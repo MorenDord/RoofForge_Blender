@@ -304,8 +304,8 @@ def extend_spatial_roof_eaves(vertices, faces, face_source_ids, overhang, tolera
         outward = _unit3(_cross3(edge_unit, normal))
         pa = tuple(float(vertices[a][k]) + distance * outward[k] for k in range(3))
         pb = tuple(float(vertices[b][k]) + distance * outward[k] for k in range(3))
-        incoming[b].append(pa)
-        outgoing[a].append(pb)
+        incoming[b].append(pb)
+        outgoing[a].append(pa)
         edge_records.append((a, b))
 
     corner_miters = {}
