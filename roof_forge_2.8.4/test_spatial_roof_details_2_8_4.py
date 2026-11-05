@@ -68,7 +68,12 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         # vertex; the old two-spoke corner triangle is no longer present.
         original_count = len(self.vertices)
         added_faces = faces[len(self.faces):]
-        for vertex_id in range(original_count):
+        boundary_ids = {
+            vertex_id
+            for edge, count in edge_uses(self.faces).items() if count == 1
+            for vertex_id in edge
+        }
+        for vertex_id in boundary_ids:
             new_neighbours = set()
             for face in added_faces:
                 if vertex_id not in face:
@@ -98,7 +103,12 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertEqual(sum(count == 1 for count in uses.values()), 4)
         original_count = len(vertices)
         added_faces = extended_faces[len(faces):]
-        for vertex_id in range(original_count):
+        boundary_ids = {
+            vertex_id
+            for edge, count in edge_uses(faces).items() if count == 1
+            for vertex_id in edge
+        }
+        for vertex_id in boundary_ids:
             new_neighbours = set()
             for face in added_faces:
                 if vertex_id not in face:
