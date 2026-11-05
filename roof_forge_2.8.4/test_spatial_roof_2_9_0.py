@@ -67,7 +67,6 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         pitches = [math.radians(v) for v in (34, 35, 36, 35, 34, 36)]
         self.assert_closed_footprint_mesh(outline, pitches)
 
-    @unittest.expectedFailure
     def test_flat_concave_l_individual_pitches(self):
         outline = [
             (0, 0, 0), (8, 0, 0), (8, 4, 0),
@@ -86,7 +85,6 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         self.assert_closed_footprint_mesh(outline, pitches)
 
 
-    @unittest.expectedFailure
     def test_nonplanar_concave_l_outline(self):
         outline = [
             (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
@@ -96,7 +94,6 @@ class SpatialTopologyLiftTests(unittest.TestCase):
             outline, [math.radians(35)] * len(outline)
         )
 
-    @unittest.expectedFailure
     def test_nonplanar_concave_u_outline(self):
         outline = [
             (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
