@@ -417,6 +417,17 @@ class SpatialRoofIntegrationSourceTests(unittest.TestCase):
         self.assertIn('row.operator("roofforge.create_ridges"', source)
         self.assertIn('row.operator("roofforge.create_valleys"', source)
 
+
+    def test_spatial_standing_seam_callback_rebuilds_detail_only(self):
+        from pathlib import Path
+        source = Path(__file__).with_name("__init__.py").read_text(encoding="utf-8")
+        start = source.index("def _standing_seam_settings_update(")
+        end = source.index("class ROOFFORGE_PG_Settings", start)
+        callback = source[start:end]
+        self.assertIn("_rebuild_standing_seams_for_mesh(owner)", callback)
+        self.assertNotIn('owner.get("roofforge_spatial", False)', callback)
+        self.assertNotIn("_rebuild_generated_roof(owner)", callback)
+
     def test_standing_seam_rebuild_supports_tagged_spatial_roof_faces(self):
         from pathlib import Path
         source = Path(__file__).with_name("__init__.py").read_text(encoding="utf-8")
