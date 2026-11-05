@@ -7,3 +7,13 @@ maintainer = "OpenAI"
 type = "add-on"
 blender_version_min = "5.0.0"
 license = ["SPDX:GPL-3.0-or-later"]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "test_*.py",
+  "*.blend",
+  "*.zip",
+  "README_RU.md",
+  "SPATIAL_ROOF_DESIGN_RU.md",
+]
