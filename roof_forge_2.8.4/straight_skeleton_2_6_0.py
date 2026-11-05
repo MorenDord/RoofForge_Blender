@@ -2760,6 +2760,209 @@ def build_inset_seam_profile_mesh(
     if not base_faces:
         return [], []
 
+    def triangulate_junction_loop(vertex_ids):
+        """Ear-clip a simple XY junction rim while preserving every rim edge."""
+        ids = list(vertex_ids)
+        if len(ids) < 3 or len(set(ids)) != len(ids):
+            raise SkeletonError("Переходный контур узла профиля вырожден.")
+
+        points = [(base_vertices[index][0], base_vertices[index][1]) for index in ids]
+        area = 0.5 * sum(
+            a[0] * b[1] - b[0] * a[1]
+            for a, b in zip(points, points[1:] + points[:1])
+        )
+        area_eps = xy_epsilon * max(scale, 1.0)
+        if abs(area) <= area_eps:
+            raise SkeletonError("Переходный контур узла профиля имеет нулевую площадь.")
+        orientation = 1.0 if area > 0.0 else -1.0
+
+        def orient2(a, b, c):
+            return cross2(sub2(b, a), sub2(c, a))
+
+        def proper_cross(a, b, c, d):
+            o1, o2 = orient2(a, b, c), orient2(a, b, d)
+            o3, o4 = orient2(c, d, a), orient2(c, d, b)
+            return o1 * o2 < -area_eps * area_eps and o3 * o4 < -area_eps * area_eps
+
+        for i in range(len(points)):
+            a, b = points[i], points[(i + 1) % len(points)]
+            for j in range(i + 1, len(points)):
+                if j == i or j == (i + 1) % len(points) or (j + 1) % len(points) == i:
+                    continue
+                if proper_cross(a, b, points[j], points[(j + 1) % len(points)]):
+                    raise SkeletonError("Переходный контур многоветвевого узла профиля самопересекается.")
+
+        remaining = list(range(len(ids)))
+        triangles = []
+        while len(remaining) > 3:
+            ear = None
+            for position, current in enumerate(remaining):
+                previous = remaining[position - 1]
+                following = remaining[(position + 1) % len(remaining)]
+                a, b, c = points[previous], points[current], points[following]
+                if orientation * orient2(a, b, c) <= area_eps:
+                    continue
+                contains = False
+                for other in remaining:
+                    if other in (previous, current, following):
+                        continue
+                    p = points[other]
+                    s1 = orientation * orient2(a, b, p)
+                    s2 = orientation * orient2(b, c, p)
+                    s3 = orientation * orient2(c, a, p)
+                    if min(s1, s2, s3) >= -area_eps:
+                        contains = True
+                        break
+                if not contains:
+                    ear = (position, (ids[previous], ids[current], ids[following]))
+                    break
+            if ear is None:
+                raise SkeletonError("Не удалось триангулировать переходный контур узла профиля.")
+            triangles.append(ear[1])
+            remaining.pop(ear[0])
+
+        final = (ids[remaining[0]], ids[remaining[1]], ids[remaining[2]])
+        if abs(orient2(
+            points[remaining[0]], points[remaining[1]], points[remaining[2]]
+        )) <= area_eps:
+            raise SkeletonError("Последний треугольник переходного узла профиля вырожден.")
+        triangles.append(final)
+        return triangles
+
+    # Three-or-more ridge branches must not share one extrusion vertex. Split
+    # their local strips at the node, close each branch cross-section, then
+    # connect those sections with one triangulated patch ordered by the actual
+    # angular sectors of the adjacent roof faces.
+    for vertex_id, incident in selected_adjacency.items():
+        if len(incident) < 3:
+            continue
+
+        centre = surface_vertices[vertex_id]
+        centre_key = point_key3(centre)
+        original_centre_id = base_vertex_map.get(centre_key)
+        if original_centre_id is None:
+            continue
+
+        local_edge_uses = defaultdict(int)
+        for face in base_faces:
+            for a_id, b_id in zip(face, face[1:] + face[:1]):
+                key = (a_id, b_id) if a_id < b_id else (b_id, a_id)
+                local_edge_uses[key] += 1
+        local_boundary_degree = sum(
+            1 for (a_id, b_id), uses in local_edge_uses.items()
+            if uses == 1 and (a_id == original_centre_id or b_id == original_centre_id)
+        )
+        # Most high-valence graph nodes are already locally manifold because
+        # adjacent selected strips share their face-corner rails. Only split
+        # the genuinely pinched nodes that would otherwise extrude a multi-use
+        # vertical edge.
+        if local_boundary_degree <= 2:
+            continue
+
+        branch_records = []
+        face_corner_ids = {}
+        face_corner_angles = defaultdict(list)
+        for other_id, face_a, face_b in incident:
+            edge_key = (
+                (vertex_id, other_id)
+                if vertex_id < other_id else (other_id, vertex_id)
+            )
+            corner_a = endpoint_corner_map.get((edge_key, vertex_id, face_a))
+            corner_b = endpoint_corner_map.get((edge_key, vertex_id, face_b))
+            if corner_a is None or corner_b is None or corner_a == corner_b:
+                raise SkeletonError(
+                    "Не удалось определить угловые вершины граней многоветвевого узла профиля."
+                )
+            branch_records.append((edge_key, face_a, face_b, corner_a, corner_b))
+
+            for face_index, corner_id in ((face_a, corner_a), (face_b, corner_b)):
+                previous_corner = face_corner_ids.get(face_index)
+                if previous_corner is not None and previous_corner != corner_id:
+                    raise SkeletonError(
+                        "Одна грань получила две разные угловые вершины в узле профиля."
+                    )
+                face_corner_ids[face_index] = corner_id
+
+                roof_face = faces[face_index]
+                try:
+                    corner_position = list(roof_face).index(vertex_id)
+                except ValueError:
+                    raise SkeletonError(
+                        "Смежная грань не содержит вершину своего узла профиля."
+                    )
+                previous_point = surface_vertices[roof_face[corner_position - 1]]
+                next_point = surface_vertices[roof_face[(corner_position + 1) % len(roof_face)]]
+                origin = centre
+                face_area = 0.5 * sum(
+                    surface_vertices[roof_face[i]][0] * surface_vertices[roof_face[(i + 1) % len(roof_face)]][1]
+                    - surface_vertices[roof_face[(i + 1) % len(roof_face)]][0] * surface_vertices[roof_face[i]][1]
+                    for i in range(len(roof_face))
+                )
+                if face_area >= 0.0:
+                    start_vector = (next_point[0] - origin[0], next_point[1] - origin[1])
+                    end_vector = (previous_point[0] - origin[0], previous_point[1] - origin[1])
+                else:
+                    start_vector = (previous_point[0] - origin[0], previous_point[1] - origin[1])
+                    end_vector = (next_point[0] - origin[0], next_point[1] - origin[1])
+                start_angle = math.atan2(start_vector[1], start_vector[0])
+                end_angle = math.atan2(end_vector[1], end_vector[0])
+                span_angle = (end_angle - start_angle) % (2.0 * math.pi)
+                face_corner_angles[corner_id].append(
+                    (start_angle + 0.5 * span_angle) % (2.0 * math.pi)
+                )
+
+        unique_corner_ids = list(face_corner_angles)
+        if len(unique_corner_ids) < 3:
+            raise SkeletonError("У многоветвевого узла профиля менее трёх различных угловых точек.")
+
+        def circular_mean(angles):
+            sx = sum(math.cos(angle) for angle in angles)
+            sy = sum(math.sin(angle) for angle in angles)
+            if math.hypot(sx, sy) <= 1.0e-10:
+                return angles[0] % (2.0 * math.pi)
+            return math.atan2(sy, sx) % (2.0 * math.pi)
+
+        unique_corner_ids.sort(key=lambda corner_id: (
+            circular_mean(face_corner_angles[corner_id]), corner_id
+        ))
+        ring_edges = {
+            frozenset((
+                unique_corner_ids[i],
+                unique_corner_ids[(i + 1) % len(unique_corner_ids)],
+            ))
+            for i in range(len(unique_corner_ids))
+        }
+        missing_sections = [
+            (corner_a, corner_b)
+            for _edge_key, _face_a, _face_b, corner_a, corner_b in branch_records
+            if frozenset((corner_a, corner_b)) not in ring_edges
+        ]
+        if missing_sections:
+            raise SkeletonError(
+                "Угловые секции многоветвевого профиля не являются соседними в порядке граней: {}."
+                .format(missing_sections[:4])
+            )
+
+        # Reassign each strip pair to its own centre copy and close its section.
+        for edge_key, face_a, face_b, corner_a, corner_b in branch_records:
+            centre_copy = len(base_vertices)
+            base_vertices.append(tuple(float(v) for v in centre))
+            for face_index, meta in enumerate(base_face_meta):
+                meta_edge, meta_face = meta
+                if meta_edge == edge_key and meta_face in (face_a, face_b):
+                    base_faces[face_index] = tuple(
+                        centre_copy if item == original_centre_id else item
+                        for item in base_faces[face_index]
+                    )
+            base_faces.append((centre_copy, corner_a, corner_b))
+            base_face_meta.append((None, -1))
+
+        # The polygon rim contains every branch cross-section edge. Its other
+        # edges form the exposed perimeter of the common junction patch.
+        for triangle in triangulate_junction_loop(unique_corner_ids):
+            base_faces.append(tuple(triangle))
+            base_face_meta.append((None, -1))
+
     # At some roof nodes two ridge seams meet while their four adjacent
     # facets are separated by valley seams. Per-facet inset strips then touch
     # only at the original node, producing four boundary spokes and a 4-use
