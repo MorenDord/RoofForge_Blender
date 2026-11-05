@@ -25,6 +25,10 @@ jobs:
         continue-on-error: true
         working-directory: roof_forge_2.8.4
         run: python -m unittest -v test_weighted_skeleton_2_9_0.py
+      - name: Diagnostic nonplanar concave seam (non-gating)
+        continue-on-error: true
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_spatial_debug_2_9_0.py
       - name: Run existing geometry regressions
         working-directory: roof_forge_2.8.4
         run: >-
