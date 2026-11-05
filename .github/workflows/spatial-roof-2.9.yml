@@ -3,7 +3,7 @@ name: RoofForge spatial geometry tests
 on:
   push:
     branches:
-      - feature/spatial-roof-2.9.0
+      - main
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
