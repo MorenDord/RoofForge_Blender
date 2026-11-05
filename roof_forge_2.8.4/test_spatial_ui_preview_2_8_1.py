@@ -78,7 +78,7 @@ class SpatialPreviewTests(unittest.TestCase):
         self.assertIn(0, alpha_values)
         self.assertIn(255, alpha_values)
         self.assertTrue(any(0 < value < 255 for value in alpha_values),
-                        "4x supersampling should produce antialiased edge pixels")
+                        "2x supersampling should produce antialiased edge pixels")
 
         for row in rows:
             for x in range(width):
@@ -110,6 +110,44 @@ class SpatialPreviewTests(unittest.TestCase):
             varied_preview,
             "Per-edge roof pitch must change the facet outlines in the preview",
         )
+
+    def test_saved_facets_skip_a_second_spatial_roof_solve(self):
+        points = [(0, 0, 0), (4, 0, 0.1), (4, 3, 0.2), (0, 3, 0.0)]
+        polygons = [
+            [(0, 0, 0), (2, 0, 0.4), (2, 1.5, 0.6), (0, 1.5, 0.2)],
+            [(2, 0, 0.4), (4, 0, 0.1), (4, 3, 0.2), (2, 1.5, 0.6)],
+        ]
+        original = NAMESPACE["build_spatial_roof_mesh"]
+
+        def forbidden_solver(*args, **kwargs):
+            raise AssertionError("The cached preview must not run the roof solver.")
+
+        NAMESPACE["build_spatial_roof_mesh"] = forbidden_solver
+        try:
+            png = render(
+                points,
+                size=128,
+                facet_polygons=polygons,
+                source_ids=[0, 1],
+            )
+        finally:
+            NAMESPACE["build_spatial_roof_mesh"] = original
+
+        self.assertTrue(png.startswith(b"\\x89PNG"))
+        self.assertEqual(struct.unpack(">2I", png[16:24]), (128, 128))
+
+    def test_generated_pitch_and_profile_callbacks_are_coalesced(self):
+        self.assertIn("_schedule_roof_update(owner, \"roof\")", SOURCE)
+        self.assertIn("_schedule_roof_update(owner, \"profiles\")", SOURCE)
+        self.assertIn("return 0.08", SOURCE)
+        self.assertIn("_ROOF_UPDATE_DELAY = 0.18", SOURCE)
+
+    def test_profile_controls_rebuild_details_without_rebuilding_roof(self):
+        start = SOURCE.index("def _profile_settings_update(self, context):")
+        end = SOURCE.index("# Spatial eave plan preview", start)
+        callback = SOURCE[start:end]
+        self.assertIn("_schedule_roof_update(owner, \"profiles\")", callback)
+        self.assertNotIn("_rebuild_generated_roof(owner)", callback)
 
     def test_labels_are_centered_and_fit_inside_their_facet(self):
         self.assertIn("anchor, clearance = label_anchor(poly)", SOURCE)
