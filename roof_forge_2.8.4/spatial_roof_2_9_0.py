@@ -467,10 +467,24 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 break
         if not matched:
             face_index = uses[0][0]
+            nearby = []
+            for other_face_index, other_face in enumerate(faces):
+                if other_face_index == face_index:
+                    continue
+                for other_a_id, other_b_id in zip(
+                    other_face, other_face[1:] + other_face[:1]
+                ):
+                    other_a = vertices[other_a_id]
+                    other_b = vertices[other_b_id]
+                    da = _distance3(a, other_a) + _distance3(b, other_b)
+                    db = _distance3(a, other_b) + _distance3(b, other_a)
+                    if min(da, db) <= plane_eps * 20.0:
+                        nearby.append((sources[other_face_index], other_a, other_b))
             raise SpatialRoofError(
-                "После совмещения найдено внутреннее открытое ребро, не принадлежащее карнизу: "
-                "A=({}, {}, {}), B=({}, {}, {}), скат={}.".format(
-                    a[0], a[1], a[2], b[0], b[1], b[2], sources[face_index] + 1
+                "После совмещения найдено внутреннее открытое ребро: "
+                "A=({}, {}, {}), B=({}, {}, {}), скат={}, соседние совпадающие рёбра={}.".format(
+                    a[0], a[1], a[2], b[0], b[1], b[2],
+                    sources[face_index] + 1, nearby[:4]
                 )
             )
 
