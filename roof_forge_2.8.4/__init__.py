@@ -782,6 +782,7 @@ def _rebuild_generated_roof(roof_obj):
         profile_vertices = None
         profile_faces = None
         profile_sources = None
+        has_edge_pitches = False
 
         if is_spatial:
             source_xyz = [tuple(float(c) for c in p[:3]) for p in source_poly]
@@ -792,6 +793,7 @@ def _rebuild_generated_roof(roof_obj):
             ))
             if len(pitches) != len(source_xyz):
                 raise RoofForgeError("Не совпадает число индивидуальных уклонов и рёбер 3D-контура.")
+            has_edge_pitches = True
             try:
                 # Keep the source surface intact for seam detection. The eave
                 # extension is added as planar strips afterwards and must not
@@ -812,25 +814,34 @@ def _rebuild_generated_roof(roof_obj):
             # Keep the eave extension and seam clipping on the exact same
             # normalized footprint as the free-angle skeleton.
             source_poly, _was_orthogonalized = _orthogonalize_nearly_orthogonal_contour(source_poly)
-            poly = _offset_polygon(source_poly, settings.overhang)
             edge_pitches = json.loads(roof_obj.get("roofforge_edge_pitches", "[]"))
             if edge_pitches and len(edge_pitches) != len(source_poly):
                 raise RoofForgeError("Число индивидуальных углов не совпадает с числом рёбер контура.")
+            has_edge_pitches = bool(edge_pitches)
             if edge_pitches:
-                surface_vertices, surface_faces, face_source_ids = build_weighted_roof_mesh(
+                # Keep the unextended weighted roof as the seam/profile source.
+                profile_vertices, profile_faces, profile_sources = build_weighted_roof_mesh(
                     source_poly, edge_pitches, settings.eave_lift
                 )
-            else:
-                surface_vertices, surface_faces, face_source_ids = _create_surface_geometry(source_poly, settings)
-            if settings.overhang > 1.0e-10:
-                surface_vertices, surface_faces, face_source_ids = extend_roof_mesh_eaves(
-                    surface_vertices, surface_faces, face_source_ids,
-                    source_poly, poly, settings.overhang, math.tan(settings.pitch_angle)
+                profile_outline = list(source_poly)
+                surface_vertices, surface_faces, face_source_ids = (
+                    extend_spatial_roof_eaves(
+                        profile_vertices, profile_faces, profile_sources, settings.overhang
+                    )
                 )
-            profile_vertices = surface_vertices
-            profile_faces = surface_faces
-            profile_sources = face_source_ids
-            profile_outline = poly
+                poly = list(source_poly)
+            else:
+                poly = _offset_polygon(source_poly, settings.overhang)
+                surface_vertices, surface_faces, face_source_ids = _create_surface_geometry(source_poly, settings)
+                if settings.overhang > 1.0e-10:
+                    surface_vertices, surface_faces, face_source_ids = extend_roof_mesh_eaves(
+                        surface_vertices, surface_faces, face_source_ids,
+                        source_poly, poly, settings.overhang, math.tan(settings.pitch_angle)
+                    )
+                profile_vertices = surface_vertices
+                profile_faces = surface_faces
+                profile_sources = face_source_ids
+                profile_outline = poly
 
         # The roof thickness is real mesh geometry translated along world +Z.
         world_thickness = Vector((0.0, 0.0, settings.thickness if settings.make_solid else 0.0))
@@ -860,7 +871,7 @@ def _rebuild_generated_roof(roof_obj):
                 roof_obj, profile_cap_surface_vertices, profile_faces
             )
 
-        if is_spatial:
+        if is_spatial or has_edge_pitches:
             seams = extract_roof_seams(
                 profile_cap_surface_vertices, profile_faces, profile_sources, profile_outline
             )
@@ -896,7 +907,7 @@ def _rebuild_generated_roof(roof_obj):
                     end_offset=settings.ridge_end_offset,
                     seat_sink_offset=(sink_local_vector.x, sink_local_vector.y, sink_local_vector.z),
                     outline=profile_input_outline,
-                    boundary_edges=_mesh_boundary_segments(profile_input_vertices, profile_input_faces) if is_spatial else None,
+                    boundary_edges=_mesh_boundary_segments(profile_input_vertices, profile_input_faces) if (is_spatial or has_edge_pitches) else None,
                 )
             else:
                 rv, rf = [], []
