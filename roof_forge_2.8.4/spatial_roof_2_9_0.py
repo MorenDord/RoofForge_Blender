@@ -1114,6 +1114,33 @@ def _derive_source_adjacency(vertices, faces, sources, tolerance):
     return adjacency
 
 
+def _split_polygon_by_line(poly, a, b, c, eps):
+    positive = _clip_halfplane(poly, -a, -b, -c, eps)
+    negative = _clip_halfplane(poly, a, b, c, eps)
+    result = []
+    if len(positive) >= 3 and abs(_area(positive)) > eps * eps:
+        result.append(positive)
+    if len(negative) >= 3 and abs(_area(negative)) > eps * eps:
+        result.append(negative)
+    return result
+
+
+def _polygon_centroid_xy(poly):
+    area = _area(poly)
+    if abs(area) <= 1.0e-20:
+        return (
+            sum(point[0] for point in poly) / len(poly),
+            sum(point[1] for point in poly) / len(poly),
+        )
+    cx = cy = 0.0
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        cross = a[0] * b[1] - b[0] * a[1]
+        cx += (a[0] + b[0]) * cross
+        cy += (a[1] + b[1]) * cross
+    factor = 1.0 / (6.0 * area)
+    return cx * factor, cy * factor
+
+
 def _build_boundary_aware_spatial_envelope(
     topology_vertices,
     topology_faces,
