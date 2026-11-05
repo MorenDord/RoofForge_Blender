@@ -78,6 +78,15 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
 
 
 
+def flush_pending_roof_update(roof):
+    key = roof.name
+    require(key in roof_forge._PENDING_ROOF_UPDATES,
+            "Expected a debounced RoofForge update for " + key)
+    owner, _due_time, update_kind = roof_forge._PENDING_ROOF_UPDATES[key]
+    roof_forge._PENDING_ROOF_UPDATES[key] = (owner, 0.0, update_kind)
+    roof_forge._flush_pending_roof_updates()
+
+
 def require_closed_profile_object(roof, property_key, label):
     object_name = str(roof.get(property_key, ""))
     require(bool(object_name), label + " helper object name is missing.")
@@ -170,17 +179,41 @@ def main():
     require_closed_profile_object(l_roof, "roofforge_ridges_object", "L ridge")
     require_closed_profile_object(l_roof, "roofforge_valleys_object", "L valley")
 
-    # Standing-seam dimensions must rebuild only the detail object. The roof
-    # mesh datablock and all its vertices must remain untouched.
-    # Per-edge spatial pitch changes rebuild the roof and its dependent details.
+    # Per-edge pitch controls are debounced during a slider drag. A sequence
+    # of edits must keep only one pending geometry rebuild until the user pauses.
     l_roof_before_pitch = l_roof.data
+    l_roof.roofforge_settings.spatial_pitch_01 = math.radians(34.2)
     l_roof.roofforge_settings.spatial_pitch_01 = math.radians(34.5)
+    require(l_roof.data is l_roof_before_pitch,
+            "Spatial pitch slider rebuilt the roof before the debounce interval.")
+    require(roof_forge._PENDING_ROOF_UPDATES[l_roof.name][2] == "roof",
+            "Spatial pitch change did not queue a roof rebuild.")
+    flush_pending_roof_update(l_roof)
     require(l_roof.data is not l_roof_before_pitch,
-            "Spatial pitch slider did not rebuild the generated roof mesh.")
+            "Spatial pitch debounce did not rebuild the generated roof mesh.")
     require(not l_roof.get("roofforge_error", ""),
             "Live spatial pitch rebuild failed: " + str(l_roof.get("roofforge_error")))
     require(int(l_roof.get("roofforge_standing_segment_count", 0)) > 0,
             "Spatial pitch rebuild did not regenerate standing seams.")
+
+    # Ridge width changes rebuild only ridge/valley detail meshes, not the roof.
+    l_roof_mesh_before_profile = l_roof.data
+    ridge_name = str(l_roof.get("roofforge_ridges_object", ""))
+    ridge_object = bpy.data.objects.get(ridge_name)
+    require(ridge_object is not None, "Ridge helper is missing before profile-only edit.")
+    ridge_mesh_before = ridge_object.data
+    l_roof.roofforge_settings.ridge_width = 0.205
+    require(l_roof.data is l_roof_mesh_before_profile,
+            "Ridge width slider rebuilt the roof instead of only profile details.")
+    require(roof_forge._PENDING_ROOF_UPDATES[l_roof.name][2] == "profiles",
+            "Ridge width change did not queue a profile-only update.")
+    flush_pending_roof_update(l_roof)
+    require(l_roof.data is l_roof_mesh_before_profile,
+            "Profile-only update replaced the roof mesh datablock.")
+    require(ridge_object.data is not ridge_mesh_before,
+            "Profile-only update did not rebuild the ridge mesh.")
+    require(not l_roof.get("roofforge_profile_error", ""),
+            "Profile-only update failed: " + str(l_roof.get("roofforge_profile_error")))
 
     # Standing-seam width changes rebuild only the seam detail object. The roof
     # datablock and its vertex coordinates must remain unchanged.
