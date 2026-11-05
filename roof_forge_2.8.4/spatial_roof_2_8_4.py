@@ -337,22 +337,25 @@ def extend_spatial_roof_eaves(vertices, faces, face_source_ids, overhang, tolera
         miter = tuple(p[k] + bisector[k] * miter_distance for k in range(3))
         corner_miters[vertex_id] = add_vertex(miter)
 
+    # One quad per edge strip. Adjacent strips share the original-corner
+    # -> miter edge; keeping the strip as a quad avoids a diagonal spoke from
+    # the corner to the neighbouring miter point.
     for a, b in edge_records:
         ma = corner_miters[a]
         mb = corner_miters[b]
-        for tri in ((b, a, ma), (b, ma, mb)):
-            if len(set(tri)) < 3:
-                continue
-            normal = _face_unit_normal(out_vertices, tri)
-            if normal[2] < 0.0:
-                tri = tuple(reversed(tri))
-                normal = _face_unit_normal(out_vertices, tri)
-            if normal[2] <= eps:
-                raise SpatialRoofError(
-                    "Свес: митровая полоса выродилась или перевернулась у угла карниза."
-                )
-            out_faces.append(tuple(tri))
-            out_sources.append(-1)
+        quad = (b, a, ma, mb)
+        if len(set(quad)) < 4:
+            raise SpatialRoofError("Свес: митровая полоса схлопнулась в вырожденный четырёхугольник.")
+        normal = _face_unit_normal(out_vertices, quad)
+        if normal[2] < 0.0:
+            quad = tuple(reversed(quad))
+            normal = _face_unit_normal(out_vertices, quad)
+        if normal[2] <= eps:
+            raise SpatialRoofError(
+                "Свес: митровая полоса выродилась или перевернулась у угла карниза."
+            )
+        out_faces.append(quad)
+        out_sources.append(-1)
 
     verify = defaultdict(int)
     for face in out_faces:
