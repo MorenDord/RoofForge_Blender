@@ -1731,14 +1731,15 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
             spatial_outline = _spatial_outline_for_panel(active, roof_obj, is_generated)
             if spatial_outline:
                 edge_box = layout.box()
-                edge_box.label(text="План карниза — номера соответствуют скатам", icon='MESH_CIRCLE')
-                preview_icon = _get_spatial_preview_icon(spatial_outline, settings.spatial_preview_text_scale)
+                edge_box.label(text="План крыши — номера соответствуют скатам", icon='MESH_CIRCLE')
+                pitch_values = [float(getattr(settings, f"spatial_pitch_{i:02d}"))
+                                for i in range(1, min(len(spatial_outline), 32)+1)]
+                preview_icon = _get_spatial_preview_icon(spatial_outline, pitch_values)
                 if preview_icon:
                     region_width = max(240, getattr(context.region, "width", 320))
                     preview_scale = max(4.0, min(14.0, region_width / 42.0))
                     edge_box.template_icon(preview_icon, scale=preview_scale)
-                edge_box.prop(settings, "spatial_preview_text_scale", text="Размер цифр", slider=True)
-                edge_box.label(text="Нумерация — по порядку обхода контура.")
+                edge_box.label(text="Нумерация скатов соответствует рёбрам исходного контура.")
                 edge_box.label(text=f"Рёбер карниза: {len(spatial_outline)}")
                 for edge_index in range(1, min(len(spatial_outline), 32)+1):
                     edge_box.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
@@ -1748,22 +1749,30 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
         if is_generated or (not is_profile_source and not is_standing_source):
             layout.separator()
             layout.label(text="Геометрия крыши", icon='MOD_BUILD')
-            if is_generated and roof_obj.get("roofforge_spatial", False):
-                layout.label(text="Пространственный карниз: отдельный угол каждого ската", icon='ORIENTATION_GLOBAL')
-                edge_count = int(roof_obj.get("roofforge_spatial_edge_count", 0))
+            if is_generated and int(roof_obj.get("roofforge_edge_pitch_count", 0)) >= 3:
+                layout.label(
+                    text=("Пространственный карниз: индивидуальные углы" if is_spatial_generated
+                          else "Индивидуальные углы скатов"),
+                    icon='ORIENTATION_GLOBAL'
+                )
+                edge_count = int(roof_obj.get("roofforge_edge_pitch_count", 0))
                 spatial_outline = _spatial_outline_for_panel(active, roof_obj, True)
-                preview_icon = _get_spatial_preview_icon(spatial_outline, settings.spatial_preview_text_scale) if spatial_outline else 0
+                pitch_values = json.loads(roof_obj.get(
+                    "roofforge_edge_pitches",
+                    roof_obj.get("roofforge_spatial_pitches", "[]")
+                ))
+                preview_icon = _get_spatial_preview_icon(spatial_outline, pitch_values) if spatial_outline else 0
                 if preview_icon:
                     region_width = max(240, getattr(context.region, "width", 320))
                     preview_scale = max(4.0, min(14.0, region_width / 42.0))
                     layout.template_icon(preview_icon, scale=preview_scale)
-                layout.prop(settings, "spatial_preview_text_scale", text="Размер цифр", slider=True)
-                layout.label(text="Номер на схеме = номер настройки ската.")
+                layout.label(text="Номер внутри контура = номер угла ската.")
                 for edge_index in range(1, min(edge_count, 32)+1):
                     layout.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
                 layout.prop(settings, "overhang", text="Свес карниза")
                 layout.prop(settings, "eave_lift")
-                layout.label(text="Свес измеряется по плоскости каждого ската.", icon='INFO')
+                if is_spatial_generated:
+                    layout.label(text="Свес измеряется по плоскости каждого ската.", icon='INFO')
             else:
                 layout.prop(settings, "pitch_angle")
                 layout.prop(settings, "overhang")
