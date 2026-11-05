@@ -69,11 +69,14 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         original_count = len(self.vertices)
         added_faces = faces[len(self.faces):]
         for vertex_id in range(original_count):
-            new_neighbours = {
-                neighbour
-                for face in added_faces if vertex_id in face
-                for neighbour in face if neighbour >= original_count
-            }
+            new_neighbours = set()
+            for face in added_faces:
+                if vertex_id not in face:
+                    continue
+                position = face.index(vertex_id)
+                for neighbour in (face[position - 1], face[(position + 1) % len(face)]):
+                    if neighbour >= original_count:
+                        new_neighbours.add(neighbour)
             self.assertEqual(len(new_neighbours), 1)
         # Each new edge strip is one upward-oriented mitered quad.
         for face in faces[len(self.faces):]:
