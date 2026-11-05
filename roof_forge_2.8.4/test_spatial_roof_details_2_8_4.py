@@ -417,14 +417,19 @@ class SpatialRoofIntegrationSourceTests(unittest.TestCase):
         self.assertIn('row.operator("roofforge.create_ridges"', source)
         self.assertIn('row.operator("roofforge.create_valleys"', source)
 
-    def test_standing_seam_rebuild_defines_spatial_guard(self):
+    def test_standing_seam_rebuild_supports_tagged_spatial_roof_faces(self):
         from pathlib import Path
         source = Path(__file__).with_name("__init__.py").read_text(encoding="utf-8")
         start = source.index("def _rebuild_standing_seams_for_mesh(")
         end = source.index("def _rebuild_generated_roof(", start)
         function_source = source[start:end]
-        self.assertIn('is_spatial = bool(roof_obj.get("roofforge_spatial", False))', function_source)
-        self.assertIn('if settings.show_standing_seams and not is_spatial:', function_source)
+        self.assertIn("if settings.show_standing_seams:", function_source)
+        self.assertNotIn("and not is_spatial", function_source)
+        self.assertIn('source_mesh.attributes.get("roofforge_face_source")', source)
+        self.assertIn("if source_id in (-2, -3, -4)", source)
+        self.assertIn("mesh_face_source_ids", source)
+        self.assertIn('seam_box.prop(settings, "show_standing_seams")', source)
+        self.assertNotIn("Фальцы для пространственного карниза пока не включены", source)
 
 
 if __name__ == "__main__":
