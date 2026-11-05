@@ -1892,6 +1892,14 @@ def extract_roof_seams(vertices, faces, face_source_ids, polygon_ccw):
         (face_a, a0, a1), (face_b, b0, b1) = uses
         if a0 == b0 and a1 == b1:
             continue
+        # -2 marks a small transition patch used only to close a non-concurrent
+        # 3D multi-facet junction. Its perimeter is not a physical ridge/valley
+        # and must not generate a separate profile.
+        if face_source_ids and (
+            int(face_source_ids[face_a]) == -2
+            or int(face_source_ids[face_b]) == -2
+        ):
+            continue
 
         normal_a = normals[face_a]
         normal_b = normals[face_b]
@@ -1915,23 +1923,72 @@ def extract_roof_seams(vertices, faces, face_source_ids, polygon_ccw):
 
 
 def roof_face_plane(vertices, face):
-    """Return normalized plane coefficients (z = ax + by + c) for one planar face."""
-    points = [vertices[i] for i in face]
-    origin = points[0]
-    normal = None
-    for i in range(1, len(points) - 1):
-        a = _sub3(points[i], origin)
-        b = _sub3(points[i + 1], origin)
-        candidate = _cross3(a, b)
-        if _length3(candidate) > 1.0e-10:
-            normal = candidate
-            break
-    if normal is None or abs(normal[2]) < 1.0e-10:
-        raise SkeletonError("Невозможно вычислить плоскость одного из скатов.")
-    nx, ny, nz = normal
-    a = -nx / nz
-    b = -ny / nz
-    c = origin[2] - a * origin[0] - b * origin[1]
+    """Return a least-squares roof plane z = a*x + b*y + c.
+
+    Planar faces are recovered exactly up to floating-point error. Slightly
+    warped imported n-gons are approximated by their best-fit height plane;
+    callers that need a strict bound should validate the residual separately.
+    """
+    points = [tuple(float(v) for v in vertices[i][:3]) for i in face]
+    if len(points) < 3:
+        raise SkeletonError("Для вычисления плоскости ската нужно минимум три вершины.")
+
+    sx = sum(p[0] for p in points)
+    sy = sum(p[1] for p in points)
+    sz = sum(p[2] for p in points)
+    sxx = sum(p[0]*p[0] for p in points)
+    syy = sum(p[1]*p[1] for p in points)
+    sxy = sum(p[0]*p[1] for p in points)
+    sxz = sum(p[0]*p[2] for p in points)
+    syz = sum(p[1]*p[2] for p in points)
+    count = float(len(points))
+    matrix = [
+        [sxx, sxy, sx, sxz],
+        [sxy, syy, sy, syz],
+        [sx, sy, count, sz],
+    ]
+    matrix_scale = max(
+        1.0, abs(sxx), abs(syy), abs(sx), abs(sy), count
+    )
+    pivot_eps = matrix_scale * 1.0e-13
+
+    # Gaussian elimination with partial pivoting.
+    for column in range(3):
+        pivot = max(range(column, 3), key=lambda row: abs(matrix[row][column]))
+        if abs(matrix[pivot][column]) <= pivot_eps:
+            # A nearly vertical/degenerate XY projection: fall back to the
+            # first non-collinear triangle, as in the original implementation.
+            origin = points[0]
+            normal = None
+            for i in range(1, len(points)-1):
+                candidate = _cross3(
+                    _sub3(points[i], origin),
+                    _sub3(points[i+1], origin),
+                )
+                if _length3(candidate) > 1.0e-10:
+                    normal = candidate
+                    break
+            if normal is None or abs(normal[2]) < 1.0e-10:
+                raise SkeletonError("Невозможно вычислить плоскость одного из скатов.")
+            nx, ny, nz = normal
+            a = -nx/nz
+            b = -ny/nz
+            return (a, b, origin[2]-a*origin[0]-b*origin[1])
+
+        matrix[column], matrix[pivot] = matrix[pivot], matrix[column]
+        divisor = matrix[column][column]
+        for j in range(column, 4):
+            matrix[column][j] /= divisor
+        for row in range(3):
+            if row == column:
+                continue
+            factor = matrix[row][column]
+            for j in range(column, 4):
+                matrix[row][j] -= factor*matrix[column][j]
+
+    a, b, c = (matrix[i][3] for i in range(3))
+    if not all(math.isfinite(v) for v in (a, b, c)):
+        raise SkeletonError("Плоскость одного из скатов содержит неконечные коэффициенты.")
     return (a, b, c)
 
 
