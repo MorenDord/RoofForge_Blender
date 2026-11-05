@@ -2887,9 +2887,29 @@ def build_inset_seam_profile_mesh(
             key = (a, b) if a < b else (b, a)
             final_edge_counts[key] += 1
     if any(use_count != 2 for use_count in final_edge_counts.values()):
+        bad_edges = [
+            (
+                tuple(round(float(v), 6) for v in out_vertices[a]),
+                tuple(round(float(v), 6) for v in out_vertices[b]),
+                int(use_count),
+            )
+            for (a, b), use_count in final_edge_counts.items()
+            if use_count != 2
+        ][:8]
+        branch_nodes = [
+            (
+                tuple(round(float(v), 6) for v in surface_vertices[vertex_id]),
+                len(incident),
+            )
+            for vertex_id, incident in selected_adjacency.items()
+            if len(incident) >= 3
+        ][:8]
         raise SkeletonError(
             "В узле профиля не удалось собрать замкнутую manifold-оболочку. "
-            "Проверьте соединение ветвей конька в узле крыши."
+            "Многоветвевые узлы (XYZ, valence): {}; граничные рёбра (A, B, uses): {}. "
+            "Проверьте соединение ветвей конька в узле крыши.".format(
+                branch_nodes, bad_edges
+            )
         )
 
     out_faces = _orient_closed_mesh_faces(out_vertices, out_faces)
