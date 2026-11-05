@@ -1157,18 +1157,51 @@ def _build_boundary_aware_spatial_envelope(
     if not patches:
         raise SpatialRoofError("Не удалось получить пространственные области скатов.")
 
-    patch_vertices = []
-    patch_faces = []
-    patch_sources = []
+    merge_scale = max(eps * 10.0, 1.0e-8)
+    face_loops = []
+    grouped = defaultdict(list)
     for source_id, patch in patches:
-        start = len(patch_vertices)
-        patch_vertices.extend(patch)
-        patch_faces.append(tuple(range(start, start + len(patch))))
-        patch_sources.append(source_id)
+        grouped[int(source_id)].append(patch)
+    for source_id, group in grouped.items():
+        for loop in _merge_face_patches(group, merge_scale):
+            if len(loop) >= 3:
+                face_loops.append((source_id, loop))
 
-    return _merge_planar_patches(
-        patch_vertices, patch_faces, patch_sources, max(eps * 10.0, 1.0e-8)
-    )
+    if not face_loops:
+        raise SpatialRoofError(
+            "После объединения пространственных фрагментов не осталось скатов."
+        )
+
+    face_loops = _split_global_t_junctions(face_loops, merge_scale)
+    vertices = []
+    faces = []
+    sources = []
+    point_buckets = defaultdict(list)
+
+    def add_point(point):
+        key = tuple(int(round(float(v) / merge_scale)) for v in point)
+        for index in point_buckets[key]:
+            if _distance3(vertices[index], point) <= merge_scale * 2.0:
+                return index
+        index = len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        point_buckets[key].append(index)
+        return index
+
+    for source_id, loop in face_loops:
+        face = [add_point(point) for point in loop]
+        clean = []
+        for index in face:
+            if not clean or clean[-1] != index:
+                clean.append(index)
+        if len(clean) > 1 and clean[0] == clean[-1]:
+            clean.pop()
+        if len(clean) >= 3:
+            if _area([(vertices[index][0], vertices[index][1]) for index in clean]) < 0.0:
+                clean.reverse()
+            faces.append(tuple(clean))
+            sources.append(int(source_id))
+    return vertices, faces, sources
 
 
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
