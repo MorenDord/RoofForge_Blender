@@ -103,6 +103,14 @@ class WeightedWavefrontTests(unittest.TestCase):
         loops = _merge_face_patches([base, with_middle_vertex], 2.0)
         self.assertEqual(len(loops), 1)
 
+    def test_concave_plus_multi_reflex_individual_pitches(self):
+        outline = [
+            (3, 0, 0), (7, 0, 0), (7, 3, 0), (10, 3, 0),
+            (10, 7, 0), (7, 7, 0), (7, 10, 0), (3, 10, 0),
+            (3, 7, 0), (0, 7, 0), (0, 3, 0), (3, 3, 0),
+        ]
+        self.build(outline, [35, 32, 37, 38, 33, 39, 34, 36, 37, 31, 40, 35])
+
     def test_partial_same_direction_overlap_is_still_rejected(self):
         first = [
             (0.0, 0.0, 0.0), (2.0, 0.0, 0.0),
