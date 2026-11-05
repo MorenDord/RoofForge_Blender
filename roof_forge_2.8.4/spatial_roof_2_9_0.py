@@ -372,7 +372,7 @@ def _embed_topology(template_vertices, template_faces, template_sources,
         for i, face_index in enumerate(fan):
             previous_q = junction_ids[(i - 1) % len(junction_ids)]
             next_q = junction_ids[i]
-            replacements[(face_index, vertex_id)] = [next_q, previous_q]
+            replacements[(face_index, vertex_id)] = [previous_q, next_q]
 
         if len(junction_ids) == 3:
             patch_face = tuple(junction_ids)
