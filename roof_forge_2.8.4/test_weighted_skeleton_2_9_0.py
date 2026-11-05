@@ -71,6 +71,12 @@ class WeightedWavefrontTests(unittest.TestCase):
                  (7,3,0),(3,3,0),(3,8,0),(0,8,0)]
         self.build(outline,[32,35,38,40,34,37,31,36])
 
+
+    def test_nonplanar_l_micro_height_variation(self):
+        outline=[(0,0,0),(8,0,.005),(8,4,.010),
+                 (4,4,.015),(4,8,.020),(0,8,.010)]
+        self.build(outline,[38]*6)
+
     def test_nonplanar_l_equal_pitch(self):
         outline=[(0,0,0),(8,0,.08),(8,4,.12),(4,4,.16),(4,8,.20),(0,8,.10)]
         self.build(outline,[38]*6)
