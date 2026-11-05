@@ -4,9 +4,7 @@ import unittest
 from collections import Counter, defaultdict
 
 from spatial_roof_2_8_4 import build_spatial_roof_mesh, extend_spatial_roof_eaves
-from straight_skeleton_2_6_0 import (
-    extract_roof_seams, build_inset_seam_profile_mesh, build_weighted_roof_mesh
-)
+from straight_skeleton_2_6_0 import extract_roof_seams, build_inset_seam_profile_mesh
 
 
 def edge_uses(faces):
@@ -88,7 +86,9 @@ class SpatialRoofDetailsTests(unittest.TestCase):
     def test_flat_individual_pitch_overhang_uses_single_miter_per_corner(self):
         outline = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
         pitches = [math.radians(v) for v in (30.0, 36.0, 42.0, 34.0)]
-        vertices, faces, sources = build_weighted_roof_mesh(outline, pitches)
+        vertices, faces, sources = build_spatial_roof_mesh(
+            [(x, y, 0.0) for x, y in outline], pitches
+        )
         extended_vertices, extended_faces, extended_sources = extend_spatial_roof_eaves(
             vertices, faces, sources, 0.35
         )
