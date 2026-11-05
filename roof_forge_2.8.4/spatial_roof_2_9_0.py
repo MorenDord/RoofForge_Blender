@@ -32,6 +32,47 @@ class SpatialRoofError(ValueError):
     """The requested 3D eave/pitch combination has no valid lifted topology."""
 
 
+def _source_id_values(source_id):
+    """Normalize one source ID or a merged tuple of IDs without int(tuple)."""
+    if isinstance(source_id, (tuple, list, set)):
+        return tuple(int(value) for value in source_id)
+    return (int(source_id),)
+
+
+def _representative_source_id(source_id):
+    """Choose a stable scalar label for Blender's integer face attributes."""
+    values = _source_id_values(source_id)
+    if -2 in values:
+        return -2
+    positive = [value for value in values if value >= 0]
+    return min(positive) if positive else (values[0] if values else -1)
+
+
+def _remap_source_id(source_id, source_edge_map):
+    values = _source_id_values(source_id)
+    mapped = tuple(
+        source_edge_map[value] if value >= 0 else value
+        for value in values
+    )
+    return mapped[0] if len(mapped) == 1 else mapped
+
+
+def _unique_support_sources(source_ids, planes, tolerance):
+    """Collapse source IDs that describe the same coplanar support plane."""
+    result = []
+    plane_tolerance = max(1.0e-9, float(tolerance) * 10.0)
+    for source_id in sorted(set(int(value) for value in source_ids if int(value) >= 0)):
+        plane = planes[source_id]
+        if any(
+            max(abs(plane[i] - planes[existing][i]) for i in range(3))
+            <= plane_tolerance
+            for existing in result
+        ):
+            continue
+        result.append(source_id)
+    return result
+
+
 def _cross2(a, b):
     return a[0] * b[1] - a[1] * b[0]
 
@@ -300,7 +341,14 @@ def _embed_topology(template_vertices, template_faces, template_sources,
             continue
 
         incident_faces = list(dict.fromkeys(vertex_faces.get(vertex_id, ())))
-        incident_sources = sorted({int(template_sources[i]) for i in incident_faces})
+        raw_incident_sources = (
+            source_id
+            for face_index in incident_faces
+            for source_id in _source_id_values(template_sources[face_index])
+        )
+        incident_sources = _unique_support_sources(
+            raw_incident_sources, planes, eps
+        )
         if not incident_sources:
             raise SpatialRoofError("У внутренней вершины skeleton отсутствуют соседние скаты.")
 
@@ -370,10 +418,12 @@ def _embed_topology(template_vertices, template_faces, template_sources,
                 _face_corner_direction(
                     template_vertices, template_faces[face_index], vertex_id
                 ),
-                int(template_sources[face_index]),
+                _representative_source_id(template_sources[face_index]),
             )
         )
-        fan_sources = [int(template_sources[i]) for i in fan]
+        fan_sources = [
+            _representative_source_id(template_sources[i]) for i in fan
+        ]
         if len(set(fan_sources)) != len(fan_sources):
             raise SpatialRoofError(
                 "В узле повторяется одна опорная плоскость; нельзя однозначно упорядочить скаты."
@@ -492,8 +542,11 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
         if len(face) < 3:
             raise SpatialRoofError("В пространственной сетке обнаружена грань менее чем из трёх вершин.")
         points = [vertices[i] for i in face]
-        source_id = int(sources[face_index])
-        if source_id >= 0:
+        source_ids = [
+            source_id for source_id in _source_id_values(sources[face_index])
+            if source_id >= 0
+        ]
+        for source_id in source_ids:
             plane = planes[source_id]
             for local_index, point in zip(face, points):
                 residual = _plane_residual(plane, point)
@@ -887,7 +940,7 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
     # pitches change the event order enough to invalidate that partition.
     try:
         template_vertices, template_faces, template_sources = build_roof_mesh(
-            xy, 1.0, 0.0, allow_oblique=True
+            xy, 1.0, 0.0, allow_oblique=True, merge_coplanar=False
         )
     except SkeletonError as exc:
         raise SpatialRoofError("Не удалось построить топологию wavefront: " + str(exc)) from exc
@@ -982,7 +1035,7 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
             vertices,faces,sources=_build_spatial_roof_mesh_template(
                 points,angles,eave_lift=float(eave_lift),tolerance=tolerance
             )
-            return vertices,faces,[source_edge_map[source] for source in sources]
+            return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
         # Individual pitches require actual weighted collapse/split times.
         # Each support plane contributes its exact inward normal speed.
@@ -1002,14 +1055,14 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
             speeds.append(1.0/inward_grade)
         try:
             vertices,faces,sources=build_weighted_roof_mesh(
-                xy,speeds,planes
+                xy,speeds,planes,merge_coplanar=False
             )
         except WeightedSkeletonError as exc:
             raise SpatialRoofError(
                 "Взвешенный волновой фронт: "+str(exc)
             ) from exc
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-        return vertices,faces,[source_edge_map[source] for source in sources]
+        return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
     uniform_pitch = max(angles)-min(angles) <= 1.0e-9
     if not uniform_pitch:
@@ -1040,12 +1093,12 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
             vertices,faces,sources,points,eps,scale
         )
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-        return vertices,faces,[source_edge_map[source] for source in sources]
+        return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
     # Uniform pitches on non-planar contours retain the established reflex-aware
     # topology; only their 3D source planes and junction heights differ.
     vertices,faces,sources=_build_spatial_roof_mesh_template(
         points,angles,eave_lift=float(eave_lift),tolerance=tolerance
     )
-    return vertices,faces,[source_edge_map[source] for source in sources]
+    return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
