@@ -172,14 +172,31 @@ def main():
 
     # Standing-seam dimensions must rebuild only the detail object. The roof
     # mesh datablock and all its vertices must remain untouched.
+    # Per-edge spatial pitch changes rebuild the roof and its dependent details.
+    l_roof_before_pitch = l_roof.data
+    l_roof.roofforge_settings.spatial_pitch_01 = math.radians(34.5)
+    require(l_roof.data is not l_roof_before_pitch,
+            "Spatial pitch slider did not rebuild the generated roof mesh.")
+    require(not l_roof.get("roofforge_error", ""),
+            "Live spatial pitch rebuild failed: " + str(l_roof.get("roofforge_error")))
+    require(int(l_roof.get("roofforge_standing_segment_count", 0)) > 0,
+            "Spatial pitch rebuild did not regenerate standing seams.")
+
+    # Standing-seam width changes rebuild only the seam detail object. The roof
+    # datablock and its vertex coordinates must remain unchanged.
     l_roof_mesh = l_roof.data
     roof_vertex_snapshot = [tuple(vertex.co) for vertex in l_roof.data.vertices]
-    old_standing_segments = int(l_roof.get("roofforge_standing_segment_count", 0))
+    standing_name = str(l_roof.get("roofforge_standing_seams_object", ""))
+    standing_object = bpy.data.objects.get(standing_name)
+    require(standing_object is not None, "Standing seam helper object is missing before live edit.")
+    standing_mesh_before = standing_object.data
     l_roof.roofforge_settings.standing_panel_width = 0.85
     require(l_roof.data is l_roof_mesh,
             "Standing seam width change rebuilt the roof mesh instead of only the seam detail.")
     require([tuple(vertex.co) for vertex in l_roof.data.vertices] == roof_vertex_snapshot,
             "Standing seam width change modified roof vertices.")
+    require(standing_object.data is not standing_mesh_before,
+            "Standing seam width change did not rebuild the seam mesh datablock.")
     require(int(l_roof.get("roofforge_standing_segment_count", 0)) > 0,
             "Live spatial standing-seam rebuild produced no segments.")
     require(not l_roof.get("roofforge_standing_error", ""),
