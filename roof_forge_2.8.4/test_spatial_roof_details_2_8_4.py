@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from spatial_roof_2_8_4 import build_spatial_roof_mesh, extend_spatial_roof_eaves
 from spatial_roof_2_9_0 import build_spatial_roof_mesh as build_spatial_roof_mesh_2_9
 from straight_skeleton_2_6_0 import extract_roof_seams, build_inset_seam_profile_mesh
+from standing_seams_2_6_0 import build_standing_seam_mesh
 
 
 def edge_uses(faces):
@@ -274,6 +275,65 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self._assert_spatial_concave_profiles_closed(
             outline, [33, 35, 37, 38, 34, 36, 32, 37]
         )
+
+
+    def _assert_spatial_standing_seams(self, outline, pitch_degrees):
+        pitches = [math.radians(value) for value in pitch_degrees]
+        vertices, faces, sources = build_spatial_roof_mesh_2_9(outline, pitches)
+        roof_vertices, roof_faces, roof_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.20
+        )
+        # Transition caps close the 3D node but are not roof panels; exclude
+        # them from seam generation while retaining slope and eave-strip faces.
+        valid = [
+            (face, source)
+            for face, source in zip(roof_faces, roof_sources)
+            if source != -2
+        ]
+        valid_faces = [face for face, _source in valid]
+        valid_sources = [source for _face, source in valid]
+        seams = extract_roof_seams(
+            roof_vertices, valid_faces, valid_sources,
+            [(p[0], p[1]) for p in outline]
+        )
+        self.assertTrue(seams, "Spatial roof produced no ridge/valley graph for standing seams.")
+        seam_vertices, seam_faces, stats = build_standing_seam_mesh(
+            roof_vertices,
+            valid_faces,
+            seams,
+            panel_width=0.65,
+            seam_height=0.025,
+            seam_base_width=0.014,
+            roof_thickness=0.01,
+            ridge_height=0.05,
+            end_offset=0.0,
+        )
+        self.assertTrue(seam_vertices)
+        self.assertTrue(seam_faces)
+        self.assertGreater(stats["segments"], 0)
+        self.assertLessEqual(stats["effective_height_max"], 0.045 + 1.0e-6)
+        self.assertEqual(len(stats["seam_edge_pairs"]), stats["segments"] * 2)
+        uses = edge_uses(seam_faces)
+        self.assertTrue(all(count <= 2 for count in uses.values()))
+        self.assertTrue(all(
+            0 <= index < len(seam_vertices)
+            for pair in stats["seam_edge_pairs"] for index in pair
+        ))
+
+    def test_spatial_concave_l_individual_pitch_standing_seams(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_standing_seams(outline, [33, 35, 37, 36, 38, 34])
+
+    def test_spatial_concave_u_individual_pitch_standing_seams(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_standing_seams(outline, [33, 35, 37, 38, 34, 36, 32, 37])
 
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
