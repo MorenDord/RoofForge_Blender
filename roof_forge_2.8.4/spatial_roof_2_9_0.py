@@ -1870,54 +1870,19 @@ def _build_planar_support_arrangement(points,planes,eps):
                     "Внутренняя arrangement-ячейка касается двух рёбер карниза."
                 )
 
-    changed=True
-    while changed:
-        changed=False
-        for edge_key,face_ids in edge_faces.items():
-            faces_list=list(face_ids)
-            if len(faces_list)!=2:
-                continue
-            meta=edges[edge_key]
-            pair_list=list(meta["pairs"])
-            if not pair_list:
-                continue
-            a_id,b_id=faces_list
-            sa,sb=face_source[a_id],face_source[b_id]
-            for pair in pair_list:
-                p,q=pair
-                if sa==p and sb is None:
-                    face_source[b_id]=q; changed=True
-                elif sa==q and sb is None:
-                    face_source[b_id]=p; changed=True
-                elif sb==p and sa is None:
-                    face_source[a_id]=q; changed=True
-                elif sb==q and sa is None:
-                    face_source[a_id]=p; changed=True
-
-    # Any disconnected internal pocket gets the plane that is lowest at its centroid.
+    # Boundary-adjacent cells are forced to their original eave source.
+    # Interior cells use the actual lowest support plane at their centroid.
     for face_id,loop in enumerate(faces):
-        if face_source[face_id] is None:
-            polygon=[vertices[index] for index in loop]
-            centroid=_polygon_centroid_xy(polygon)
-            face_source[face_id]=min(
-                range(len(planes)),
-                key=lambda source_id:_plane_value(
-                    planes[source_id],centroid[0],centroid[1]
-                )
-            )
-
-    # Validate each internal arrangement edge against the labels of its two cells.
-    for edge_key,face_ids in edge_faces.items():
-        if len(face_ids)!=2:
+        if face_source[face_id] is not None:
             continue
-        meta=edges[edge_key]
-        sa,sb=[face_source[index] for index in face_ids]
-        if sa==sb:
-            continue
-        if not any(sa in pair and sb in pair for pair in meta["pairs"]):
-            raise SpatialRoofError(
-                "Arrangement-edge получил несовместимые источники скатов."
+        polygon=[vertices[index] for index in loop]
+        centroid=_polygon_centroid_xy(polygon)
+        face_source[face_id]=min(
+            range(len(planes)),
+            key=lambda source_id:_plane_value(
+                planes[source_id],centroid[0],centroid[1]
             )
+        )
 
     patches_by_source=defaultdict(list)
     for face_id,loop in enumerate(faces):
