@@ -1042,6 +1042,7 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
                           for face in roof_faces]
     except Exception:
         facet_polygons = [[(p[0], p[1]) for p in pts3]]
+        source_ids = [0]
 
     all_xy = [p for poly in facet_polygons for p in poly]
     min_x, max_x = min(p[0] for p in all_xy), max(p[0] for p in all_xy)
@@ -1096,10 +1097,12 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
 
     def label_anchor(poly):
         best=(sum(p[0] for p in poly)/len(poly),sum(p[1] for p in poly)/len(poly))
+        pxs=[p[0] for p in poly]; pys=[p[1] for p in poly]
+        lo_x,hi_x=min(pxs),max(pxs); lo_y,hi_y=min(pys),max(pys)
         score=-1.0
-        for gy in range(1,17):
-            for gx in range(1,17):
-                p=(min_x+(max_x-min_x)*gx/17.0,min_y+(max_y-min_y)*gy/17.0)
+        for gy in range(1,21):
+            for gx in range(1,21):
+                p=(lo_x+(hi_x-lo_x)*gx/21.0,lo_y+(hi_y-lo_y)*gy/21.0)
                 if inside(p,poly):
                     d=boundary_distance(p,poly)
                     if d>score: best,score=p,d
