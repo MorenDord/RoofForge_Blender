@@ -203,25 +203,28 @@ class _WaveVertex:
                 (inward_left.x * speed_right - speed_left * inward_right.x) / determinant,
             )
         else:
+            normal_alignment = inward_left.dot(inward_right)
             speed_delta = abs(speed_left - speed_right)
-            if speed_delta > 1.0e-8 * max(speed_left, speed_right, 1.0):
-                raise SkeletonError(
-                    "Weighted skeleton: схлопнувшийся узел соединяет параллельные рёбра "
-                    "с разными скоростями."
-                )
-            direction = _V2(0.0, 0.0)
-            if direction_vectors is not None:
-                direction = direction_vectors[0] + direction_vectors[1]
-            if abs(direction) <= _EPS:
+            if normal_alignment > 1.0 - 1.0e-8:
+                if speed_delta > 1.0e-8 * max(speed_left, speed_right, 1.0):
+                    raise SkeletonError(
+                        "Weighted skeleton: совпадающие параллельные фронты имеют разные скорости."
+                    )
+                # Coincident support directions leave tangential motion
+                # unconstrained. Select the minimum-norm solution.
+                velocity = inward_left * speed_left
+            else:
                 direction = -left_direction + right_direction
                 if self.is_reflex:
                     direction = -direction
-            normal_speed = direction.dot(inward_left)
-            if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
-                raise SkeletonError(
-                    "Weighted skeleton: вырожденный узел не имеет устойчивого направления движения."
-                )
-            velocity = direction * (speed_left / normal_speed)
+                if abs(direction) <= _EPS and direction_vectors is not None:
+                    direction = direction_vectors[0] + direction_vectors[1]
+                normal_speed = direction.dot(inward_left)
+                if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
+                    raise SkeletonError(
+                        "Weighted skeleton: параллельные опоры не задают однозначное движение вершины."
+                    )
+                velocity = direction * (speed_left / normal_speed)
 
         if not math.isfinite(velocity.x) or not math.isfinite(velocity.y):
             raise SkeletonError("Weighted skeleton: скорость вершины стала неконечной.")
