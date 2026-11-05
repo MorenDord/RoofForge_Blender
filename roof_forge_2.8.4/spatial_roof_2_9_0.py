@@ -1123,105 +1123,84 @@ def _build_boundary_aware_spatial_envelope(
     eps,
     eave_lift,
 ):
-    """Rebuild each topological roof cell from exact 3D support planes.
-
-    The XY topology is supplied by the event solver. It acts as a hard mask,
-    so artificial diagonals from the triangulation of the original footprint
-    cannot become roof edges. Inside every source cell, neighbouring support
-    planes cut the mask at their exact intersection lines.
-    """
+    """Build the lower envelope independently inside each event-topology mask."""
     patches_by_source = defaultdict(list)
     merge_scale = max(eps * 10.0, 1.0e-8)
 
-    for face_index, face in enumerate(topology_faces):
-        source_id = int(topology_sources[face_index])
+    for topology_face in topology_faces:
         mask = [
             (float(topology_vertices[index][0]), float(topology_vertices[index][1]))
-            for index in face
+            for index in topology_face
         ]
         if len(mask) < 3 or abs(_area(mask)) <= eps * eps:
             continue
 
         mask_triangles = _triangulate_xy(mask, eps)
-        plane = planes[source_id]
         for triangle in mask_triangles:
-            cell = list(triangle)
-            # Do not trust the source-adjacency graph as the sole geometric
-            # constraint. At a non-planar reflex configuration a support plane
-            # that was not an XY neighbour can still cut the 3D cell. Detect
-            # such crossings locally inside this topological mask.
-            candidate_ids = []
-            for neighbour_id, other in enumerate(planes):
-                if neighbour_id == source_id:
+            # Within this topological mask, let every support plane compete.
+            # Thus a seam is always generated from the exact same pair of
+            # support planes on both sides, independent of which source owned
+            # the original event cell.
+            for source_id, plane in enumerate(planes):
+                cell = list(triangle)
+                for other_id, other in enumerate(planes):
+                    if other_id == source_id:
+                        continue
+                    cell = _clip_halfplane(
+                        cell,
+                        plane[0] - other[0],
+                        plane[1] - other[1],
+                        plane[2] - other[2],
+                        eps * 5.0,
+                    )
+                    if len(cell) < 3:
+                        break
+                if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
                     continue
-                values = [
-                    (plane[0] - other[0]) * point[0]
-                    + (plane[1] - other[1]) * point[1]
-                    + (plane[2] - other[2])
-                    for point in triangle
-                ]
-                if min(values) <= eps * 5.0 <= max(values):
-                    candidate_ids.append(neighbour_id)
-                elif min(values) < -eps * 5.0 < max(values):
-                    candidate_ids.append(neighbour_id)
-            for neighbour_id in candidate_ids:
-                other = planes[neighbour_id]
-                cell = _clip_halfplane(
-                    cell,
-                    plane[0] - other[0],
-                    plane[1] - other[1],
-                    plane[2] - other[2],
-                    eps * 5.0,
-                )
-                if len(cell) < 3:
-                    break
-            if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
-                continue
 
-            plane = planes[source_id]
-            lifted = [
-                (
-                    float(x),
-                    float(y),
-                    float(plane[0]) * x
-                    + float(plane[1]) * y
-                    + float(plane[2])
-                    + float(eave_lift),
-                )
-                for x, y in cell
-            ]
-            if _area(cell) < 0.0:
-                lifted.reverse()
-            patches_by_source[source_id].append(lifted)
+                lifted = [
+                    (
+                        float(x),
+                        float(y),
+                        float(plane[0]) * x
+                        + float(plane[1]) * y
+                        + float(plane[2])
+                        + float(eave_lift),
+                    )
+                    for x, y in cell
+                ]
+                if _area(cell) < 0.0:
+                    lifted.reverse()
+                patches_by_source[source_id].append(lifted)
 
     if not any(patches_by_source.values()):
         raise SpatialRoofError("Не удалось получить пространственные области скатов.")
 
+    # Multiple topology masks can yield fragments of the same source facet.
+    # Union them with the battle-tested directed half-edge cancellation.
     face_loops = []
-    # Non-planar reflex events can produce two mathematically equivalent
-    # endpoint locations on the same support plane. Cluster only same-source
-    # points before union; points belonging to different roof facets are never
-    # merged here.
-    all_xy = [
+    plan_points = [
         (float(vertex[0]), float(vertex[1]))
         for vertex in topology_vertices
     ]
     plan_scale = max(
-        max(point[0] for point in all_xy) - min(point[0] for point in all_xy),
-        max(point[1] for point in all_xy) - min(point[1] for point in all_xy),
+        max(point[0] for point in plan_points) - min(point[0] for point in plan_points),
+        max(point[1] for point in plan_points) - min(point[1] for point in plan_points),
         1.0,
     )
-    eave_values = [float(point[2]) for point in topology_vertices]
+    eave_values = [float(vertex[2]) for vertex in topology_vertices]
     eave_range = max(eave_values) - min(eave_values) if eave_values else 0.0
     snap_tolerance = max(
         merge_scale * 4.0,
         min(plan_scale * 5.0e-3, max(eave_range, plan_scale * 1.0e-6)),
     )
 
-    def snap_same_source(group):
+    for source_id in sorted(patches_by_source):
+        group = patches_by_source[source_id]
+        snapped = []
         canonical = []
         for loop in group:
-            snapped = []
+            out = []
             for raw in loop:
                 point = tuple(float(v) for v in raw)
                 match = None
@@ -1233,18 +1212,12 @@ def _build_boundary_aware_spatial_envelope(
                         best = distance
                 if match is None:
                     canonical.append(point)
-                    snapped.append(point)
+                    out.append(point)
                 else:
-                    snapped.append(canonical[match])
-            return_group = False
-            if len(snapped) >= 3:
-                return_group = True
-            if return_group:
-                yield snapped
+                    out.append(canonical[match])
+            snapped.append(out)
 
-    for source_id in sorted(patches_by_source):
-        snapped_group = list(snap_same_source(patches_by_source[source_id]))
-        for loop in _merge_face_patches(snapped_group, merge_scale):
+        for loop in _merge_face_patches(snapped, merge_scale):
             if len(loop) >= 3:
                 face_loops.append((source_id, loop))
 
@@ -1283,197 +1256,14 @@ def _build_boundary_aware_spatial_envelope(
             clean.pop()
         if len(clean) >= 3:
             if _area([
-                (vertices[index][0], vertices[index][1]) for index in clean
+                (vertices[index][0], vertices[index][1])
+                for index in clean
             ]) < 0.0:
                 clean.reverse()
             faces.append(tuple(clean))
             sources.append(int(source_id))
     return vertices, faces, sources
 
-
-
-
-def _point_to_line_parameter(point, line_point, direction):
-    denominator = direction[0] * direction[0] + direction[1] * direction[1]
-    if denominator <= 1.0e-20:
-        return 0.0
-    return (
-        (point[0] - line_point[0]) * direction[0]
-        + (point[1] - line_point[1]) * direction[1]
-    ) / denominator
-
-
-def _plane_intersection_xy(plane_a, plane_b, eps):
-    """Return (point_xy, direction_xy) for two non-parallel z=f(x,y) planes."""
-    a = float(plane_a[0]) - float(plane_b[0])
-    b = float(plane_a[1]) - float(plane_b[1])
-    c = float(plane_a[2]) - float(plane_b[2])
-    length = math.hypot(a, b)
-    if length <= eps:
-        return None
-    # a*x + b*y + c = 0
-    if abs(a) >= abs(b):
-        point = (-c / a, 0.0)
-    else:
-        point = (0.0, -c / b)
-    direction = (b, -a)
-    direction_length = math.hypot(direction[0], direction[1])
-    return point, (
-        direction[0] / direction_length,
-        direction[1] / direction_length,
-    )
-
-
-def _segment_projection_interval_xy(segment, line_point, direction):
-    t0 = _point_to_line_parameter(segment[0], line_point, direction)
-    t1 = _point_to_line_parameter(segment[1], line_point, direction)
-    return min(t0, t1), max(t0, t1)
-
-
-def _segments_are_near_parallel(a, b, c, d, tolerance):
-    ab = (b[0] - a[0], b[1] - a[1])
-    cd = (d[0] - c[0], d[1] - c[1])
-    la = math.hypot(*ab)
-    lc = math.hypot(*cd)
-    if la <= tolerance or lc <= tolerance:
-        return False
-    cross = abs(ab[0] * cd[1] - ab[1] * cd[0]) / (la * lc)
-    return cross <= 0.05
-
-
-def _repair_internal_seam_loops(face_loops, planes, outline, eps, scale):
-    """Force near-coincident internal face edges onto their exact plane pair line."""
-    if len(face_loops) < 2:
-        return face_loops
-
-    match_tolerance = max(
-        eps * 100.0,
-        min(scale * 5.0e-3, max(scale * 1.0e-6, scale * 5.0e-3)),
-    )
-
-    def on_same_outline_edge(a, b):
-        for index, p in enumerate(outline):
-            q = outline[(index + 1) % len(outline)]
-            on_a, _, _ = _point_on_segment(
-                a[:2], p[:2], q[:2], match_tolerance
-            )
-            on_b, _, _ = _point_on_segment(
-                b[:2], p[:2], q[:2], match_tolerance
-            )
-            if on_a and on_b:
-                return True
-        return False
-
-    def segment_gap(a, b, c, d):
-        direct = max(_distance2(a[:2], c[:2]), _distance2(b[:2], d[:2]))
-        reverse = max(_distance2(a[:2], d[:2]), _distance2(b[:2], c[:2]))
-        return min(direct, reverse)
-
-    for pass_index in range(4):
-        changed = False
-        edge_records = []
-        for face_index, (source_id, loop) in enumerate(face_loops):
-            for local_index, a in enumerate(loop):
-                b = loop[(local_index + 1) % len(loop)]
-                if _distance2(a[:2], b[:2]) <= eps:
-                    continue
-                if on_same_outline_edge(a, b):
-                    continue
-                edge_records.append(
-                    (face_index, source_id, local_index, a, b)
-                )
-
-        used_pairs = set()
-        for i, first in enumerate(edge_records):
-            face_a, source_a, index_a, a, b = first
-            for j in range(i + 1, len(edge_records)):
-                if j in used_pairs:
-                    continue
-                face_b, source_b, index_b, c, d = edge_records[j]
-                if face_a == face_b or source_a == source_b:
-                    continue
-                if (face_a, index_a) in used_pairs or (face_b, index_b) in used_pairs:
-                    continue
-                if segment_gap(a, b, c, d) > match_tolerance:
-                    continue
-                if not _segments_are_near_parallel(
-                    a[:2], b[:2], c[:2], d[:2], match_tolerance
-                ):
-                    continue
-
-                line = _plane_intersection_xy(
-                    planes[source_a], planes[source_b], max(eps, 1.0e-12)
-                )
-                if line is None:
-                    continue
-                line_point, direction = line
-
-                interval_a = _segment_projection_interval_xy(
-                    (a[:2], b[:2]), line_point, direction
-                )
-                interval_b = _segment_projection_interval_xy(
-                    (c[:2], d[:2]), line_point, direction
-                )
-                low = max(interval_a[0], interval_b[0])
-                high = min(interval_a[1], interval_b[1])
-                if high - low <= max(eps, 1.0e-8):
-                    continue
-
-                p0_xy = (
-                    line_point[0] + direction[0] * low,
-                    line_point[1] + direction[1] * low,
-                )
-                p1_xy = (
-                    line_point[0] + direction[0] * high,
-                    line_point[1] + direction[1] * high,
-                )
-                plane = planes[source_a]
-                p0 = (
-                    p0_xy[0],
-                    p0_xy[1],
-                    plane[0] * p0_xy[0] + plane[1] * p0_xy[1] + plane[2],
-                )
-                p1 = (
-                    p1_xy[0],
-                    p1_xy[1],
-                    plane[0] * p1_xy[0] + plane[1] * p1_xy[1] + plane[2],
-                )
-
-                loop_a = list(face_loops[face_a][1])
-                loop_b = list(face_loops[face_b][1])
-                old_a0 = loop_a[index_a]
-                old_a1 = loop_a[(index_a + 1) % len(loop_a)]
-                old_b0 = loop_b[index_b]
-                old_b1 = loop_b[(index_b + 1) % len(loop_b)]
-
-                if _distance2(old_a0[:2], p0_xy) + _distance2(old_a1[:2], p1_xy) <= \
-                        _distance2(old_a0[:2], p1_xy) + _distance2(old_a1[:2], p0_xy):
-                    loop_a[index_a] = p0
-                    loop_a[(index_a + 1) % len(loop_a)] = p1
-                else:
-                    loop_a[index_a] = p1
-                    loop_a[(index_a + 1) % len(loop_a)] = p0
-
-                if _distance2(old_b0[:2], p0_xy) + _distance2(old_b1[:2], p1_xy) <= \
-                        _distance2(old_b0[:2], p1_xy) + _distance2(old_b1[:2], p0_xy):
-                    loop_b[index_b] = p0
-                    loop_b[(index_b + 1) % len(loop_b)] = p1
-                else:
-                    loop_b[index_b] = p1
-                    loop_b[(index_b + 1) % len(loop_b)] = p0
-
-                face_loops[face_a] = (source_a, loop_a)
-                face_loops[face_b] = (source_b, loop_b)
-                used_pairs.add((face_a, index_a))
-                used_pairs.add((face_b, index_b))
-                changed = True
-                break
-            if changed:
-                break
-        if not changed:
-            break
-
-    return face_loops
 
 
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
