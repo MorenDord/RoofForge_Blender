@@ -68,7 +68,12 @@ jobs:
       - name: Register add-on and generate roofs in Blender
         env:
           ROOFFORGE_ADDON_PARENT: ${{ runner.temp }}/roof_forge_addons
+          ROOFFORGE_ROUNDTRIP_BLEND: ${{ runner.temp }}/roof_forge_roundtrip_2_9_0.blend
         run: |
           "$RUNNER_TEMP/blender-dist/blender" \
             --background --factory-startup \
             --python roof_forge_2.8.4/test_blender_runtime_2_9_0.py
+          test -s "$ROOFFORGE_ROUNDTRIP_BLEND"
+          "$RUNNER_TEMP/blender-dist/blender" \
+            --background "$ROOFFORGE_ROUNDTRIP_BLEND" \
+            --python roof_forge_2.8.4/test_blender_roundtrip_2_9_0.py
