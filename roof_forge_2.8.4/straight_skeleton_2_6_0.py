@@ -2760,6 +2760,171 @@ def build_inset_seam_profile_mesh(
     if not base_faces:
         return [], []
 
+    def triangulate_node_patch(polygon_ids):
+        """Triangulate a simple XY junction polygon without changing its rim."""
+        ids = list(polygon_ids)
+        if len(ids) < 3 or len(set(ids)) != len(ids):
+            raise SkeletonError("Многоветвевой узел профиля выродился: повторяются угловые вершины.")
+
+        points = [(base_vertices[index][0], base_vertices[index][1]) for index in ids]
+        area = sum(
+            a[0] * b[1] - b[0] * a[1]
+            for a, b in zip(points, points[1:] + points[:1])
+        ) * 0.5
+        area_eps = xy_epsilon * max(scale, 1.0)
+        if abs(area) <= area_eps:
+            raise SkeletonError("Переходная грань многоветвевого узла профиля имеет нулевую XY-площадь.")
+        orientation = 1.0 if area > 0.0 else -1.0
+
+        def orient2(a, b, c):
+            return cross2(sub2(b, a), sub2(c, a))
+
+        def proper_cross(a, b, c, d):
+            o1 = orient2(a, b, c)
+            o2 = orient2(a, b, d)
+            o3 = orient2(c, d, a)
+            o4 = orient2(c, d, b)
+            return (
+                o1 * o2 < -area_eps * area_eps
+                and o3 * o4 < -area_eps * area_eps
+            )
+
+        count = len(points)
+        for i in range(count):
+            a, b = points[i], points[(i + 1) % count]
+            for j in range(i + 1, count):
+                if j == i or j == (i + 1) % count or (j + 1) % count == i:
+                    continue
+                c, d = points[j], points[(j + 1) % count]
+                if proper_cross(a, b, c, d):
+                    raise SkeletonError(
+                        "Контур переходной грани многоветвевого узла профиля самопересекается."
+                    )
+
+        remaining = list(range(count))
+        triangles = []
+        while len(remaining) > 3:
+            ear_found = False
+            for position, current in enumerate(remaining):
+                previous = remaining[position - 1]
+                following = remaining[(position + 1) % len(remaining)]
+                a, b, c = points[previous], points[current], points[following]
+                turn = orientation * orient2(a, b, c)
+                if turn <= area_eps:
+                    continue
+
+                contains_vertex = False
+                for other in remaining:
+                    if other in (previous, current, following):
+                        continue
+                    p = points[other]
+                    side_a = orientation * orient2(a, b, p)
+                    side_b = orientation * orient2(b, c, p)
+                    side_c = orientation * orient2(c, a, p)
+                    if min(side_a, side_b, side_c) >= -area_eps:
+                        contains_vertex = True
+                        break
+                if contains_vertex:
+                    continue
+
+                triangles.append((ids[previous], ids[current], ids[following]))
+                remaining.pop(position)
+                ear_found = True
+                break
+
+            if not ear_found:
+                raise SkeletonError(
+                    "Не удалось триангулировать переходную грань многоветвевого узла профиля "
+                    "без пересечения её контура."
+                )
+
+        final_triangle = tuple(ids[index] for index in remaining)
+        if abs(orient2(
+            points[remaining[0]], points[remaining[1]], points[remaining[2]]
+        )) <= area_eps:
+            raise SkeletonError("Последний треугольник переходного узла профиля вырожден.")
+        triangles.append(final_triangle)
+        return triangles
+
+    # A node with three or more selected seam branches needs one shared
+    # transition patch. The section endpoints are keyed by their adjacent roof
+    # faces: they form a cycle when selected branches surround the node, or a
+    # path when the two outer faces leave radial edges to the node centre.
+    # Closing that graph as one polygon avoids overlapping independent caps.
+    for vertex_id, incident in selected_adjacency.items():
+        if len(incident) < 3:
+            continue
+
+        corner_graph = defaultdict(set)
+        for other_id, face_a, face_b in incident:
+            edge_key = (
+                (vertex_id, other_id)
+                if vertex_id < other_id else (other_id, vertex_id)
+            )
+            corner_a = endpoint_corner_map.get((edge_key, vertex_id, face_a))
+            corner_b = endpoint_corner_map.get((edge_key, vertex_id, face_b))
+            if corner_a is None or corner_b is None or corner_a == corner_b:
+                raise SkeletonError(
+                    "Не удалось сопоставить угловые вершины граней многоветвевого узла профиля."
+                )
+            corner_graph[corner_a].add(corner_b)
+            corner_graph[corner_b].add(corner_a)
+
+        # The face-corner graph must be one connected path or cycle. Anything
+        # else is ambiguous and is rejected rather than emitted as overlapping caps.
+        if not corner_graph:
+            raise SkeletonError("У многоветвевого узла профиля отсутствуют угловые секции.")
+        start_nodes = [node for node, neighbours in corner_graph.items() if len(neighbours) == 1]
+        if all(len(neighbours) == 2 for neighbours in corner_graph.values()):
+            start = min(corner_graph)
+            ordered_corners = [start]
+            previous = None
+            current = start
+            next_node = min(corner_graph[current])
+            while next_node != start:
+                if next_node in ordered_corners:
+                    raise SkeletonError("Цикл угловых граней профиля повторно проходит через вершину.")
+                ordered_corners.append(next_node)
+                previous, current = current, next_node
+                candidates = [node for node in corner_graph[current] if node != previous]
+                if len(candidates) != 1:
+                    raise SkeletonError("Цикл угловых граней профиля неоднозначен.")
+                next_node = candidates[0]
+            if len(ordered_corners) != len(corner_graph):
+                raise SkeletonError("Цикл угловых граней профиля распался на несколько компонентов.")
+            patch_ids = ordered_corners
+        elif len(start_nodes) == 2 and all(
+            len(neighbours) in (1, 2) for neighbours in corner_graph.values()
+        ):
+            start = min(start_nodes)
+            ordered_corners = [start]
+            previous = None
+            current = start
+            while True:
+                candidates = [node for node in corner_graph[current] if node != previous]
+                if not candidates:
+                    break
+                if len(candidates) != 1 or candidates[0] in ordered_corners:
+                    raise SkeletonError("Цепочка угловых граней профиля неоднозначна.")
+                previous, current = current, candidates[0]
+                ordered_corners.append(current)
+            if len(ordered_corners) != len(corner_graph):
+                raise SkeletonError("Цепочка угловых граней профиля распалась на компоненты.")
+            centre_key = point_key3(surface_vertices[vertex_id])
+            centre_id = base_vertex_map.get(centre_key)
+            if centre_id is None:
+                raise SkeletonError("У многоветвевого узла профиля отсутствует общая центральная вершина.")
+            patch_ids = [centre_id] + ordered_corners
+        else:
+            raise SkeletonError(
+                "Угловые секции многоветвевого узла профиля образуют разветвлённый граф, "
+                "а не один замкнутый цикл или цепочку."
+            )
+
+        for triangle in triangulate_node_patch(patch_ids):
+            base_faces.append(tuple(triangle))
+            base_face_meta.append((None, -1))
+
     # At some roof nodes two ridge seams meet while their four adjacent
     # facets are separated by valley seams. Per-facet inset strips then touch
     # only at the original node, producing four boundary spokes and a 4-use
