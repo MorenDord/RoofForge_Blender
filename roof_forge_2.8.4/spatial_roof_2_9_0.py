@@ -627,6 +627,151 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 )
 
 
+def _collapse_near_event_slivers(vertices, faces, sources, outline, eps, scale):
+    """Collapse only tiny source facets trapped between nearly coincident events.
+
+    Two close interior vertices may be merged when they are adjacent in every
+    common face and those common faces have a tiny projected area. Such faces
+    are zero-area event slivers after the 3D event order changes; dropping them
+    lets their neighbouring roof facets share one edge. Large faces and
+    non-adjacent vertices are never candidates.
+    """
+    height_range=max(float(p[2]) for p in outline)-min(float(p[2]) for p in outline)
+    weld_xy_tolerance=max(
+        eps*100.0,
+        min(scale*1.0e-3,height_range*0.75)
+    )
+    weld_z_tolerance=max(height_range*1.5,scale*1.0e-3)
+    sliver_area_tolerance=max(
+        weld_xy_tolerance*scale*2.0,
+        scale*scale*1.0e-9
+    )
+
+    vertex_faces=[set() for _ in vertices]
+    face_areas=[]
+    for face_index,face in enumerate(faces):
+        for vertex_id in face:
+            vertex_faces[vertex_id].add(face_index)
+        face_areas.append(abs(_area([
+            (vertices[index][0],vertices[index][1]) for index in face
+        ])))
+
+    def boundary(point):
+        for edge_id,p in enumerate(outline):
+            q=outline[(edge_id+1)%len(outline)]
+            on,t,distance=_point_on_segment(point[:2],p[:2],q[:2],eps*20.0)
+            if on:
+                t=max(0.0,min(1.0,t))
+                expected_z=p[2]+(q[2]-p[2])*t
+                if abs(point[2]-expected_z)<=max(eps*100.0,scale*2.5e-4):
+                    return True
+        return False
+
+    def adjacent_in_face(face, a_id, b_id):
+        try:
+            a_pos=face.index(a_id)
+            b_pos=face.index(b_id)
+        except ValueError:
+            return False
+        n=len(face)
+        return (a_pos-b_pos)%n in (1,n-1)
+
+    def can_merge(a_id,b_id):
+        common=vertex_faces[a_id] & vertex_faces[b_id]
+        for face_index in common:
+            face=faces[face_index]
+            if not adjacent_in_face(face,a_id,b_id):
+                return False
+            if face_areas[face_index]>sliver_area_tolerance:
+                return False
+        return True
+
+    welded=[]
+    counts=[]
+    sums=[]
+    face_membership=[]
+    boundary_fixed=[]
+    buckets=defaultdict(list)
+    old_to_new=[]
+
+    for old_id,raw in enumerate(vertices):
+        point=tuple(float(v) for v in raw)
+        if boundary(point):
+            new_id=len(welded)
+            welded.append(point)
+            counts.append(1)
+            sums.append(list(point))
+            face_membership.append(set(vertex_faces[old_id]))
+            boundary_fixed.append(True)
+            old_to_new.append(new_id)
+            continue
+
+        cell=(int(math.floor(point[0]/weld_xy_tolerance)),
+              int(math.floor(point[1]/weld_xy_tolerance)))
+        best=None
+        best_distance=float("inf")
+        for dx in (-1,0,1):
+            for dy in (-1,0,1):
+                for candidate_id in buckets.get((cell[0]+dx,cell[1]+dy),()):
+                    if boundary_fixed[candidate_id]:
+                        continue
+                    candidate=welded[candidate_id]
+                    xy_distance=_distance2(point[:2],candidate[:2])
+                    z_distance=abs(point[2]-candidate[2])
+                    if xy_distance>weld_xy_tolerance or z_distance>weld_z_tolerance:
+                        continue
+                    # Test against every original vertex already represented
+                    # by this cluster; do not use a transitive chain to bridge
+                    # unrelated event nodes.
+                    if not can_merge(old_id,candidate_id):
+                        continue
+                    if xy_distance<best_distance:
+                        best,best_distance=candidate_id,xy_distance
+
+        if best is None:
+            best=len(welded)
+            welded.append(point)
+            counts.append(1)
+            sums.append(list(point))
+            face_membership.append(set(vertex_faces[old_id]))
+            boundary_fixed.append(False)
+            buckets[cell].append(best)
+        else:
+            for axis in range(3):
+                sums[best][axis]+=point[axis]
+            counts[best]+=1
+            face_membership[best].update(vertex_faces[old_id])
+            welded[best]=tuple(value/counts[best] for value in sums[best])
+        old_to_new.append(best)
+
+    remapped_faces=[]
+    remapped_sources=[]
+    for face_index,(face,source) in enumerate(zip(faces,sources)):
+        mapped=[]
+        for old_id in face:
+            new_id=old_to_new[old_id]
+            if not mapped or mapped[-1]!=new_id:
+                mapped.append(new_id)
+        if len(mapped)>1 and mapped[0]==mapped[-1]:
+            mapped.pop()
+        if len(set(mapped))<3:
+            if face_areas[face_index] <= sliver_area_tolerance:
+                # A face whose two event corners collapsed to one vertex has
+                # zero area. Its two remaining sides become one shared edge.
+                continue
+            raise SpatialRoofError(
+                "Попытка схлопнуть пространственный узел затронула неузкую грань ската."
+            )
+        remapped_faces.append(tuple(mapped))
+        remapped_sources.append(source)
+
+    used=sorted({index for face in remapped_faces for index in face})
+    index_map={old:new for new,old in enumerate(used)}
+    compact_vertices=[welded[index] for index in used]
+    compact_faces=[tuple(index_map[index] for index in face) for face in remapped_faces]
+    return compact_vertices,compact_faces,remapped_sources
+
+
 def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a non-planar concave or convex roof from a 3D eave loop.
 
@@ -693,6 +838,9 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
     vertices, faces, sources = _embed_topology(
         template_vertices, template_faces, template_sources,
         points, planes, eps, span
+    )
+    vertices, faces, sources = _collapse_near_event_slivers(
+        vertices, faces, sources, points, eps, span
     )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
     return vertices, faces, [
