@@ -15,9 +15,11 @@ import math
 from collections import defaultdict
 
 try:
-    from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from .weighted_skeleton_2_9_0 import build_weighted_roof_mesh
+    from .straight_skeleton_2_6_0 import SkeletonError
 except ImportError:
-    from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from weighted_skeleton_2_9_0 import build_weighted_roof_mesh
+    from straight_skeleton_2_6_0 import SkeletonError
 
 
 class SpatialRoofError(ValueError):
@@ -554,21 +556,29 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
                     float(pitch_angles[i]), float(eave_lift))
         for i in range(count)
     ]
-    # Use the proven reflex-aware straight-skeleton topology as a candidate
-    # partition, then lift every facet onto its own 3D eave support plane.
-    # The strict geometric validator below rejects cases where independent
-    # pitches change the event order enough to invalidate that partition.
+    # Solve the wavefront with the actual per-edge normal velocities.
+    # This lets split/collapse events move to their correct weighted times
+    # instead of reusing a unit-speed planar event sequence and merely
+    # projecting its vertices afterwards.
+    speeds = []
+    for edge_id in range(count):
+        p = points[edge_id]
+        q = points[(edge_id + 1) % count]
+        edge_length = math.hypot(q[0] - p[0], q[1] - p[1])
+        along_grade = (q[2] - p[2]) / edge_length
+        inward_grade = math.sqrt(
+            max(0.0, math.tan(float(pitch_angles[edge_id])) ** 2 - along_grade ** 2)
+        )
+        if inward_grade <= 1.0e-10:
+            raise SpatialRoofError("У ребра карниза {} отсутствует внутренний подъём.".format(edge_id + 1))
+        speeds.append(1.0 / inward_grade)
     try:
-        template_vertices, template_faces, template_sources = build_roof_mesh(
-            xy, 1.0, 0.0, allow_oblique=True
+        vertices, faces, sources = build_weighted_roof_mesh(
+            xy, speeds, planes
         )
     except SkeletonError as exc:
-        raise SpatialRoofError("Не удалось построить топологию wavefront: " + str(exc)) from exc
+        raise SpatialRoofError("Не удалось построить взвешенный wavefront: " + str(exc)) from exc
 
-    vertices, faces, sources = _embed_topology(
-        template_vertices, template_faces, template_sources,
-        points, planes, eps, span
-    )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
     original_sources = [source_edge_map[source_id] for source_id in sources]
     return vertices, faces, original_sources
