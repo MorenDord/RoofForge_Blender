@@ -466,8 +466,12 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 matched = True
                 break
         if not matched:
+            face_index = uses[0][0]
             raise SpatialRoofError(
-                "После совмещения найдено внутреннее открытое ребро, не принадлежащее карнизу."
+                "После совмещения найдено внутреннее открытое ребро, не принадлежащее карнизу: "
+                "A=({}, {}, {}), B=({}, {}, {}), скат={}.".format(
+                    a[0], a[1], a[2], b[0], b[1], b[2], sources[face_index] + 1
+                )
             )
 
     for edge_id, intervals in enumerate(boundary_intervals):
