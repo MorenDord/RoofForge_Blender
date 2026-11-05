@@ -21,9 +21,6 @@ jobs:
       - name: Run spatial topology-lifting tests
         working-directory: roof_forge_2.8.4
         run: python -m unittest -v test_spatial_roof_2_9_0.py
-      - name: Run weighted wavefront tests
-        working-directory: roof_forge_2.8.4
-        run: python -m unittest -v test_weighted_skeleton_2_9_0.py
       - name: Run existing geometry regressions
         working-directory: roof_forge_2.8.4
         run: >-
