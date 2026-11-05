@@ -1767,7 +1767,7 @@ def _segment_pair_parameters(a,b,c,d,eps):
     ]
 
 
-def _build_planar_support_arrangement(points,planes,eps):
+def _build_planar_support_arrangement(points,planes,eps,allowed_pairs=None):
     """Exact planar arrangement with boundary-owned roof cells."""
     xy=[(float(p[0]),float(p[1])) for p in points]
     raw_segments=[]
@@ -1778,11 +1778,25 @@ def _build_planar_support_arrangement(points,planes,eps):
             "a":p,"b":q,"kind":"boundary","label":edge_id,"params":[0.0,1.0]
         })
 
-    # Every plane pair contributes all interior intersection segments.
-    for source_a in range(len(planes)):
-        for source_b in range(source_a+1,len(planes)):
-            pa=planes[source_a]; pb=planes[source_b]
-            a=pa[0]-pb[0]; b=pa[1]-pb[1]; cc=pa[2]-pb[2]
+    # Only topologically adjacent plane pairs are allowed to become roof
+    # seams. Without this restriction, every mathematical plane crossing would
+    # create spurious cells unrelated to the roof wavefront.
+    if allowed_pairs is None:
+        pair_list=[
+            (source_a,source_b)
+            for source_a in range(len(planes))
+            for source_b in range(source_a+1,len(planes))
+        ]
+    else:
+        pair_list=sorted({
+            tuple(sorted((int(pair[0]),int(pair[1]))))
+            for pair in allowed_pairs
+            if pair[0]!=pair[1]
+        })
+
+    for source_a,source_b in pair_list:
+        pa=planes[source_a]; pb=planes[source_b]
+        a=pa[0]-pb[0]; b=pa[1]-pb[1]; cc=pa[2]-pb[2]
             for p0,p1 in _line_segment_intersections(a,b,cc,xy,eps*5.0):
                 raw_segments.append({
                     "a":p0,"b":p1,"kind":"pair",
@@ -2286,12 +2300,49 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Non-planar eaves: use the exact planar arrangement of all support
-    # plane intersections. Source labels propagate from their eave edges
-    # through pairwise plane seams, so height offsets never turn into a
-    # global lower-envelope decision.
+    # First compute the combinatorial neighbour graph in the flat XY
+    # problem using the exact same per-edge pitch values. Only those pairs are
+    # allowed to become 3D seams.
+    flat_outline=[(p[0],p[1]) for p in points]
+    flat_planes=[
+        _edge_plane(
+            (points[i][0],points[i][1],0.0),
+            (points[(i+1)%count][0],points[(i+1)%count][1],0.0),
+            angles[i],0.0
+        )
+        for i in range(count)
+    ]
+    topology_error=None
+    try:
+        flat_speeds=[1.0/math.tan(angle) for angle in angles]
+        topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
+            flat_outline,flat_speeds,flat_planes
+        )
+    except WeightedSkeletonError as exc:
+        topology_error=exc
+        try:
+            topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+                flat_outline,1.0,0.0,allow_oblique=True
+            )
+        except SkeletonError as fallback_exc:
+            raise SpatialRoofError(
+                "Не удалось получить топологию соседства скатов: {} / {}".format(
+                    exc,fallback_exc
+                )
+            ) from fallback_exc
+
+    allowed_pairs=set()
+    adjacency=_derive_source_adjacency(
+        topology_vertices,topology_faces,topology_sources,
+        max(eps*10.0,1.0e-8)
+    )
+    for source_id,neighbors in adjacency.items():
+        for neighbor_id in neighbors:
+            if source_id<neighbor_id:
+                allowed_pairs.add((source_id,neighbor_id))
+
     vertices,faces,sources=_build_planar_support_arrangement(
-        points,planes,eps
+        points,planes,eps,allowed_pairs
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
