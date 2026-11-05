@@ -198,6 +198,20 @@ def main():
         [33, 35, 37, 36, 38, 34],
         overhang=0.20,
     )
+    # Emulate a helper saved by an older add-on build as a child; startup
+    # migration must turn it into a sibling with a roof-follow constraint.
+    legacy_ridge = bpy.data.objects.get(str(l_roof.get("roofforge_ridges_object", "")))
+    require(legacy_ridge is not None, "Legacy helper migration fixture is missing.")
+    old_follow = next(
+        (constraint for constraint in legacy_ridge.constraints
+         if constraint.name == "RoofForge Follow Roof"),
+        None,
+    )
+    if old_follow is not None:
+        legacy_ridge.constraints.remove(old_follow)
+    legacy_ridge.parent = l_roof
+    roof_forge._migrate_legacy_thickness()
+    require_sibling_helper(l_roof, "roofforge_ridges_object", "Migrated ridge")
     require(bool(l_roof.get("roofforge_spatial_profile_source_mesh", "")),
             "Spatial L roof profile source mesh was not persisted.")
     l_source_mesh = bpy.data.meshes.get(l_roof["roofforge_spatial_profile_source_mesh"])
