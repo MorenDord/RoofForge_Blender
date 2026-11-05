@@ -1896,8 +1896,8 @@ def extract_roof_seams(vertices, faces, face_source_ids, polygon_ccw):
         # 3D multi-facet junction. Its perimeter is not a physical ridge/valley
         # and must not generate a separate profile.
         if face_source_ids and (
-            int(face_source_ids[face_a]) == -2
-            or int(face_source_ids[face_b]) == -2
+            face_source_ids[face_a] == -2
+            or face_source_ids[face_b] == -2
         ):
             continue
 
