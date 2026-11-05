@@ -1143,11 +1143,29 @@ def _build_boundary_aware_spatial_envelope(
             continue
 
         mask_triangles = _triangulate_xy(mask, eps)
+        plane = planes[source_id]
         for triangle in mask_triangles:
             cell = list(triangle)
-            for neighbour_id in sorted(adjacency.get(source_id, ())):
+            # Do not trust the source-adjacency graph as the sole geometric
+            # constraint. At a non-planar reflex configuration a support plane
+            # that was not an XY neighbour can still cut the 3D cell. Detect
+            # such crossings locally inside this topological mask.
+            candidate_ids = []
+            for neighbour_id, other in enumerate(planes):
+                if neighbour_id == source_id:
+                    continue
+                values = [
+                    (plane[0] - other[0]) * point[0]
+                    + (plane[1] - other[1]) * point[1]
+                    + (plane[2] - other[2])
+                    for point in triangle
+                ]
+                if min(values) <= eps * 5.0 <= max(values):
+                    candidate_ids.append(neighbour_id)
+                elif min(values) < -eps * 5.0 < max(values):
+                    candidate_ids.append(neighbour_id)
+            for neighbour_id in candidate_ids:
                 other = planes[neighbour_id]
-                plane = planes[source_id]
                 cell = _clip_halfplane(
                     cell,
                     plane[0] - other[0],
