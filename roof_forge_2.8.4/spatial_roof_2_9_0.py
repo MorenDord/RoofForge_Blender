@@ -1260,14 +1260,24 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     ]
 
     if z_span<=flat_tolerance:
-        # With a uniform pitch the established unit-speed straight skeleton
-        # is the best-conditioned path, especially at symmetric L/U events.
+        # With a uniform pitch use the established reflex-aware 2D topology
+        # and lift its facets onto the identical support planes.
         uniform_pitch = max(angles)-min(angles) <= 1.0e-9
         if uniform_pitch:
-            vertices,faces,sources=_build_spatial_roof_mesh_template(
-                points,angles,eave_lift=float(eave_lift),tolerance=tolerance
+            try:
+                template_vertices,template_faces,template_sources=build_roof_mesh(
+                    xy,1.0,0.0,allow_oblique=True
+                )
+            except SkeletonError as exc:
+                raise SpatialRoofError(
+                    "Не удалось построить XY-топологию крыши: "+str(exc)
+                ) from exc
+            vertices,faces,sources=_embed_topology(
+                template_vertices,template_faces,template_sources,
+                points,planes,eps,scale
             )
-            return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
+            _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
+            return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
 
         # Individual pitches require actual weighted collapse/split times.
         # Each support plane contributes its exact inward normal speed.
@@ -1327,10 +1337,38 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Uniform pitches on non-planar contours retain the established reflex-aware
-    # topology; only their 3D source planes and junction heights differ.
-    vertices,faces,sources=_build_spatial_roof_mesh_template(
-        points,angles,eave_lift=float(eave_lift),tolerance=tolerance
+    # Uniform non-planar contours use the same boundary-aware support-plane
+    # path as individual-pitch non-planar roofs.
+    flat_outline=[(p[0],p[1]) for p in points]
+    speeds=[]
+    for i in range(count):
+        p=points[i]
+        q=points[(i+1)%count]
+        edge_length=math.hypot(q[0]-p[0],q[1]-p[1])
+        along_grade=(q[2]-p[2])/edge_length
+        inward_grade=math.sqrt(
+            max(0.0,math.tan(angles[i])**2-along_grade**2)
+        )
+        if inward_grade<=1.0e-10:
+            raise SpatialRoofError(
+                "Для ребра {} недостаточен внутренний уклон.".format(i+1)
+            )
+        speeds.append(1.0/inward_grade)
+    try:
+        topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
+            flat_outline,speeds,planes
+        )
+    except WeightedSkeletonError:
+        topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+            flat_outline,1.0,0.0,allow_oblique=True
+        )
+    adjacency=_derive_source_adjacency(
+        topology_vertices,topology_faces,topology_sources,
+        max(eps*10.0,1.0e-8)
     )
-    return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
+    vertices,faces,sources=_build_boundary_aware_spatial_envelope(
+        points,angles,planes,adjacency,_triangulate_xy(flat_outline,eps),eps,eave_lift
+    )
+    _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
+    return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
 
