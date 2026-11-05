@@ -202,6 +202,20 @@ def main():
     require_closed_profile_object(u_roof, "roofforge_ridges_object", "U ridge")
     require_closed_profile_object(u_roof, "roofforge_valleys_object", "U valley")
 
+    oblique_source, oblique_roof = create_roof_from_outline(
+        "RF_Spatial_ObliqueMultiReflex",
+        [(0.0, 0.0, 0.00), (10.0, 0.0, 0.04),
+         (10.0, 8.0, 0.10), (7.0, 8.0, 0.14),
+         (6.6, 3.2, 0.09), (3.4, 3.2, 0.16),
+         (3.0, 8.0, 0.22), (0.0, 8.0, 0.12)],
+        [33, 35, 37, 36, 38, 34, 32, 37],
+        overhang=0.20,
+    )
+    require(bool(oblique_roof.get("roofforge_spatial_profile_source_mesh", "")),
+            "Oblique multi-reflex roof profile source mesh was not persisted.")
+    require_closed_profile_object(oblique_roof, "roofforge_ridges_object", "Oblique ridge")
+    require_closed_profile_object(oblique_roof, "roofforge_valleys_object", "Oblique valley")
+
     # Save a real .blend for a second Blender process to reopen and exercise
     # Create/Update profile tools against the persisted source mesh metadata.
     roundtrip_path = os.environ.get("ROOFFORGE_ROUNDTRIP_BLEND", "")
