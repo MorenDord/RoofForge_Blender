@@ -57,6 +57,13 @@ class MultiReflexSpatialStressTests(unittest.TestCase):
         self.assertIn("VALLEY", seam_types)
 
         for kind, width in (("RIDGE", 0.18), ("VALLEY", 0.22)):
+            degree = Counter()
+            for edge in seams:
+                if str(edge[4]).upper() == kind:
+                    for point in edge[:2]:
+                        degree[tuple(round(float(v), 6) for v in point)] += 1
+            print("MULTIREFLEX_SEAM_DEGREES", kind,
+                  sorted((point, value) for point, value in degree.items() if value >= 3))
             try:
                 profile_vertices, profile_faces = build_inset_seam_profile_mesh(
                     vertices,
