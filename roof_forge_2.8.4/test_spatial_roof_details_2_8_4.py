@@ -149,6 +149,18 @@ class SpatialRoofDetailsTests(unittest.TestCase):
 
 
 
+
+    def test_transition_cap_faces_do_not_create_false_ridge_or_valley(self):
+        vertices = [
+            (0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.5), (0.0, 1.0, 0.0),
+        ]
+        faces = [(0, 1, 2), (0, 2, 3)]
+        ordinary = extract_roof_seams(vertices, faces, [0, 1], [])
+        with_transition_cap = extract_roof_seams(vertices, faces, [0, -2], [])
+        self.assertTrue(ordinary)
+        self.assertEqual(with_transition_cap, [])
+
     def test_existing_roof_profiles_accept_millimetre_face_warp(self):
         vertices = [
             (-1.0, 0.0, 1.0), (0.0, 0.0, 0.0),
@@ -254,6 +266,10 @@ class SpatialRoofIntegrationSourceTests(unittest.TestCase):
         self.assertIn("extend_spatial_roof_eaves(", source)
         self.assertIn("_store_spatial_profile_source_mesh(", source)
         self.assertIn("_spatial_profile_surface_from_source_mesh(roof_obj)", source)
+        self.assertIn('name="roofforge_face_source", type="INT", domain="FACE"', source)
+        self.assertIn('mesh.attributes.get("roofforge_face_source")', source)
+        self.assertIn("profile_faces, profile_sources", source)
+        self.assertIn("if source < 0:", source)
         self.assertIn('row.operator("roofforge.create_ridges"', source)
         self.assertIn('row.operator("roofforge.create_valleys"', source)
 
