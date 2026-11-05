@@ -639,11 +639,14 @@ def _collapse_near_event_slivers(vertices, faces, sources, outline, eps, scale):
     height_range=max(float(p[2]) for p in outline)-min(float(p[2]) for p in outline)
     weld_xy_tolerance=max(
         eps*100.0,
-        min(scale*1.0e-3,height_range*0.75)
+        min(scale*2.0e-2,height_range*0.75)
     )
-    weld_z_tolerance=max(height_range*1.5,scale*1.0e-3)
+    weld_z_tolerance=max(
+        eps*100.0,
+        min(height_range*1.5,scale*1.0e-2)
+    )
     sliver_area_tolerance=max(
-        weld_xy_tolerance*scale*2.0,
+        weld_xy_tolerance*scale*0.25,
         scale*scale*1.0e-9
     )
 
