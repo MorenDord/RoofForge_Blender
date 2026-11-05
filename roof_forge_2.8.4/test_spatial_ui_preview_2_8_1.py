@@ -147,6 +147,8 @@ class SpatialPreviewTests(unittest.TestCase):
 
     def test_generated_pitch_uses_frame_limited_roof_only_updates(self):
         self.assertIn("_schedule_roof_update(owner, \"interactive\")", SOURCE)
+        self.assertIn("_invalidate_spatial_preview_signature()", SOURCE)
+        self.assertIn("roofforge_interactive_mode", SOURCE)
         self.assertIn("_schedule_roof_update(owner, \"profiles\")", SOURCE)
         self.assertIn("_INTERACTIVE_FINALIZE_DELAY = 0.25", SOURCE)
         self.assertIn("interactive_update_rate: FloatProperty", SOURCE)
