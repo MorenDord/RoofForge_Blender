@@ -116,11 +116,14 @@ class _Ray2(_Line2):
 
 
 class _Segment2(_Line2):
-    __slots__ = ("index",)
+    __slots__ = ("index", "speed")
 
-    def __init__(self, a, b, index):
+    def __init__(self, a, b, index, speed=1.0):
         super().__init__(a, b - a)
         self.index = int(index)
+        self.speed = float(speed)
+        if not math.isfinite(self.speed) or self.speed <= 0.0:
+            raise SkeletonError("Straight skeleton: скорость смещения ребра должна быть положительной.")
 
 
 class _EdgeEvent:
@@ -184,21 +187,27 @@ class _WaveVertex:
         if direction_vectors is None:
             direction_vectors = creator_vectors
         self.is_reflex = _cross(direction_vectors[0], direction_vectors[1]) < 0.0
-        direction = creator_vectors[0] + creator_vectors[1]
-        if self.is_reflex:
-            direction = -direction
-        if abs(direction) <= _EPS:
+
+        # Weighted wavefront: each supporting edge moves along its inward
+        # unit normal at its own speed. The vertex velocity is the unique
+        # solution of n_left·v=s_left and n_right·v=s_right. Unit speeds
+        # reproduce the established unweighted bisector exactly.
+        left_direction = edge_left.v.normalized()
+        right_direction = edge_right.v.normalized()
+        inward_left = _V2(left_direction.y, -left_direction.x)
+        inward_right = _V2(right_direction.y, -right_direction.x)
+        determinant = _cross(inward_left, inward_right)
+        if abs(determinant) <= 1.0e-10:
             raise SkeletonError("Straight skeleton: соседние рёбра образуют неопределённую биссектрису.")
-        # Initial and split vertices move at unit wavefront speed. The raw
-        # bisector sum has the right direction but needs normalization for
-        # non-orthogonal corners. Edge-event vertices can be degenerate (their
-        # surviving supporting lines may be parallel/opposed); in that case
-        # keep the event bisector as-is, exactly as the wavefront topology requires.
-        inward_normal = _V2(edge_left.v.y, -edge_left.v.x).normalized()
-        normal_speed = direction.dot(inward_normal)
-        if abs(normal_speed) > 1.0e-8:
-            direction = direction / normal_speed
-        self.bisector = _Ray2(point, direction)
+        speed_left = float(getattr(edge_left, "speed", 1.0))
+        speed_right = float(getattr(edge_right, "speed", 1.0))
+        velocity = _V2(
+            (speed_left * inward_right.y - inward_left.y * speed_right) / determinant,
+            (inward_left.x * speed_right - speed_left * inward_right.x) / determinant,
+        )
+        if not math.isfinite(velocity.x) or not math.isfinite(velocity.y):
+            raise SkeletonError("Straight skeleton: скорость вершины стала неконечной.")
+        self.bisector = _Ray2(point, velocity)
 
     def position_at(self, time):
         return self.point + self.bisector.v * (float(time) - self.birth_time)
@@ -231,7 +240,7 @@ class _WaveVertex:
                 # Input to the wavefront engine is clockwise, so its inward
                 # unit normal is the right-hand normal of the original edge.
                 inward = _V2(edge_direction.y, -edge_direction.x).normalized()
-                relative_velocity = velocity - inward
+                relative_velocity = velocity - inward * float(getattr(edge, "speed", 1.0))
                 denominator = _cross(edge_direction, relative_velocity)
                 if abs(denominator) <= 1.0e-12:
                     continue
@@ -371,11 +380,16 @@ class _LAV:
 
 
 class _SLAV:
-    def __init__(self, clockwise_polygon):
+    def __init__(self, clockwise_polygon, edge_speeds=None):
         self.lavs = []
         count = len(clockwise_polygon)
+        if edge_speeds is None:
+            edge_speeds = [1.0] * count
+        if len(edge_speeds) != count:
+            raise SkeletonError("Straight skeleton: число скоростей должно совпадать с числом рёбер.")
         edges = [
-            _Segment2(clockwise_polygon[i], clockwise_polygon[(i + 1) % count], i)
+            _Segment2(clockwise_polygon[i], clockwise_polygon[(i + 1) % count],
+                      i, edge_speeds[i])
             for i in range(count)
         ]
         lav = _LAV.from_polygon(clockwise_polygon, edges, self)
@@ -1581,7 +1595,9 @@ def _enqueue_missing_wavefront_events(slav, current_time, projected_edge_events,
     return queue_order
 
 
-def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_events=False):
+def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
+                          projected_edge_events=False, edge_speeds=None,
+                          weighted_height_time=False):
     """Build an exact low-poly roof from a simple CCW XY polygon.
 
     Returns (vertices, faces, face_source_ids). Each source id is the index of
@@ -1602,7 +1618,17 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_
     # The event implementation uses the conventional screen-coordinate
     # orientation (clockwise in world XY). We retain CCW indices for roof faces.
     clockwise = [_V2(x, y) for x, y in reversed(polygon_ccw)]
-    slav = _SLAV(clockwise)
+    if edge_speeds is not None:
+        if len(edge_speeds) != len(polygon_ccw):
+            raise SkeletonError("Число скоростей wavefront должно совпадать с числом рёбер контура.")
+        # Reversed vertex order maps edge j to original CCW edge n-2-j.
+        clockwise_speeds = [
+            float(edge_speeds[(len(polygon_ccw) - 2 - j) % len(polygon_ccw)])
+            for j in range(len(polygon_ccw))
+        ]
+    else:
+        clockwise_speeds = None
+    slav = _SLAV(clockwise, clockwise_speeds)
 
     def current_segments(time):
         return slav.active_segments(time)
@@ -1616,16 +1642,16 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_
 
     event_queue = []
     queue_order = 0
+    event_mode = bool(projected_edge_events or edge_speeds is not None)
     for lav in slav.lavs:
         for vertex in lav:
-            event = vertex.next_event(current_time, projected_edge_events)
+            event = vertex.next_event(current_time, event_mode)
             if event is not None:
                 queue_order += 1
                 heapq.heappush(event_queue, (event.distance, queue_order, event))
 
     processed = 0
-    event_mode = bool(projected_edge_events)
-    tried_event_modes = set()
+    tried_event_modes = {False} if edge_speeds is not None else set()
     event_limit = max(100, len(polygon_ccw) * len(polygon_ccw) * 40)
     scale = max(
         max(math.hypot(polygon_ccw[(i + 1) % len(polygon_ccw)][0] - polygon_ccw[i][0],
@@ -1707,8 +1733,12 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_
                 key = (edge_id, vertex_a.uid, vertex_b.uid)
                 old = snapshots.get(key)
                 if old is not None:
-                    z0 = float(eave_lift) + current_time * float(pitch_tan)
-                    z1 = float(eave_lift) + event_time * float(pitch_tan)
+                    if weighted_height_time:
+                        z0 = float(eave_lift) + current_time
+                        z1 = float(eave_lift) + event_time
+                    else:
+                        z0 = float(eave_lift) + current_time * float(pitch_tan)
+                        z1 = float(eave_lift) + event_time * float(pitch_tan)
                     quad = [
                         (old[0].x, old[0].y, z0),
                         (old[1].x, old[1].y, z0),
@@ -1864,6 +1894,33 @@ def build_roof_mesh(polygon_ccw, pitch_tan, eave_lift=0.0, allow_oblique=False):
                 f"Расчёт свободных углов: {projected_error}. "
                 f"Резервный расчёт: {classic_error}"
             ) from classic_error
+
+
+
+def build_weighted_roof_mesh(polygon_ccw, pitch_angles, eave_lift=0.0):
+    """Build a flat-eave roof with one pitch angle per source boundary edge.
+
+    Angles are in radians. The wavefront time is vertical rise, so the inward
+    speed of edge i is cot(pitch_i). This is a weighted straight skeleton:
+    reflex split events and edge collapses are recalculated using those speeds.
+    """
+    count = len(polygon_ccw)
+    if count < 3 or len(pitch_angles) != count:
+        raise SkeletonError("Нужно минимум три точки и один угол ската на каждое ребро.")
+    speeds = []
+    for index, angle in enumerate(pitch_angles):
+        value = float(angle)
+        if not math.isfinite(value) or value <= 0.0 or value >= math.pi * 0.5:
+            raise SkeletonError("Угол ската {} должен быть больше 0° и меньше 90°.".format(index + 1))
+        tangent = math.tan(value)
+        speeds.append(1.0 / tangent)
+    return _build_roof_mesh_impl(
+        polygon_ccw, 1.0, float(eave_lift),
+        projected_edge_events=True,
+        edge_speeds=speeds,
+        weighted_height_time=True,
+    )
+
 
 
 def extract_roof_seams(vertices, faces, face_source_ids, polygon_ccw):
