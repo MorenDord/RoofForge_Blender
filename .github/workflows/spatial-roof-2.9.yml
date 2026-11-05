@@ -66,7 +66,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/roof_forge_dist"
           "$RUNNER_TEMP/blender-dist/blender" --command extension build \
             --source-dir roof_forge_2.8.4 \
-            --output-dir "$RUNNER_TEMP/roof_forge_dist" \
             --output-filepath "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
           "$RUNNER_TEMP/blender-dist/blender" --command extension validate \
             "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
