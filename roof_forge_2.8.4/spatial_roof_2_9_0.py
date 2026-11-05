@@ -1145,10 +1145,10 @@ def _build_boundary_aware_spatial_envelope(
     topology_vertices, topology_faces, topology_sources,
     points, planes, eps
 ):
-    """Evaluate all locally relevant support planes inside stable XY masks."""
-    patches_by_source=defaultdict(list)
+    """Build a locally constrained lower envelope inside each XY topology cell."""
     merge_scale=max(eps*10.0,1.0e-8)
     xy=[(float(p[0]),float(p[1])) for p in points]
+    patches_by_source=defaultdict(list)
 
     def boundary_owner(poly):
         owners=set()
@@ -1160,6 +1160,29 @@ def _build_boundary_aware_spatial_envelope(
                     owners.add(edge_id)
         return next(iter(owners)) if len(owners)==1 else None
 
+    def split_winner_cell(poly,winner,challenger):
+        pa=planes[winner]
+        pb=planes[challenger]
+        a=pa[0]-pb[0]
+        b=pa[1]-pb[1]
+        cc=pa[2]-pb[2]
+        if math.hypot(a,b)<=eps:
+            if _plane_value(pa,*_polygon_centroid_xy(poly)) <= _plane_value(pb,*_polygon_centroid_xy(poly)):
+                return [(poly,winner)]
+            return [(poly,challenger)]
+        pieces=[]
+        low=_clip_halfplane(poly,a,b,eps*5.0)
+        high=_clip_halfplane(poly,-a,-b,-cc,eps*5.0)
+        if len(low)>=3 and abs(_area(low))>eps*eps:
+            forced=boundary_owner(low)
+            source=forced if forced is not None else winner
+            pieces.append((low,source))
+        if len(high)>=3 and abs(_area(high))>eps*eps:
+            forced=boundary_owner(high)
+            source=forced if forced is not None else challenger
+            pieces.append((high,source))
+        return pieces
+
     for face_index,face in enumerate(topology_faces):
         base_source=int(topology_sources[face_index])
         mask=[
@@ -1169,71 +1192,43 @@ def _build_boundary_aware_spatial_envelope(
         if len(mask)<3 or abs(_area(mask))<=eps*eps:
             continue
 
-        triangles=_triangulate_xy(mask,eps)
-        for triangle in triangles:
-            candidates={base_source}
-            for other_id,other in enumerate(planes):
-                if other_id==base_source:
+        cells=[(list(triangle),base_source)
+               for triangle in _triangulate_xy(mask,eps)]
+        for challenger in range(len(planes)):
+            new_cells=[]
+            for cell,winner in cells:
+                if challenger==winner:
+                    new_cells.append((cell,winner))
                     continue
-                plane=planes[base_source]
-                values=[
-                    (plane[0]-other[0])*p[0]
-                    +(plane[1]-other[1])*p[1]
-                    +(plane[2]-other[2])
-                    for p in triangle
-                ]
-                if min(values)<=eps*10.0 and max(values)>=-eps*10.0:
-                    candidates.add(other_id)
-
-            candidate_list=sorted(candidates)
-            cells=[list(triangle)]
-            for ia in range(len(candidate_list)):
-                for ib in range(ia+1,len(candidate_list)):
-                    pa=planes[candidate_list[ia]]
-                    pb=planes[candidate_list[ib]]
-                    a=pa[0]-pb[0]
-                    b=pa[1]-pb[1]
-                    cc=pa[2]-pb[2]
-                    if math.hypot(a,b)<=eps:
-                        continue
-                    split=[]
-                    for cell in cells:
-                        split.extend(_split_polygon_by_line(cell,a,b,cc,eps*5.0))
-                    cells=split
-                    if not cells:
-                        break
-                if not cells:
-                    break
-
-            for cell in cells:
-                if len(cell)<3 or abs(_area(cell))<=eps*eps:
-                    continue
-                forced=boundary_owner(cell)
-                centroid=_polygon_centroid_xy(cell)
-                source_id=(
-                    forced
-                    if forced is not None
-                    else min(
-                        candidate_list,
-                        key=lambda source:_plane_value(
-                            planes[source],centroid[0],centroid[1]
-                        )
-                    )
+                # A boundary-owned piece must keep its eave source even when
+                # a remote support plane is lower just inside the footprint.
+                split_winner_cell_result=split_winner_cell(
+                    cell,winner,challenger
                 )
-                plane=planes[source_id]
-                patch=[
-                    (
-                        float(x),float(y),
-                        _plane_value(plane,float(x),float(y))
-                    )
-                    for x,y in cell
-                ]
-                if _area(cell)<0.0:
-                    patch.reverse()
-                patches_by_source[source_id].append(patch)
+                new_cells.extend(split_winner_cell_result)
+            cells=new_cells
+            if not cells:
+                break
+
+        for cell,source_id in cells:
+            if len(cell)<3 or abs(_area(cell))<=eps*eps:
+                continue
+            plane=planes[source_id]
+            patch=[
+                (
+                    float(x),float(y),
+                    _plane_value(plane,float(x),float(y))
+                )
+                for x,y in cell
+            ]
+            if _area(cell)<0.0:
+                patch.reverse()
+            patches_by_source[int(source_id)].append(patch)
 
     if not patches_by_source:
-        raise SpatialRoofError("Не удалось получить области пространственной крыши.")
+        raise SpatialRoofError(
+            "Не удалось получить области пространственной крыши."
+        )
 
     grouped=[]
     for source_id,patches in sorted(patches_by_source.items()):
@@ -1243,9 +1238,11 @@ def _build_boundary_aware_spatial_envelope(
 
     if not grouped:
         raise SpatialRoofError(
-            "После объединения пространственных фрагментов не осталось скатов."
+            "После объединения локальных пространственных фрагментов "
+            "не осталось скатов."
         )
 
+    # Same-source union is exact; common seam vertices are then canonicalized.
     vertices=[]
     faces=[]
     sources=[]
@@ -1279,6 +1276,52 @@ def _build_boundary_aware_spatial_envelope(
     vertices,faces,sources=_merge_coplanar_roof_faces(
         vertices,faces,sources,scale=max(merge_scale,eps*10.0)
     )
+
+    # The topology-cell boundaries may not coincide with the exact 3D seam
+    # after the local winner changes. Repair only near-coincident internal
+    # edges by the exact intersection of the two owning support planes.
+    face_loops=[]
+    for face,source_id in zip(faces,sources):
+        face_loops.append((
+            int(source_id),
+            [vertices[index] for index in face]
+        ))
+    plan_scale=max(
+        max(p[0] for p in xy)-min(p[0] for p in xy),
+        max(p[1] for p in xy)-min(p[1] for p in xy),
+        1.0
+    )
+    face_loops=_repair_internal_seam_loops(
+        face_loops,planes,topology_vertices,eps,plan_scale
+    )
+
+    vertices=[]
+    faces=[]
+    sources=[]
+    buckets=defaultdict(list)
+
+    def add_final(point):
+        key=tuple(int(round(float(v)/merge_scale)) for v in point)
+        for index in buckets[key]:
+            if _distance3(vertices[index],point)<=merge_scale*2.0:
+                return index
+        index=len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        buckets[key].append(index)
+        return index
+
+    for source_id,loop in face_loops:
+        face=[add_final(point) for point in loop]
+        clean=[]
+        for index in face:
+            if not clean or clean[-1]!=index:
+                clean.append(index)
+        if len(clean)>1 and clean[0]==clean[-1]:
+            clean.pop()
+        if len(clean)>=3:
+            faces.append(tuple(clean))
+            sources.append(source_id)
+
     return vertices,faces,sources
 
 
