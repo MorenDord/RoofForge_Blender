@@ -30,6 +30,7 @@ from bpy.props import (
 from .straight_skeleton_2_6_0 import (
     SkeletonError,
     build_roof_mesh,
+    build_weighted_roof_mesh,
     _orthogonalize_nearly_orthogonal_contour,
     extend_roof_mesh_eaves,
     extract_roof_seams,
@@ -785,7 +786,10 @@ def _rebuild_generated_roof(roof_obj):
         if is_spatial:
             source_xyz = [tuple(float(c) for c in p[:3]) for p in source_poly]
             profile_outline = [(p[0], p[1]) for p in source_xyz]
-            pitches = json.loads(roof_obj.get("roofforge_spatial_pitches", "[]"))
+            pitches = json.loads(roof_obj.get(
+                "roofforge_edge_pitches",
+                roof_obj.get("roofforge_spatial_pitches", "[]")
+            ))
             if len(pitches) != len(source_xyz):
                 raise RoofForgeError("Не совпадает число индивидуальных уклонов и рёбер 3D-контура.")
             try:
@@ -809,7 +813,15 @@ def _rebuild_generated_roof(roof_obj):
             # normalized footprint as the free-angle skeleton.
             source_poly, _was_orthogonalized = _orthogonalize_nearly_orthogonal_contour(source_poly)
             poly = _offset_polygon(source_poly, settings.overhang)
-            surface_vertices, surface_faces, face_source_ids = _create_surface_geometry(source_poly, settings)
+            edge_pitches = json.loads(roof_obj.get("roofforge_edge_pitches", "[]"))
+            if edge_pitches and len(edge_pitches) != len(source_poly):
+                raise RoofForgeError("Число индивидуальных углов не совпадает с числом рёбер контура.")
+            if edge_pitches:
+                surface_vertices, surface_faces, face_source_ids = build_weighted_roof_mesh(
+                    source_poly, edge_pitches, settings.eave_lift
+                )
+            else:
+                surface_vertices, surface_faces, face_source_ids = _create_surface_geometry(source_poly, settings)
             if settings.overhang > 1.0e-10:
                 surface_vertices, surface_faces, face_source_ids = extend_roof_mesh_eaves(
                     surface_vertices, surface_faces, face_source_ids,
@@ -1128,11 +1140,16 @@ def _spatial_pitch_settings_update(self, context):
     owner = getattr(self, "id_data", None)
     if not isinstance(owner, bpy.types.Object) or not owner.get("roofforge_generated", False):
         return
-    if not owner.get("roofforge_spatial", False) or owner.get("roofforge_updating", False):
+    if owner.get("roofforge_updating", False):
         return
-    count = int(owner.get("roofforge_spatial_edge_count", 0))
+    count = int(owner.get("roofforge_edge_pitch_count", owner.get("roofforge_spatial_edge_count", 0)))
+    if count < 3:
+        return
     values = [float(getattr(self, f"spatial_pitch_{i:02d}")) for i in range(1, count+1)]
-    owner["roofforge_spatial_pitches"] = json.dumps(values, separators=(",", ":"))
+    owner["roofforge_edge_pitches"] = json.dumps(values, separators=(",", ":"))
+    # Keep the legacy key populated for existing spatial roof files.
+    if owner.get("roofforge_spatial", False):
+        owner["roofforge_spatial_pitches"] = json.dumps(values, separators=(",", ":"))
     _rebuild_generated_roof(owner)
 
 
@@ -1170,10 +1187,6 @@ class ROOFFORGE_PG_Settings(bpy.types.PropertyGroup):
     )
     pitch_default_migrated: BoolProperty(
         name="Миграция уклона выполнена", default=False, options={'HIDDEN'},
-    )
-    spatial_preview_text_scale: FloatProperty(
-        name="Размер цифр на схеме", description="Увеличить или уменьшить номера скатов на плане",
-        default=1.0, min=0.65, max=2.2, step=1, precision=2,
     )
     overhang: FloatProperty(
         name="Свес карниза", description="Для плоского контура — горизонтальный вынос; для пространственного — расстояние по плоскости каждого ската. Исходный контур остаётся линией опирания нижней поверхности.",
@@ -1339,6 +1352,7 @@ class ROOFFORGE_OT_Create(bpy.types.Operator):
             roof_obj["roofforge_outline"] = json.dumps(polygon, separators=(",", ":"))
             roof_obj["roofforge_spatial"] = bool(is_spatial)
             roof_obj["roofforge_spatial_edge_count"] = len(polygon) if is_spatial else 0
+            roof_obj["roofforge_edge_pitch_count"] = len(polygon)
             roof_obj["roofforge_ridges_object"] = ""
             roof_obj["roofforge_valleys_object"] = ""
             roof_obj["roofforge_standing_seams_object"] = ""
@@ -1346,9 +1360,10 @@ class ROOFFORGE_OT_Create(bpy.types.Operator):
             target_settings = roof_obj.roofforge_settings
             for prop_name in _settings_values(scene_settings):
                 setattr(target_settings, prop_name, getattr(scene_settings, prop_name))
+            edge_pitches = [float(getattr(target_settings, f"spatial_pitch_{i:02d}")) for i in range(1, len(polygon)+1)]
+            roof_obj["roofforge_edge_pitches"] = json.dumps(edge_pitches, separators=(",", ":"))
             if is_spatial:
-                spatial_pitches = [float(getattr(target_settings, f"spatial_pitch_{i:02d}")) for i in range(1, len(polygon)+1)]
-                roof_obj["roofforge_spatial_pitches"] = json.dumps(spatial_pitches, separators=(",", ":"))
+                roof_obj["roofforge_spatial_pitches"] = json.dumps(edge_pitches, separators=(",", ":"))
             # Enable callbacks only after all starting values have been copied.
             roof_obj["roofforge_generated"] = True
 
