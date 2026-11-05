@@ -250,6 +250,8 @@ def _embed_topology(template_vertices, template_faces, template_sources,
     vertices = []
     vertex_map = {}
     replacements = {}
+    junction_fill_faces = []
+    junction_fill_sources = {}
 
     def append_vertex(point):
         if not all(math.isfinite(float(v)) for v in point):
@@ -309,17 +311,21 @@ def _embed_topology(template_vertices, template_faces, template_sources,
             vertex_map[vertex_id] = append_vertex(common)
             continue
 
-        # A symmetric 2D event can have four or more incident roof facets.
-        # Arbitrary 3D support planes are not necessarily concurrent. Resolve
-        # that degenerate node into a deterministic fan of 3-plane junctions.
-        if len(incident_sources) < 4:
+        # If the incident support planes do not share one point, replace
+        # the zero-area multi-facet node with a small closed transition patch.
+        # For cyclically adjacent facets i,j, their pairwise intersection
+        # point Q(i,j) lies on both support planes. The segment between the
+        # previous and next Q points therefore lies on the current facet.
+        # A triangular patch closes a 3-way event; higher valence patches are
+        # triangulated around a local centre to avoid warped n-gons.
+        if len(incident_sources) < 3:
             raise SpatialRoofError(
-                "Три соседних пространственных ската не имеют общей точки пересечения."
+                "Пространственный узел с двумя скатами не имеет устойчивой точки пересечения."
             )
         if len(incident_faces) != len(incident_sources):
             raise SpatialRoofError(
-                "В многолучевом узле один исходный скат подходит несколькими отдельными участками; "
-                "топология неоднозначна."
+                "В узле несколько участков одного исходного ската; "
+                "автоматическое замыкание переходной грани неоднозначно."
             )
 
         fan = sorted(
@@ -333,30 +339,71 @@ def _embed_topology(template_vertices, template_faces, template_sources,
         )
         fan_sources = [int(template_sources[i]) for i in fan]
         if len(set(fan_sources)) != len(fan_sources):
-            raise SpatialRoofError("В многолучевом узле повторяется одна и та же плоскость ската.")
+            raise SpatialRoofError(
+                "В узле повторяется одна опорная плоскость; нельзя однозначно упорядочить скаты."
+            )
 
         junction_ids = []
-        for i in range(1, len(fan_sources) - 1):
-            triple = (fan_sources[0], fan_sources[i], fan_sources[i + 1])
-            point = _three_plane_intersection(planes, triple, determinant_tolerance)
-            if point is None:
+        target_xy = (float(target[0]), float(target[1]))
+        max_junction_radius = max(scale * 0.35, node_tolerance * 100.0)
+        for i in range(len(fan_sources)):
+            source_a = fan_sources[i]
+            source_b = fan_sources[(i + 1) % len(fan_sources)]
+            point = _two_plane_projection(
+                planes[source_a], planes[source_b], target_xy, determinant_tolerance
+            )
+            if _distance2(point[:2], target_xy) > max_junction_radius:
                 raise SpatialRoofError(
-                    "Не удалось разрешить многолучевой узел: вырожденное пересечение плоскостей."
+                    "Переходный узел разошёлся дальше допустимого радиуса; "
+                    "измените высоты карниза или углы прилегающих скатов."
                 )
-            if max(_plane_residual(planes[s], point) for s in triple) > node_tolerance:
-                raise SpatialRoofError("Многолучевой узел не лежит на общих плоскостях скатов.")
-            junction_ids.append(append_vertex(point))
+            if max(_plane_residual(planes[s], point) for s in (source_a, source_b)) > node_tolerance:
+                raise SpatialRoofError("Парная точка переходного узла не лежит на обеих плоскостях.")
+            if junction_ids and _distance3(vertices[junction_ids[-1]], point) <= node_tolerance:
+                junction_ids.append(junction_ids[-1])
+            else:
+                junction_ids.append(append_vertex(point))
+
+        if len(set(junction_ids)) < 3:
+            raise SpatialRoofError(
+                "Переходный узел выродился: попарные пересечения скатов не образуют замкнутую область."
+            )
 
         for i, face_index in enumerate(fan):
-            if i == 0:
-                chain = list(junction_ids)
-            elif i == 1:
-                chain = [junction_ids[0]]
-            elif i == len(fan) - 1:
-                chain = [junction_ids[-1]]
-            else:
-                chain = [junction_ids[i - 1], junction_ids[i - 2]]
-            replacements[(face_index, vertex_id)] = chain
+            previous_q = junction_ids[(i - 1) % len(junction_ids)]
+            next_q = junction_ids[i]
+            replacements[(face_index, vertex_id)] = [next_q, previous_q]
+
+        if len(junction_ids) == 3:
+            patch_face = tuple(junction_ids)
+            patch_area = _area([
+                (vertices[index][0], vertices[index][1]) for index in patch_face
+            ])
+            if abs(patch_area) <= eps * eps:
+                raise SpatialRoofError("Треугольная переходная грань имеет нулевую проекционную площадь.")
+            if patch_area < 0.0:
+                patch_face = tuple(reversed(patch_face))
+            junction_fill_faces.append(patch_face)
+        else:
+            centre = tuple(
+                sum(vertices[index][axis] for index in junction_ids) / len(junction_ids)
+                for axis in range(3)
+            )
+            centre_id = append_vertex(centre)
+            for i in range(len(junction_ids)):
+                triangle = (
+                    centre_id,
+                    junction_ids[i],
+                    junction_ids[(i + 1) % len(junction_ids)],
+                )
+                area = _area([(vertices[index][0], vertices[index][1]) for index in triangle])
+                if abs(area) <= eps * eps:
+                    raise SpatialRoofError(
+                        "Триангуляция многолучевой переходной грани создала вырожденный треугольник."
+                    )
+                if area < 0.0:
+                    triangle = tuple(reversed(triangle))
+                junction_fill_faces.append(triangle)
         vertex_map[vertex_id] = None
 
     output_faces = []
@@ -382,6 +429,8 @@ def _embed_topology(template_vertices, template_faces, template_sources,
             output_faces.append(tuple(clean))
             output_sources.append(int(template_sources[face_index]))
 
+    output_faces.extend(junction_fill_faces)
+    output_sources.extend([-2] * len(junction_fill_faces))
     return vertices, output_faces, output_sources
 
 
@@ -402,12 +451,14 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
         if len(face) < 3:
             raise SpatialRoofError("В пространственной сетке обнаружена грань менее чем из трёх вершин.")
         points = [vertices[i] for i in face]
-        plane = planes[sources[face_index]]
-        for point in points:
-            if _plane_residual(plane, point) > plane_eps:
-                raise SpatialRoofError(
-                    "Один из скатов не лежит на своей опорной плоскости после совмещения узлов."
-                )
+        source_id = int(sources[face_index])
+        if source_id >= 0:
+            plane = planes[source_id]
+            for point in points:
+                if _plane_residual(plane, point) > plane_eps:
+                    raise SpatialRoofError(
+                        "Один из скатов не лежит на своей опорной плоскости после совмещения узлов."
+                    )
         area = _area([(p[0], p[1]) for p in points])
         if area <= eps * eps:
             raise SpatialRoofError(
@@ -594,7 +645,10 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
         points, planes, eps, span
     )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
-    return vertices, faces, [source_edge_map[source_id] for source_id in sources]
+    return vertices, faces, [
+        source_edge_map[source_id] if source_id >= 0 else source_id
+        for source_id in sources
+    ]
 
 
 def _is_convex_xy_outline(points, eps):
