@@ -571,19 +571,24 @@ def _world_surface_from_mesh_object(roof_obj):
 
 
 
-def _store_spatial_profile_source_mesh(roof_obj, vertices, faces):
-    """Persist the pre-overhang upper surface without adding a scene object.
-
-    The mesh datablock has a fake user and is referenced by name from the roof.
-    This gives Create/Update profile tools a stable source mesh after saving and
-    reopening the .blend, while keeping the visible roof object independent.
-    """
+def _store_spatial_profile_source_mesh(roof_obj, vertices, faces, face_source_ids=None):
+    """Persist the pre-overhang surface and per-face source IDs in a hidden mesh datablock."""
     key = "roofforge_spatial_profile_source_mesh"
     old_name = str(roof_obj.get(key, ""))
     mesh = bpy.data.meshes.new(roof_obj.name + "_RF_ProfileSource")
     try:
         mesh.from_pydata(vertices, [], faces)
         mesh.update()
+        if face_source_ids is not None:
+            if len(face_source_ids) != len(faces):
+                raise RoofForgeError(
+                    "Число идентификаторов исходных скатов не совпадает с числом граней профиля."
+                )
+            attribute = mesh.attributes.new(
+                name="roofforge_face_source", type="INT", domain="FACE"
+            )
+            for index, source_id in enumerate(face_source_ids):
+                attribute.data[index].value = int(source_id)
         mesh.use_fake_user = True
     except Exception:
         bpy.data.meshes.remove(mesh)
@@ -608,7 +613,12 @@ def _spatial_profile_surface_from_source_mesh(roof_obj):
         point = transform @ vertex.co
         vertices.append((float(point.x), float(point.y), float(point.z)))
     faces = [tuple(int(i) for i in polygon.vertices) for polygon in mesh.polygons]
-    seams = extract_roof_seams(vertices, faces, [-1] * len(faces), [])
+    source_attribute = mesh.attributes.get("roofforge_face_source")
+    if source_attribute is not None and len(source_attribute.data) == len(faces):
+        face_sources = [int(item.value) for item in source_attribute.data]
+    else:
+        face_sources = [-1] * len(faces)
+    seams = extract_roof_seams(vertices, faces, face_sources, [])
     boundary = _mesh_boundary_segments(vertices, faces)
     return vertices, faces, seams, boundary
 
@@ -866,7 +876,7 @@ def _rebuild_generated_roof(roof_obj):
         _update_roof_modifiers(roof_obj, settings)
         if is_spatial:
             _store_spatial_profile_source_mesh(
-                roof_obj, profile_cap_surface_vertices, profile_faces
+                roof_obj, profile_cap_surface_vertices, profile_faces, profile_sources
             )
 
         if is_spatial or has_edge_pitches:
@@ -1125,6 +1135,10 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
         for i,a in enumerate(poly):
             segment(a,poly[(i+1)%len(poly)],ss*0.48)
         source=int(source_ids[fi]) if len(source_ids)==len(facet_polygons) else fi
+        # Negative IDs identify transition caps, not pitched roof facets.
+        # Keep their outlines visible but do not number them as a roof slope.
+        if source < 0:
+            continue
         label=str(source+1)
         cx,cy=screen(label_anchor(poly))
         cell=max(2,int(round(size/160.0))*ss)
