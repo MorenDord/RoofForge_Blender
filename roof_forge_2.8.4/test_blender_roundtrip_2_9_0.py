@@ -55,9 +55,10 @@ def main():
             "RF_Spatial_L_VariablePitch_Roof",
             "RF_Spatial_U_VariablePitch_Roof",
             "RF_Spatial_ObliqueMultiReflex_Roof",
+            "RF_Spatial_Plus_MultiBranch_Roof",
         }
     ]
-    require(len(roofs) == 3, "Expected saved spatial L/U and oblique multi-reflex roofs after reopening the .blend.")
+    require(len(roofs) == 4, "Expected saved spatial L/U, oblique multi-reflex and multi-branch plus roofs after reopening the .blend.")
 
     for roof in roofs:
         source_name = str(roof.get("roofforge_spatial_profile_source_mesh", ""))
