@@ -157,6 +157,45 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         angle = _face_corner_direction(vertices, (0, 1, 2, 3, 4, 5), 1)
         self.assertAlmostEqual(angle, math.radians(135.0), places=6)
 
+
+    def test_nonplanar_concave_l_five_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.0000), (8, 0, 0.0020), (8, 4, 0.0030),
+            (4, 4, 0.0040), (4, 8, 0.0050), (0, 8, 0.0025),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_u_five_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.0000), (10, 0, 0.0020), (10, 8, 0.0030),
+            (7, 8, 0.0050), (7, 3, 0.0024), (3, 3, 0.0035),
+            (3, 8, 0.0048), (0, 8, 0.0020),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_l_ten_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.0000), (8, 0, 0.0040), (8, 4, 0.0060),
+            (4, 4, 0.0080), (4, 8, 0.0100), (0, 8, 0.0050),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_u_ten_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.0000), (10, 0, 0.0040), (10, 8, 0.0060),
+            (7, 8, 0.0100), (7, 3, 0.0048), (3, 3, 0.0070),
+            (3, 8, 0.0096), (0, 8, 0.0040),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
     def test_reversed_winding_preserves_build(self):
         outline = [(0, 0, 0), (8, 0, .2), (8, 5, .4), (0, 5, .1)]
         pitches = [math.radians(v) for v in (35, 38, 40, 36)]
