@@ -1599,6 +1599,91 @@ def _build_nonplanar_lower_envelope(points, planes, eps):
     return vertices, faces, sources
 
 
+def _build_mask_clipped_spatial_roof(
+    topology_vertices, topology_faces, topology_sources,
+    planes, adjacency, eps
+):
+    """Clip each 2D skeleton facet by exact intersections with its neighbours."""
+    merge_scale=max(eps*10.0,1.0e-8)
+    patches_by_source=defaultdict(list)
+
+    for face_index, face in enumerate(topology_faces):
+        source_id=int(topology_sources[face_index])
+        mask=[
+            (float(topology_vertices[index][0]),float(topology_vertices[index][1]))
+            for index in face
+        ]
+        if len(mask)<3 or abs(_area(mask))<=eps*eps:
+            continue
+        cell=list(mask)
+        for neighbour_id in sorted(adjacency.get(source_id,())):
+            plane=planes[source_id]
+            other=planes[neighbour_id]
+            cell=_clip_halfplane(
+                cell,
+                plane[0]-other[0],
+                plane[1]-other[1],
+                plane[2]-other[2],
+                eps*5.0,
+            )
+            if len(cell)<3:
+                break
+        if len(cell)<3 or abs(_area(cell))<=eps*eps:
+            continue
+        plane=planes[source_id]
+        lifted=[
+            (
+                float(x),float(y),
+                float(plane[0])*x+float(plane[1])*y+float(plane[2])
+            )
+            for x,y in cell
+        ]
+        if _area(cell)<0.0:
+            lifted.reverse()
+        patches_by_source[source_id].append(lifted)
+
+    face_loops=[]
+    for source_id,patches in sorted(patches_by_source.items()):
+        for loop in _merge_face_patches(patches,merge_scale):
+            if len(loop)>=3:
+                face_loops.append((source_id,loop))
+    if not face_loops:
+        raise SpatialRoofError("Не удалось сформировать пространственные скаты из topology masks.")
+
+    face_loops=_split_global_t_junctions(face_loops,merge_scale)
+
+    vertices=[]
+    faces=[]
+    sources=[]
+    buckets=defaultdict(list)
+
+    def add_vertex(point):
+        key=tuple(int(round(float(v)/merge_scale)) for v in point)
+        for index in buckets[key]:
+            if _distance3(vertices[index],point)<=merge_scale*2.0:
+                return index
+        index=len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        buckets[key].append(index)
+        return index
+
+    for source_id,loop in face_loops:
+        face=[add_vertex(point) for point in loop]
+        clean=[]
+        for index in face:
+            if not clean or clean[-1]!=index:
+                clean.append(index)
+        if len(clean)>1 and clean[0]==clean[-1]:
+            clean.pop()
+        if len(clean)<3:
+            continue
+        if _area([(vertices[index][0],vertices[index][1]) for index in clean])<0.0:
+            clean.reverse()
+        faces.append(tuple(clean))
+        sources.append(int(source_id))
+    return vertices,faces,sources
+
+
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a roof from edge-specific pitches and a 3D eave loop.
 
@@ -1701,9 +1786,45 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Non-planar eaves: exact lower envelope with boundary ownership.
-    vertices,faces,sources=_build_nonplanar_lower_envelope(
-        points,planes,eps
+    # Non-planar eaves: preserve the established 2D event topology and
+    # compute every facet boundary directly from neighbouring 3D planes.
+    xy2=[(p[0],p[1]) for p in points]
+    uniform_pitch=max(angles)-min(angles)<=1.0e-9
+    if uniform_pitch:
+        try:
+            topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+                xy2,1.0,0.0,allow_oblique=True
+            )
+        except SkeletonError as exc:
+            raise SpatialRoofError("Не удалось получить XY-топологию: "+str(exc)) from exc
+    else:
+        flat_planes=[
+            _edge_plane(
+                (points[i][0],points[i][1],0.0),
+                (points[(i+1)%count][0],points[(i+1)%count][1],0.0),
+                angles[i],0.0
+            )
+            for i in range(count)
+        ]
+        flat_speeds=[1.0/math.tan(angle) for angle in angles]
+        try:
+            topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
+                xy2,flat_speeds,flat_planes
+            )
+        except WeightedSkeletonError:
+            try:
+                topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+                    xy2,1.0,0.0,allow_oblique=True
+                )
+            except SkeletonError as exc:
+                raise SpatialRoofError("Не удалось получить topology индивидуальных углов: "+str(exc)) from exc
+    adjacency=_derive_source_adjacency(
+        topology_vertices,topology_faces,topology_sources,
+        max(eps*10.0,1.0e-8)
+    )
+    vertices,faces,sources=_build_mask_clipped_spatial_roof(
+        topology_vertices,topology_faces,topology_sources,
+        planes,adjacency,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
