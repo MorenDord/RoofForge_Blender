@@ -4,7 +4,9 @@ import unittest
 from collections import Counter, defaultdict
 
 from spatial_roof_2_8_4 import build_spatial_roof_mesh, extend_spatial_roof_eaves
-from straight_skeleton_2_6_0 import extract_roof_seams, build_inset_seam_profile_mesh
+from straight_skeleton_2_6_0 import (
+    extract_roof_seams, build_inset_seam_profile_mesh, build_weighted_roof_mesh
+)
 
 
 def edge_uses(faces):
@@ -81,6 +83,31 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         # Each new edge strip is one upward-oriented mitered quad.
         for face in faces[len(self.faces):]:
             self.assertGreater(face_normal(vertices, face)[2], 0.0)
+
+
+    def test_flat_individual_pitch_overhang_uses_single_miter_per_corner(self):
+        outline = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
+        pitches = [math.radians(v) for v in (30.0, 36.0, 42.0, 34.0)]
+        vertices, faces, sources = build_weighted_roof_mesh(outline, pitches)
+        extended_vertices, extended_faces, extended_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.35
+        )
+        self.assertEqual(len(extended_faces), len(extended_sources))
+        uses = edge_uses(extended_faces)
+        self.assertTrue(all(count in (1, 2) for count in uses.values()))
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
+        original_count = len(vertices)
+        added_faces = extended_faces[len(faces):]
+        for vertex_id in range(original_count):
+            new_neighbours = set()
+            for face in added_faces:
+                if vertex_id not in face:
+                    continue
+                position = face.index(vertex_id)
+                for neighbour in (face[position - 1], face[(position + 1) % len(face)]):
+                    if neighbour >= original_count:
+                        new_neighbours.add(neighbour)
+            self.assertEqual(len(new_neighbours), 1)
 
     def test_overhang_preserves_original_facet_geometry(self):
         vertices, faces, sources = extend_spatial_roof_eaves(
