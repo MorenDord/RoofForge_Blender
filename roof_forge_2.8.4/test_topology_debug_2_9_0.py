@@ -21,6 +21,26 @@ class TopologyDiagnostic(unittest.TestCase):
                       "p0",vertices[edge[0]],"p1",vertices[edge[1]])
         self.assertTrue(faces)
 
+
+    def test_planar_arrangement_l_edge_uses(self):
+        from spatial_roof_2_9_0 import _build_planar_support_arrangement, _edge_plane
+        outline=[(0,0,0),(8,0,.02),(8,4,.03),(4,4,.04),(4,8,.05),(0,8,.025)]
+        pitches=[math.radians(35.0)]*6
+        planes=[
+            _edge_plane(outline[i],outline[(i+1)%6],pitches[i],0.0)
+            for i in range(6)
+        ]
+        vertices,faces,sources=_build_planar_support_arrangement(
+            outline,planes,1.0e-9
+        )
+        uses=defaultdict(list)
+        for fi,face in enumerate(faces):
+            for a,b in zip(face,face[1:]+face[:1]):
+                uses[tuple(sorted((a,b)))].append(fi)
+        print("ARR_FACES",list(zip(sources,faces)))
+        print("ARR_OPEN",[edge for edge,v in uses.items() if len(v)==1][:30])
+        self.assertTrue(faces)
+
     def test_u_topology(self):
         outline=[(0,0),(10,0),(10,8),(7,8),(7,3),(3,3),(3,8),(0,8)]
         vertices,faces,sources=build_roof_mesh(outline,1.0,0.0,allow_oblique=True)
