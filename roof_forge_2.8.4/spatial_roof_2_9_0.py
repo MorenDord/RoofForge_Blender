@@ -1553,7 +1553,6 @@ def _build_nonplanar_lower_envelope(points, planes, eps):
         raise SpatialRoofError("Нижняя огибающая не сформировала ни одного ската.")
 
     face_loops = _split_global_t_junctions(face_loops, merge_scale)
-
     vertices = []
     faces = []
     sources = []
@@ -1583,7 +1582,6 @@ def _build_nonplanar_lower_envelope(points, planes, eps):
             clean.reverse()
         faces.append(tuple(clean))
         sources.append(source_id)
-
     return vertices, faces, sources
 
 
@@ -1645,7 +1643,51 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     if z_span<=flat_tolerance:
         # With a uniform pitch use the established reflex-aware 2D topology
         # and lift its facets onto the identical support planes.
-        # Non-planar eaves have different edge starting heights, so use the
+        uniform_pitch = max(angles)-min(angles) <= 1.0e-9
+        if uniform_pitch:
+            try:
+                template_vertices,template_faces,template_sources=build_roof_mesh(
+                    xy,1.0,0.0,allow_oblique=True
+                )
+            except SkeletonError as exc:
+                raise SpatialRoofError(
+                    "Не удалось построить XY-топологию крыши: "+str(exc)
+                ) from exc
+            vertices,faces,sources=_embed_topology(
+                template_vertices,template_faces,template_sources,
+                points,planes,eps,scale
+            )
+            _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
+            return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
+
+        # Individual pitches require actual weighted collapse/split times.
+        # Each support plane contributes its exact inward normal speed.
+        speeds=[]
+        for i in range(count):
+            p=points[i]
+            q=points[(i+1)%count]
+            edge_length=math.hypot(q[0]-p[0],q[1]-p[1])
+            along_grade=(q[2]-p[2])/edge_length
+            inward_grade=math.sqrt(
+                max(0.0,math.tan(angles[i])**2-along_grade**2)
+            )
+            if inward_grade<=1.0e-10:
+                raise SpatialRoofError(
+                    "Для ребра {} не хватает внутреннего уклона.".format(i+1)
+                )
+            speeds.append(1.0/inward_grade)
+        try:
+            vertices,faces,sources=build_weighted_roof_mesh(
+                xy,speeds,planes,merge_coplanar=False
+            )
+        except WeightedSkeletonError as exc:
+            raise SpatialRoofError(
+                "Взвешенный волновой фронт: "+str(exc)
+            ) from exc
+        _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
+        return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
+
+    # Non-planar eaves have different edge starting heights, so use the
     # exact lower envelope of their support planes rather than a common-time
     # weighted wavefront.
     vertices,faces,sources=_build_nonplanar_lower_envelope(
