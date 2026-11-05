@@ -1825,6 +1825,8 @@ def _build_planar_support_arrangement(points,planes,eps):
                 )
                 ranked=[]
                 for candidate in outs:
+                    if candidate==a and len(outs)>1:
+                        continue
                     angle=math.atan2(
                         vertices[candidate][1]-vertices[b][1],
                         vertices[candidate][0]-vertices[b][0]
