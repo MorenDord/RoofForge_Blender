@@ -119,6 +119,11 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         b = build_spatial_roof_mesh(reversed_outline, reversed_pitches)
         self.assertEqual(len(a[1]), len(b[1]))
         self.assertEqual(len(a[2]), len(b[2]))
+        expected_reversed_sources = [
+            (len(pitches) - 2 - source_id) % len(pitches)
+            for source_id in a[2]
+        ]
+        self.assertEqual(b[2], expected_reversed_sources)
 
     def test_rejects_pitch_below_eave_grade(self):
         outline = [(0, 0, 0), (1, 0, 2), (1, 1, 2), (0, 1, 0)]
