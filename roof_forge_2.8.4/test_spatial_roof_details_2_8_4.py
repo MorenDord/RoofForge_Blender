@@ -63,10 +63,19 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertGreater(len(vertices), len(self.vertices))
         uses = edge_uses(faces)
         self.assertTrue(all(count in (1, 2) for count in uses.values()))
-        self.assertEqual(sum(count == 1 for count in uses.values()), 8)
-        self.assertEqual(sum(count == 2 for count in uses.values()), 18)
-        # Every newly added face is upward-oriented (the four strips and four
-        # corner transition triangles), rather than an inverted underside.
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
+        # Every original eave corner connects to exactly one shared miter
+        # vertex; the old two-spoke corner triangle is no longer present.
+        original_count = len(self.vertices)
+        added_faces = faces[len(self.faces):]
+        for vertex_id in range(original_count):
+            new_neighbours = {
+                neighbour
+                for face in added_faces if vertex_id in face
+                for neighbour in face if neighbour >= original_count
+            }
+            self.assertEqual(len(new_neighbours), 1)
+        # Each new edge strip is one upward-oriented mitered quad.
         for face in faces[len(self.faces):]:
             self.assertGreater(face_normal(vertices, face)[2], 0.0)
 
@@ -109,7 +118,7 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertEqual(len(extended_faces), len(extended_sources))
         uses = edge_uses(extended_faces)
         self.assertTrue(all(count in (1, 2) for count in uses.values()))
-        self.assertEqual(sum(count == 1 for count in uses.values()), 8)
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
 
     def test_spatial_ridge_profile_seats_on_thickness_offset_surface(self):
         top = [(x, y, z + 0.012) for x, y, z in self.vertices]
