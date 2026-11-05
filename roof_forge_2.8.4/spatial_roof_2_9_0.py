@@ -1198,10 +1198,53 @@ def _build_boundary_aware_spatial_envelope(
         raise SpatialRoofError("Не удалось получить пространственные области скатов.")
 
     face_loops = []
+    # Non-planar reflex events can produce two mathematically equivalent
+    # endpoint locations on the same support plane. Cluster only same-source
+    # points before union; points belonging to different roof facets are never
+    # merged here.
+    all_xy = [
+        (float(vertex[0]), float(vertex[1]))
+        for vertex in topology_vertices
+    ]
+    plan_scale = max(
+        max(point[0] for point in all_xy) - min(point[0] for point in all_xy),
+        max(point[1] for point in all_xy) - min(point[1] for point in all_xy),
+        1.0,
+    )
+    eave_values = [float(point[2]) for point in topology_vertices]
+    eave_range = max(eave_values) - min(eave_values) if eave_values else 0.0
+    snap_tolerance = max(
+        merge_scale * 4.0,
+        min(plan_scale * 5.0e-3, max(eave_range, plan_scale * 1.0e-6)),
+    )
+
+    def snap_same_source(group):
+        canonical = []
+        for loop in group:
+            snapped = []
+            for raw in loop:
+                point = tuple(float(v) for v in raw)
+                match = None
+                best = float("inf")
+                for index, candidate in enumerate(canonical):
+                    distance = _distance3(point, candidate)
+                    if distance <= snap_tolerance and distance < best:
+                        match = index
+                        best = distance
+                if match is None:
+                    canonical.append(point)
+                    snapped.append(point)
+                else:
+                    snapped.append(canonical[match])
+            return_group = False
+            if len(snapped) >= 3:
+                return_group = True
+            if return_group:
+                yield snapped
+
     for source_id in sorted(patches_by_source):
-        for loop in _merge_face_patches(
-            patches_by_source[source_id], merge_scale
-        ):
+        snapped_group = list(snap_same_source(patches_by_source[source_id]))
+        for loop in _merge_face_patches(snapped_group, merge_scale):
             if len(loop) >= 3:
                 face_loops.append((source_id, loop))
 
