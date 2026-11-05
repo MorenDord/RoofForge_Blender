@@ -1266,6 +1266,205 @@ def _build_boundary_aware_spatial_envelope(
 
 
 
+
+def _point_to_line_parameter(point, line_point, direction):
+    denominator = direction[0] * direction[0] + direction[1] * direction[1]
+    if denominator <= 1.0e-20:
+        return 0.0
+    return (
+        (point[0] - line_point[0]) * direction[0]
+        + (point[1] - line_point[1]) * direction[1]
+    ) / denominator
+
+
+def _plane_intersection_xy(plane_a, plane_b, eps):
+    a = float(plane_a[0]) - float(plane_b[0])
+    b = float(plane_a[1]) - float(plane_b[1])
+    c = float(plane_a[2]) - float(plane_b[2])
+    length = math.hypot(a, b)
+    if length <= eps:
+        return None
+    if abs(a) >= abs(b):
+        line_point = (-c / a, 0.0)
+    else:
+        line_point = (0.0, -c / b)
+    direction = (b / length, -a / length)
+    return line_point, direction
+
+
+def _segment_projection_interval_xy(segment, line_point, direction):
+    t0 = _point_to_line_parameter(segment[0], line_point, direction)
+    t1 = _point_to_line_parameter(segment[1], line_point, direction)
+    return min(t0, t1), max(t0, t1)
+
+
+def _segments_are_near_parallel(a, b, c, d, tolerance):
+    ab = (b[0] - a[0], b[1] - a[1])
+    cd = (d[0] - c[0], d[1] - c[1])
+    la = math.hypot(*ab)
+    lc = math.hypot(*cd)
+    if la <= tolerance or lc <= tolerance:
+        return False
+    cross = abs(ab[0] * cd[1] - ab[1] * cd[0]) / (la * lc)
+    return cross <= 0.05
+
+
+def _repair_internal_seam_loops(face_loops, planes, outline_vertices, eps, scale):
+    """Make near-coincident internal edges use one exact plane intersection segment."""
+    if len(face_loops) < 2:
+        return face_loops
+
+    outline = [
+        (float(vertex[0]), float(vertex[1]))
+        for vertex in outline_vertices
+    ]
+    match_tolerance = max(
+        eps * 100.0,
+        min(scale * 5.0e-3, max(scale * 1.0e-6, scale * 5.0e-3)),
+    )
+
+    def on_same_outline_edge(a, b):
+        for index, p in enumerate(outline):
+            q = outline[(index + 1) % len(outline)]
+            on_a, _, _ = _point_on_segment(
+                a[:2], p, q, match_tolerance
+            )
+            on_b, _, _ = _point_on_segment(
+                b[:2], p, q, match_tolerance
+            )
+            if on_a and on_b:
+                return True
+        return False
+
+    def segment_gap(a, b, c, d):
+        direct = max(
+            _distance2(a[:2], c[:2]),
+            _distance2(b[:2], d[:2]),
+        )
+        reverse = max(
+            _distance2(a[:2], d[:2]),
+            _distance2(b[:2], c[:2]),
+        )
+        return min(direct, reverse)
+
+    for _pass_index in range(4):
+        changed = False
+        edge_records = []
+        for face_index, (source_id, loop) in enumerate(face_loops):
+            for local_index, a in enumerate(loop):
+                b = loop[(local_index + 1) % len(loop)]
+                if _distance2(a[:2], b[:2]) <= eps:
+                    continue
+                if on_same_outline_edge(a, b):
+                    continue
+                edge_records.append(
+                    (face_index, source_id, local_index, a, b)
+                )
+
+        used_pairs = set()
+        for i, first in enumerate(edge_records):
+            face_a, source_a, index_a, a, b = first
+            for j in range(i + 1, len(edge_records)):
+                face_b, source_b, index_b, c, d = edge_records[j]
+                if face_a == face_b or source_a == source_b:
+                    continue
+                if (face_a, index_a) in used_pairs or (face_b, index_b) in used_pairs:
+                    continue
+                if segment_gap(a, b, c, d) > match_tolerance:
+                    continue
+                if not _segments_are_near_parallel(
+                    a[:2], b[:2], c[:2], d[:2], match_tolerance
+                ):
+                    continue
+
+                line = _plane_intersection_xy(
+                    planes[source_a],
+                    planes[source_b],
+                    max(eps, 1.0e-12),
+                )
+                if line is None:
+                    continue
+                line_point, direction = line
+                interval_a = _segment_projection_interval_xy(
+                    (a[:2], b[:2]), line_point, direction
+                )
+                interval_b = _segment_projection_interval_xy(
+                    (c[:2], d[:2]), line_point, direction
+                )
+                low = max(interval_a[0], interval_b[0])
+                high = min(interval_a[1], interval_b[1])
+                if high - low <= max(eps, 1.0e-8):
+                    continue
+
+                p0_xy = (
+                    line_point[0] + direction[0] * low,
+                    line_point[1] + direction[1] * low,
+                )
+                p1_xy = (
+                    line_point[0] + direction[0] * high,
+                    line_point[1] + direction[1] * high,
+                )
+                plane = planes[source_a]
+                p0 = (
+                    p0_xy[0],
+                    p0_xy[1],
+                    plane[0] * p0_xy[0]
+                    + plane[1] * p0_xy[1]
+                    + plane[2],
+                )
+                p1 = (
+                    p1_xy[0],
+                    p1_xy[1],
+                    plane[0] * p1_xy[0]
+                    + plane[1] * p1_xy[1]
+                    + plane[2],
+                )
+
+                loop_a = list(face_loops[face_a][1])
+                loop_b = list(face_loops[face_b][1])
+                old_a0 = loop_a[index_a]
+                old_a1 = loop_a[(index_a + 1) % len(loop_a)]
+                old_b0 = loop_b[index_b]
+                old_b1 = loop_b[(index_b + 1) % len(loop_b)]
+
+                if (
+                    _distance2(old_a0[:2], p0_xy)
+                    + _distance2(old_a1[:2], p1_xy)
+                    <= _distance2(old_a0[:2], p1_xy)
+                    + _distance2(old_a1[:2], p0_xy)
+                ):
+                    loop_a[index_a] = p0
+                    loop_a[(index_a + 1) % len(loop_a)] = p1
+                else:
+                    loop_a[index_a] = p1
+                    loop_a[(index_a + 1) % len(loop_a)] = p0
+
+                if (
+                    _distance2(old_b0[:2], p0_xy)
+                    + _distance2(old_b1[:2], p1_xy)
+                    <= _distance2(old_b0[:2], p1_xy)
+                    + _distance2(old_b1[:2], p0_xy)
+                ):
+                    loop_b[index_b] = p0
+                    loop_b[(index_b + 1) % len(loop_b)] = p1
+                else:
+                    loop_b[index_b] = p1
+                    loop_b[(index_b + 1) % len(loop_b)] = p0
+
+                face_loops[face_a] = (source_a, loop_a)
+                face_loops[face_b] = (source_b, loop_b)
+                used_pairs.add((face_a, index_a))
+                used_pairs.add((face_b, index_b))
+                changed = True
+                break
+            if changed:
+                break
+        if not changed:
+            break
+
+    return face_loops
+
+
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a roof from edge-specific pitches and a 3D eave loop.
 
