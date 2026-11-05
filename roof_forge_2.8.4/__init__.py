@@ -422,7 +422,9 @@ def _helper_owner(obj):
     if obj is None or not obj.get("roofforge_helper", False):
         return obj
     for constraint in obj.constraints:
-        if constraint.type == 'COPY_TRANSFORMS' and constraint.target is not None:
+        if (constraint.type == 'COPY_TRANSFORMS'
+                and constraint.name == "RoofForge Follow Roof"
+                and constraint.target is not None):
             target = constraint.target
             if target.type == 'MESH':
                 return target
@@ -1226,11 +1228,25 @@ def _flush_pending_roof_updates():
                 continue
             if update_kind == "interactive":
                 _rebuild_generated_roof(owner, rebuild_details=False)
-                _LAST_ROOF_UPDATE[key] = time.monotonic()
+                update_finished = time.monotonic()
+                _LAST_ROOF_UPDATE[key] = update_finished
                 if owner.get("roofforge_error", ""):
                     _PENDING_ROOF_FINALIZATIONS.pop(key, None)
                     owner["roofforge_interactive_mode"] = False
                     _hide_roof_helpers(owner, False)
+                else:
+                    # The solver itself may take longer than the idle grace
+                    # period. Start the detail-restoration pause only after the
+                    # new roof surface is available.
+                    pending_finalize = _PENDING_ROOF_FINALIZATIONS.get(key)
+                    if pending_finalize is not None:
+                        _PENDING_ROOF_FINALIZATIONS[key] = (
+                            owner,
+                            max(
+                                pending_finalize[1],
+                                update_finished + _INTERACTIVE_FINALIZE_DELAY,
+                            ),
+                        )
             elif update_kind == "roof":
                 _rebuild_generated_roof(owner, rebuild_details=True)
                 _LAST_ROOF_UPDATE[key] = time.monotonic()
@@ -1352,7 +1368,6 @@ _SPATIAL_PREVIEW_PATH = None
 _SPATIAL_PREVIEW_SIGNATURE = None
 _SPATIAL_PREVIEW_REQUEST = None
 _SPATIAL_PREVIEW_DUE = 0.0
-_SPATIAL_PREVIEW_DELAY = 0.18
 
 
 def _spatial_preview_png(
