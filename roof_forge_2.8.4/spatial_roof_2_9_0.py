@@ -1933,6 +1933,131 @@ def _build_planar_support_arrangement(points,planes,eps):
     return out_vertices,out_faces,out_sources
 
 
+
+def _build_triangulated_lower_envelope(points, planes, eps):
+    """Exact lower support-plane envelope inside a triangulated footprint."""
+    xy=[(float(p[0]),float(p[1])) for p in points]
+    triangles=_triangulate_xy(xy,eps)
+    patches=[]
+    split_eps=eps*5.0
+
+    def boundary_owner(poly):
+        owners=set()
+        for edge_id,(p,q) in enumerate(zip(xy,xy[1:]+xy[:1])):
+            for a,b in zip(poly,poly[1:]+poly[:1]):
+                oa,_,_=_point_on_segment(a,p,q,eps*10.0)
+                ob,_,_=_point_on_segment(b,p,q,eps*10.0)
+                if oa and ob and _distance2(a,b)>eps:
+                    owners.add(edge_id)
+        return next(iter(owners)) if len(owners)==1 else None
+
+    for triangle in triangles:
+        cells=[list(triangle)]
+        for i in range(len(planes)):
+            for j in range(i+1,len(planes)):
+                pa,pb=planes[i],planes[j]
+                a=pa[0]-pb[0]
+                b=pa[1]-pb[1]
+                cc=pa[2]-pb[2]
+                if math.hypot(a,b)<=eps:
+                    continue
+                split=[]
+                for cell in cells:
+                    split.extend(
+                        _split_polygon_by_line(cell,a,b,cc,split_eps)
+                    )
+                cells=split
+                if not cells:
+                    break
+            if not cells:
+                break
+
+        for cell in cells:
+            if len(cell)<3 or abs(_area(cell))<=eps*eps:
+                continue
+            forced=boundary_owner(cell)
+            centroid=_polygon_centroid_xy(cell)
+            source_id=(
+                forced
+                if forced is not None
+                else min(
+                    range(len(planes)),
+                    key=lambda source:_plane_value(
+                        planes[source],centroid[0],centroid[1]
+                    )
+                )
+            )
+            plane=planes[source_id]
+            lifted=[
+                (
+                    float(x),float(y),
+                    _plane_value(plane,float(x),float(y))
+                )
+                for x,y in cell
+            ]
+            if _area(cell)<0.0:
+                lifted.reverse()
+            patches.append((source_id,lifted))
+
+    if not patches:
+        raise SpatialRoofError(
+            "Не удалось построить патчи нижней огибающей внутри триангуляции."
+        )
+
+    # Use the established exact same-source boundary union, then canonicalize
+    # the shared 3D edges once globally.
+    grouped=defaultdict(list)
+    for source_id,patch in patches:
+        grouped[int(source_id)].append(patch)
+
+    face_loops=[]
+    merge_scale=max(eps*10.0,1.0e-8)
+    for source_id,group in sorted(grouped.items()):
+        for loop in _merge_face_patches(group,merge_scale):
+            if len(loop)>=3:
+                face_loops.append((source_id,loop))
+
+    if not face_loops:
+        raise SpatialRoofError(
+            "После объединения патчей нижней огибающей не осталось граней."
+        )
+
+    vertices=[]
+    faces=[]
+    sources=[]
+    buckets=defaultdict(list)
+
+    def add_vertex(point):
+        key=tuple(int(round(float(v)/merge_scale)) for v in point)
+        for index in buckets[key]:
+            if _distance3(vertices[index],point)<=merge_scale*2.0:
+                return index
+        index=len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        buckets[key].append(index)
+        return index
+
+    for source_id,loop in face_loops:
+        face=[add_vertex(point) for point in loop]
+        clean=[]
+        for index in face:
+            if not clean or clean[-1]!=index:
+                clean.append(index)
+        if len(clean)>1 and clean[0]==clean[-1]:
+            clean.pop()
+        if len(clean)<3:
+            continue
+        if _area([(vertices[i][0],vertices[i][1]) for i in clean])<0.0:
+            clean.reverse()
+        faces.append(tuple(clean))
+        sources.append(int(source_id))
+
+    vertices,faces,sources=_merge_coplanar_roof_faces(
+        vertices,faces,sources,scale=max(merge_scale,eps*10.0)
+    )
+    return vertices,faces,sources
+
+
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a roof from edge-specific pitches and a 3D eave loop.
 
@@ -2035,7 +2160,7 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    vertices,faces,sources=_build_planar_support_arrangement(
+    vertices,faces,sources=_build_triangulated_lower_envelope(
         points,planes,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
