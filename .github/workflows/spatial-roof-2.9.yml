@@ -25,10 +25,6 @@ jobs:
         continue-on-error: true
         working-directory: roof_forge_2.8.4
         run: python -m unittest -v test_weighted_skeleton_2_9_0.py
-      - name: Diagnostic nonplanar concave seam (non-gating)
-        continue-on-error: true
-        working-directory: roof_forge_2.8.4
-        run: python -m unittest -v test_spatial_debug_2_9_0.py
       - name: Run existing geometry regressions
         working-directory: roof_forge_2.8.4
         run: >-
@@ -100,3 +96,18 @@ jobs:
           path: ${{ runner.temp }}/roof_forge_dist/roof_forge_2.9.0.zip
           if-no-files-found: error
           retention-days: 30
+
+  spatial-arrangement-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile diagnostic modules
+        working-directory: roof_forge_2.8.4
+        run: python -m py_compile spatial_roof_2_9_0.py test_spatial_debug_2_9_0.py
+      - name: Run diagnostic
+        continue-on-error: true
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_spatial_debug_2_9_0.py
