@@ -352,7 +352,7 @@ def _extrude_mesh_global_z(vertices, faces, local_offset):
     return out_vertices, out_faces
 
 
-def _replace_mesh_data(obj, name, vertices, faces, seam_edges=None):
+def _replace_mesh_data(obj, name, vertices, faces, seam_edges=None, face_source_ids=None):
     """Replace mesh data without remeshing, dissolving, smoothing or subdividing.
 
     The polygons passed by the roof solver are the intended mathematical faces.
@@ -372,6 +372,16 @@ def _replace_mesh_data(obj, name, vertices, faces, seam_edges=None):
         mesh.update()
     for polygon in mesh.polygons:
         polygon.use_smooth = False
+    if face_source_ids is not None:
+        if len(face_source_ids) != len(mesh.polygons):
+            raise RoofForgeError(
+                "Число face-source меток не совпадает с числом граней итогового меша."
+            )
+        face_attribute = mesh.attributes.new(
+            name="roofforge_face_source", type="INT", domain="FACE"
+        )
+        for index, source_id in enumerate(face_source_ids):
+            face_attribute.data[index].value = int(source_id)
     if seam_edges:
         marked = {
             (int(edge[0]), int(edge[1])) if int(edge[0]) < int(edge[1])
@@ -465,6 +475,53 @@ def _mesh_boundary_segments(vertices, faces):
 
 
 def _world_surface_from_mesh_object(roof_obj):
+    """Extract upward roof facets, preserving generated per-face source tags."""
+    source_mesh = roof_obj.data
+    source_attribute = (
+        source_mesh.attributes.get("roofforge_face_source")
+        if source_mesh is not None else None
+    )
+    if source_attribute is not None and len(source_attribute.data) == len(source_mesh.polygons):
+        transform = roof_obj.matrix_world
+        world_points = [transform @ vertex.co for vertex in source_mesh.vertices]
+        source_faces = []
+        face_sources = []
+        for polygon in source_mesh.polygons:
+            source_id = int(source_attribute.data[polygon.index].value)
+            # -2: transition cap, -3: underside, -4: thickness sidewall.
+            # -1 remains a real overhang facet and can carry a panel to eave.
+            if source_id in (-2, -3, -4) or len(polygon.vertices) < 3:
+                continue
+            coords = [world_points[index] for index in polygon.vertices]
+            nx = ny = nz = 0.0
+            for i, point in enumerate(coords):
+                nxt = coords[(i + 1) % len(coords)]
+                nx += (point.y - nxt.y) * (point.z + nxt.z)
+                ny += (point.z - nxt.z) * (point.x + nxt.x)
+                nz += (point.x - nxt.x) * (point.y + nxt.y)
+            length = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if length <= 1.0e-12 or nz / length <= 0.05:
+                continue
+            source_faces.append(tuple(int(index) for index in polygon.vertices))
+            face_sources.append(source_id)
+
+        if not source_faces:
+            raise RoofForgeError(
+                "В меше не найдены верхние скаты, пригодные для построения фальцев."
+            )
+        used = sorted({index for face in source_faces for index in face})
+        remap = {old: new for new, old in enumerate(used)}
+        surface_vertices = [
+            (float(world_points[index].x), float(world_points[index].y), float(world_points[index].z))
+            for index in used
+        ]
+        surface_faces = [tuple(remap[index] for index in face) for face in source_faces]
+        ridge_graph = extract_roof_seams(
+            surface_vertices, surface_faces, face_sources, []
+        )
+        boundary_edges = _mesh_boundary_segments(surface_vertices, surface_faces)
+        return surface_vertices, surface_faces, ridge_graph, boundary_edges
+
     """Extract evaluated upward-facing roof facets without changing the source.
 
     Modifiers are evaluated first, then a temporary BMesh dissolves tiny
@@ -727,7 +784,7 @@ def _rebuild_standing_seams_for_mesh(roof_obj):
     roof_obj['roofforge_standing_updating'] = True
     try:
         settings = roof_obj.roofforge_settings
-        if settings.show_standing_seams and not is_spatial:
+        if settings.show_standing_seams:
             standing_obj = _ensure_helper_object(
                 roof_obj, "_StandingSeams", "roofforge_standing_seams_object"
             )
@@ -875,7 +932,26 @@ def _rebuild_generated_roof(roof_obj):
             cap_surface_vertices = list(surface_vertices)
             profile_cap_surface_vertices = list(profile_vertices)
 
-        _replace_mesh_data(roof_obj, roof_obj.name + "_Mesh", mesh_vertices, mesh_faces)
+        mesh_face_source_ids = None
+        if is_spatial or has_edge_pitches:
+            surface_face_count = len(surface_faces)
+            if len(mesh_faces) == surface_face_count:
+                mesh_face_source_ids = [int(source_id) for source_id in face_source_ids]
+            elif len(mesh_faces) >= surface_face_count * 2:
+                sidewall_count = len(mesh_faces) - surface_face_count * 2
+                mesh_face_source_ids = (
+                    [-3] * surface_face_count
+                    + [int(source_id) for source_id in face_source_ids]
+                    + [-4] * sidewall_count
+                )
+            else:
+                raise RoofForgeError(
+                    "Не удалось сопоставить source ID с верхом/низом/стенками меша крыши."
+                )
+        _replace_mesh_data(
+            roof_obj, roof_obj.name + "_Mesh", mesh_vertices, mesh_faces,
+            face_source_ids=mesh_face_source_ids
+        )
         _update_roof_modifiers(roof_obj, settings)
         if is_spatial or has_edge_pitches:
             _store_spatial_profile_source_mesh(
@@ -947,7 +1023,7 @@ def _rebuild_generated_roof(roof_obj):
             # standalone profile workflow are refreshed from their current mesh.
             _rebuild_existing_roof_profiles(roof_obj, ("RIDGE", "VALLEY"))
 
-        if settings.show_standing_seams and not is_spatial:
+        if settings.show_standing_seams:
             standing_obj = _ensure_helper_object(
                 roof_obj, "_StandingSeams", "roofforge_standing_seams_object"
             )
@@ -1013,9 +1089,8 @@ def _settings_update(self, context):
         _rebuild_existing_roof_profiles(owner)
     if owner.get("roofforge_standing_source", False):
         _rebuild_standing_seams_for_mesh(owner)
-    elif owner.get("roofforge_generated", False) and owner.get("roofforge_spatial", False):
-        # 3D panel layout is intentionally withheld until its spatial seam graph exists.
-        return
+    elif owner.get("roofforge_generated", False) and owner.roofforge_settings.show_standing_seams:
+        _rebuild_standing_seams_for_mesh(owner)
 
 
 def _profile_settings_update(self, context):
@@ -1843,26 +1918,23 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
         seam_box = layout.box()
         seam_box.label(text="Фальцевая кровля", icon='MOD_ARRAY')
         if is_generated or is_standing_source:
-            if is_spatial_generated:
-                seam_box.label(text="Фальцы для пространственного карниза пока не включены.", icon='INFO')
-            else:
-                seam_box.prop(settings, "show_standing_seams")
-                if settings.show_standing_seams:
-                    seam_box.prop(settings, "standing_panel_width")
-                    seam_box.prop(settings, "standing_seam_height")
-                    seam_box.prop(settings, "standing_seam_width")
-                    seam_box.prop(settings, "standing_end_offset")
-                    if is_standing_source:
-                        seam_box.prop(settings, "thickness", text="Толщина для заглубления")
-                        seam_box.prop(settings, "ridge_extrusion", text="Высота ограничивающего конька")
-                    effective = float(roof_obj.get("roofforge_standing_effective_height", 0.0))
-                    seam_box.label(text=f"Фактическая высота: {effective:.4f} м")
-                    seam_box.label(text="Высота по нормали; лимит 90% от конька.", icon='INFO')
-                    seam_box.label(text="Две продольные кромки плеча фальца помечены Seam.", icon='INFO')
-                    seam_error = roof_obj.get("roofforge_standing_error", "")
-                    if seam_error:
-                        seam_box.alert = True
-                        seam_box.label(text=seam_error[:100], icon='ERROR')
+            seam_box.prop(settings, "show_standing_seams")
+            if settings.show_standing_seams:
+                seam_box.prop(settings, "standing_panel_width")
+                seam_box.prop(settings, "standing_seam_height")
+                seam_box.prop(settings, "standing_seam_width")
+                seam_box.prop(settings, "standing_end_offset")
+                if is_standing_source:
+                    seam_box.prop(settings, "thickness", text="Толщина для заглубления")
+                    seam_box.prop(settings, "ridge_extrusion", text="Высота ограничивающего конька")
+                effective = float(roof_obj.get("roofforge_standing_effective_height", 0.0))
+                seam_box.label(text=f"Фактическая высота: {effective:.4f} м")
+                seam_box.label(text="Высота по нормали; лимит 90% от конька.", icon='INFO')
+                seam_box.label(text="Две продольные кромки плеча фальца помечены Seam.", icon='INFO')
+                seam_error = roof_obj.get("roofforge_standing_error", "")
+                if seam_error:
+                    seam_box.alert = True
+                    seam_box.label(text=seam_error[:100], icon='ERROR')
         else:
             scene_settings = context.scene.roofforge_settings
             seam_box.prop(scene_settings, "show_standing_seams")
