@@ -495,10 +495,14 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
         source_id = int(sources[face_index])
         if source_id >= 0:
             plane = planes[source_id]
-            for point in points:
-                if _plane_residual(plane, point) > plane_eps:
+            for local_index, point in zip(face, points):
+                residual = _plane_residual(plane, point)
+                if residual > plane_eps:
                     raise SpatialRoofError(
-                        "Один из скатов не лежит на своей опорной плоскости после совмещения узлов."
+                        "Скат {}: вершина {} {} отклоняется от опорной плоскости на {:.6g} м "
+                        "(допуск {:.6g} м).".format(
+                            face_index + 1, local_index, point, residual, plane_eps
+                        )
                     )
         area = _area([(p[0], p[1]) for p in points])
         if area <= eps * eps:
