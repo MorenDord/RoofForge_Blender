@@ -36,11 +36,8 @@ from .straight_skeleton_2_6_0 import (
     build_inset_seam_profile_mesh,
 )
 from .standing_seams_2_6_0 import build_standing_seam_mesh
-from .spatial_roof_2_8_4 import (
-    build_spatial_roof_mesh,
-    extend_spatial_roof_eaves,
-    SpatialRoofError,
-)
+from .spatial_roof_2_8_4 import extend_spatial_roof_eaves
+from .spatial_roof_2_9_0 import build_spatial_roof_mesh, SpatialRoofError
 
 
 # -----------------------------------------------------------------------------
