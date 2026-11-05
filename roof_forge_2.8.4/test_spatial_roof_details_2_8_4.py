@@ -148,6 +148,39 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertTrue(any(abs(v[2]) > 0.0 for v in profile_vertices))
 
 
+
+    def test_existing_roof_profiles_accept_millimetre_face_warp(self):
+        vertices = [
+            (-1.0, 0.0, 1.0), (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.2), (-1.0, 1.0, 1.2),
+            (1.0, 0.0, 1.0), (1.0, 1.0, 1.2005),
+        ]
+        faces = [(0, 1, 2, 3), (1, 4, 5, 2)]
+        seams = extract_roof_seams(vertices, faces, [-1, -1], [])
+        valleys = [edge for edge in seams if edge[4] == "VALLEY"]
+        self.assertEqual(len(valleys), 1)
+        profile_vertices, profile_faces = build_inset_seam_profile_mesh(
+            vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
+            end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
+        )
+        self.assertTrue(profile_vertices)
+        self.assertTrue(profile_faces)
+        self.assertTrue(all(count == 2 for count in edge_uses(profile_faces).values()))
+
+    def test_existing_roof_profiles_reject_large_face_warp(self):
+        vertices = [
+            (-1.0, 0.0, 1.0), (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.2), (-1.0, 1.0, 1.2),
+            (1.0, 0.0, 1.0), (1.0, 1.0, 1.25),
+        ]
+        faces = [(0, 1, 2, 3), (1, 4, 5, 2)]
+        seams = extract_roof_seams(vertices, faces, [-1, -1], [])
+        with self.assertRaisesRegex(ValueError, "слишком сильно отклоняется"):
+            build_inset_seam_profile_mesh(
+                vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
+                end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
+            )
+
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
         pitches = list(reversed(self.pitches))
