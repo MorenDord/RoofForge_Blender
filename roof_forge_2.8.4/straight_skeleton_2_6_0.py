@@ -1793,7 +1793,9 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
             queue_order = _enqueue_missing_wavefront_events(
                 slav, current_time, event_mode, event_queue, queue_order
             )
-            tried_event_modes.clear()
+            # A weighted wavefront cannot fall back to the unweighted event
+            # equations: that would silently change the requested roof slopes.
+            tried_event_modes = {False} if edge_speeds is not None else set()
         else:
             for new_event in new_events:
                 queue_order += 1
