@@ -1329,8 +1329,6 @@ def _standing_seam_settings_update(self, context):
         owner.get("roofforge_generated", False)
         or owner.get("roofforge_standing_source", False)
     ):
-        if owner.get("roofforge_spatial", False):
-            return
         _rebuild_standing_seams_for_mesh(owner)
 
 
