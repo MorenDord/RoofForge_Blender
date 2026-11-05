@@ -1205,7 +1205,7 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
                 if inside(p,poly):
                     d=boundary_distance(p,poly)
                     if d>score: best,score=p,d
-        return best
+        return best, max(0.0, score)
 
     glyphs={
       '0':('111','101','101','101','111'),'1':('010','110','010','010','111'),
@@ -1223,8 +1223,18 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
         if source < 0:
             continue
         label=str(source+1)
-        cx,cy=screen(label_anchor(poly))
-        cell=max(2,int(round(size/160.0))*ss)
+        anchor, clearance = label_anchor(poly)
+        # Fit each fixed-style label to the local facet clearance. This keeps
+        # the digits centred and prevents them from touching narrow facet rims.
+        available_radius = clearance * scale * ss * 0.78
+        glyph_radius_per_cell = math.hypot(2.0*len(label)-0.5, 2.5)
+        fit_cell = int(math.floor(
+            available_radius / max(glyph_radius_per_cell, 1.0e-9)
+        ))
+        if fit_cell < 2:
+            continue
+        cell=min(max(2,int(round(size/160.0))*ss),fit_cell)
+        cx,cy=screen(anchor)
         gw,gh=3*cell,5*cell
         width=len(label)*(gw+cell)-cell
         sx,sy=int(round(cx-width/2)),int(round(cy-gh/2))
