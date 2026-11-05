@@ -1998,8 +1998,16 @@ def _build_planar_support_arrangement(points,planes,eps):
         if not meta or not any(
             sa in pair and sb in pair for pair in meta["pairs"]
         ):
+            a_vertex,b_vertex=edge_key
             raise SpatialRoofError(
-                "Arrangement-ячейки получили несовместимые источники по внутреннему ребру."
+                "Arrangement-ячейки получили несовместимые источники: "
+                "edge {}-{} XY=({:.6f},{:.6f})->({:.6f},{:.6f}), "
+                "sources=({},{}), allowed_pairs={}.".format(
+                    a_vertex,b_vertex,
+                    vertices[a_vertex][0],vertices[a_vertex][1],
+                    vertices[b_vertex][0],vertices[b_vertex][1],
+                    sa,sb,sorted(meta["pairs"]) if meta else []
+                )
             )
 
     # Lift arrangement cells to their own support planes. Shared XY points
