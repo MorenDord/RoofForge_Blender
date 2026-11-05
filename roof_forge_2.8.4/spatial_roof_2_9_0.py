@@ -658,14 +658,20 @@ def _weld_nearby_spatial_event_vertices(vertices, faces, sources, outline, eps, 
                 return True
         return False
 
+    vertex_faces=[set() for _ in vertices]
+    for face_index,face in enumerate(faces):
+        for vertex_id in face:
+            vertex_faces[vertex_id].add(face_index)
+
     welded=[]
     counts=[]
     sums=[]
     boundary_fixed=[]
+    cluster_faces=[]
     buckets=defaultdict(list)
     old_to_new=[]
 
-    for raw in vertices:
+    for old_vertex_id,raw in enumerate(vertices):
         point=tuple(float(v) for v in raw)
         if is_boundary(point):
             index=len(welded)
@@ -673,6 +679,7 @@ def _weld_nearby_spatial_event_vertices(vertices, faces, sources, outline, eps, 
             counts.append(1)
             sums.append(list(point))
             boundary_fixed.append(True)
+            cluster_faces.append(set(vertex_faces[old_vertex_id]))
             old_to_new.append(index)
             continue
 
@@ -685,6 +692,10 @@ def _weld_nearby_spatial_event_vertices(vertices, faces, sources, outline, eps, 
                     for candidate_id in buckets.get((cell[0]+dx,cell[1]+dy,cell[2]+dz),()):
                         if boundary_fixed[candidate_id]:
                             continue
+                        if vertex_faces[old_vertex_id] & cluster_faces[candidate_id]:
+                            # Never collapse two distinct corners of the same
+                            # source facet into one welded event vertex.
+                            continue
                         distance=_distance3(point,welded[candidate_id])
                         if distance<=event_tolerance and distance<best_distance:
                             best,best_distance=candidate_id,distance
@@ -694,11 +705,13 @@ def _weld_nearby_spatial_event_vertices(vertices, faces, sources, outline, eps, 
             counts.append(1)
             sums.append(list(point))
             boundary_fixed.append(False)
+            cluster_faces.append(set(vertex_faces[old_vertex_id]))
             buckets[cell].append(best)
         else:
             for axis in range(3):
                 sums[best][axis]+=point[axis]
             counts[best]+=1
+            cluster_faces[best].update(vertex_faces[old_vertex_id])
             welded[best]=tuple(value/counts[best] for value in sums[best])
         old_to_new.append(best)
 
