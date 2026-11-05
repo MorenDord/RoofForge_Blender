@@ -2160,8 +2160,25 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    vertices,faces,sources=_build_triangulated_lower_envelope(
-        points,planes,eps
+    # Non-planar eaves keep the stable XY event topology. The 3D geometry
+    # is then clipped by exact pairwise support-plane seams only between
+    # source facets that are actual neighbours in that topology.
+    try:
+        topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+            xy,1.0,0.0,allow_oblique=True
+        )
+    except SkeletonError as exc:
+        raise SpatialRoofError(
+            "Не удалось получить устойчивую XY-топологию неплоской крыши: "+str(exc)
+        ) from exc
+
+    adjacency=_derive_source_adjacency(
+        topology_vertices,topology_faces,topology_sources,
+        max(eps*10.0,1.0e-8)
+    )
+    vertices,faces,sources=_build_mask_clipped_spatial_roof(
+        topology_vertices,topology_faces,topology_sources,
+        planes,adjacency,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
