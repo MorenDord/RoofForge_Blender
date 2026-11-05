@@ -732,6 +732,60 @@ def _envelope_vertex_index(point, vertices, buckets, tolerance):
     return best
 
 
+def _split_convex_polygon_by_line(poly, a, b, c, value_eps, point_eps):
+    """Split a convex polygon into its two half-plane pieces, if crossed."""
+    if not poly:
+        return []
+    values=[a*p[0]+b*p[1]+c for p in poly]
+    if min(values) >= -value_eps or max(values) <= value_eps:
+        return [poly]
+    negative=_clip_convex_polygon_halfplane(poly,a,b,c,value_eps,point_eps)
+    positive=_clip_convex_polygon_halfplane(poly,-a,-b,-c,value_eps,point_eps)
+    pieces=[]
+    for piece in (negative,positive):
+        if len(piece)>=3 and abs(_area(piece))>point_eps*point_eps:
+            pieces.append(piece)
+    return pieces
+
+
+def _partition_footprint_by_edge_projection(triangles, outline, eps, scale):
+    """Partition the footprint where every edge's finite projection status is constant."""
+    cells=list(triangles)
+    value_eps=max(eps*20.0,scale*1.0e-9)
+    point_eps=max(eps*10.0,scale*1.0e-10)
+    for edge_id,p in enumerate(outline):
+        q=outline[(edge_id+1)%len(outline)]
+        dx=q[0]-p[0]
+        dy=q[1]-p[1]
+        # Projection t=0 and t=1 are the perpendicular endpoint planes.
+        lines=((dx,dy,-dx*p[0]-dy*p[1]),
+               (dx,dy,-dx*q[0]-dy*q[1]))
+        for a,b,c in lines:
+            next_cells=[]
+            for cell in cells:
+                next_cells.extend(_split_convex_polygon_by_line(
+                    cell,a,b,c,value_eps,point_eps
+                ))
+            cells=next_cells
+    return cells
+
+
+def _eligible_edge_ids_for_cell(cell, outline, eps):
+    centroid=(sum(p[0] for p in cell)/len(cell),sum(p[1] for p in cell)/len(cell))
+    result=[]
+    for edge_id,p in enumerate(outline):
+        q=outline[(edge_id+1)%len(outline)]
+        dx=q[0]-p[0]
+        dy=q[1]-p[1]
+        length_sq=dx*dx+dy*dy
+        if length_sq<=eps*eps:
+            continue
+        t=((centroid[0]-p[0])*dx+(centroid[1]-p[1])*dy)/length_sq
+        if -1.0e-8<=t<=1.0+1.0e-8:
+            result.append(edge_id)
+    return result
+
+
 def _build_spatial_roof_mesh_envelope(points, pitches, planes, eps, scale):
     """Build the exact lower envelope of the 3D edge-support planes.
 
@@ -744,6 +798,9 @@ def _build_spatial_roof_mesh_envelope(points, pitches, planes, eps, scale):
     """
     polygon_xy = [(p[0], p[1]) for p in points]
     triangles = _triangulate_footprint_xy(polygon_xy, eps)
+    cells = _partition_footprint_by_edge_projection(
+        triangles, polygon_xy, eps, scale
+    )
 
     value_eps = max(eps * 50.0, scale * 1.0e-8)
     point_eps = max(eps * 20.0, scale * 1.0e-9)
@@ -764,9 +821,16 @@ def _build_spatial_roof_mesh_envelope(points, pitches, planes, eps, scale):
     for source_id in representatives:
         source_plane = planes[source_id]
         patches = []
-        for triangle in triangles:
-            clipped = list(triangle)
-            for other_id in representatives:
+        for cell in cells:
+            eligible = _eligible_edge_ids_for_cell(cell, polygon_xy, eps)
+            if source_id not in eligible:
+                continue
+            active_planes = [
+                other_id for other_id in representatives
+                if other_id in eligible
+            ]
+            clipped = list(cell)
+            for other_id in active_planes:
                 if other_id == source_id or not clipped:
                     continue
                 other_plane = planes[other_id]
