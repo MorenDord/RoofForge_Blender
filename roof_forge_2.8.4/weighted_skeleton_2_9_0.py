@@ -804,19 +804,11 @@ def _merge_face_patches(patches, scale):
         if _newell_normal(clean)[2] < 0.0:
             clean.reverse()
 
-        # Coincident split/collapse times can emit an identical swept cell
-        # twice. Deduplicate only the exact same cyclic boundary; partially
-        # overlapping cells still trigger the manifold boundary validator.
-        patch_ids = [point_keys[tuple(float(v) for v in point)] for point in clean]
-        start_index = min(
-            range(len(patch_ids)),
-            key=lambda index: tuple(patch_ids[index:] + patch_ids[:index]),
-        )
-        patch_key = tuple(patch_ids[start_index:] + patch_ids[:start_index])
-        if patch_key in seen_patch_loops:
-            continue
-        seen_patch_loops.add(patch_key)
-
+        # Split every edge at all canonical source vertices before comparing
+        # patch identity. This also recognizes duplicate swept cells when one
+        # event emitted a collinear vertex that the other emission omitted.
+        split_segments = []
+        split_patch_ids = []
         for i, a in enumerate(clean):
             b = clean[(i + 1) % len(clean)]
             ab = _sub3(b, a)
@@ -844,8 +836,27 @@ def _merge_face_patches(patches, scale):
                 k1 = point_keys[tuple(float(v) for v in p1)]
                 if k0 == k1:
                     continue
-                undirected = (k0, k1) if k0 < k1 else (k1, k0)
-                signed_uses[undirected] += 1 if (k0, k1) == undirected else -1
+                split_patch_ids.append(k0)
+                split_segments.append((k0, k1))
+
+        if not split_segments:
+            continue
+        start_index = min(
+            range(len(split_patch_ids)),
+            key=lambda index: tuple(
+                split_patch_ids[index:] + split_patch_ids[:index]
+            ),
+        )
+        patch_key = tuple(
+            split_patch_ids[start_index:] + split_patch_ids[:start_index]
+        )
+        if patch_key in seen_patch_loops:
+            continue
+        seen_patch_loops.add(patch_key)
+
+        for k0, k1 in split_segments:
+            undirected = (k0, k1) if k0 < k1 else (k1, k0)
+            signed_uses[undirected] += 1 if (k0, k1) == undirected else -1
 
     boundary_edges = []
     for undirected, signed_count in signed_uses.items():
