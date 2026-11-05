@@ -474,7 +474,11 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                     continue
                 c, d = face[j], face[(j + 1) % count]
                 if _proper_segment_cross(vertices[a], vertices[b], vertices[c], vertices[d], cross_eps):
-                    raise SpatialRoofError("Граница одного пространственного ската самопересекается.")
+                    raise SpatialRoofError(
+                        "Граница пространственного ската {} самопересекается: {}.".format(
+                            sources[face_index], points
+                        )
+                    )
             key = tuple(sorted((a, b)))
             edge_uses[key].append((face_index, a, b))
             if len(edge_uses[key]) > 2:
