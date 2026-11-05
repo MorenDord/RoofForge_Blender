@@ -1409,10 +1409,10 @@ def _repair_internal_seam_loops(face_loops, planes, outline, eps, scale):
                 line_point, direction = line
 
                 interval_a = _segment_projection_interval_xy(
-                    a[:2], line_point, direction
+                    (a[:2], b[:2]), line_point, direction
                 )
                 interval_b = _segment_projection_interval_xy(
-                    c[:2], line_point, direction
+                    (c[:2], d[:2]), line_point, direction
                 )
                 low = max(interval_a[0], interval_b[0])
                 high = min(interval_a[1], interval_b[1])
