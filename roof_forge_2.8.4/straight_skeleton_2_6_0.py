@@ -2458,7 +2458,7 @@ def build_inset_seam_profile_mesh(
     tolerance = max(1.0e-8, scale * 1.0e-8)
     xy_epsilon = max(1.0e-10, scale * 1.0e-10)
     weld_tolerance = max(1.0e-8, scale * 1.0e-8)
-    input_face_planarity_tolerance = max(1.0e-5, scale * 5.0e-4)
+    input_face_planarity_tolerance = max(1.0e-5, scale * 2.0e-3)
     output_quad_planarity_tolerance = max(1.0e-10, scale * 1.0e-10)
 
     def point_key3(point):
