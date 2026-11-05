@@ -734,6 +734,7 @@ def _reconcile_weighted_spatial_mesh_xy(vertices, faces, sources, outline, eps, 
     canonical = []
     counts = []
     sums = []
+    boundary_fixed = []
     buckets = defaultdict(list)
     old_to_new = []
 
@@ -757,12 +758,14 @@ def _reconcile_weighted_spatial_mesh_xy(vertices, faces, sources, outline, eps, 
                 canonical.append(point)
                 counts.append(0)
                 sums.append([0.0, 0.0, 0.0])
+                boundary_fixed.append(False)
                 buckets[cell].append(best)
             # Boundary coordinates are fixed by the input loop, not averaged
             # with an interior plane intersection that happens to be nearby.
             canonical[best] = point
             counts[best] = 1
             sums[best] = [point[0], point[1], point[2]]
+            boundary_fixed[best] = True
             old_to_new.append(best)
             continue
 
@@ -781,13 +784,14 @@ def _reconcile_weighted_spatial_mesh_xy(vertices, faces, sources, outline, eps, 
             canonical.append(point)
             counts.append(0)
             sums.append([0.0, 0.0, 0.0])
+            boundary_fixed.append(False)
             buckets[cell].append(best)
-        if counts[best] == 0:
+        if not boundary_fixed[best]:
             sums[best][0] += point[0]
             sums[best][1] += point[1]
             sums[best][2] += point[2]
             counts[best] += 1
-            canonical[best] = tuple(sums[best])
+            canonical[best] = tuple(value / counts[best] for value in sums[best])
         old_to_new.append(best)
 
     remapped_faces = []
