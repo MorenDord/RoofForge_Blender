@@ -682,7 +682,11 @@ def _collapse_near_event_slivers(vertices, faces, sources, outline, eps, scale):
             face=faces[face_index]
             if not adjacent_in_face(face,a_id,b_id):
                 return False
-            if face_areas[face_index]>sliver_area_tolerance:
+            # In an n-gon, merging two adjacent near-coincident corners only
+            # removes a microscopic boundary edge and preserves the rest of
+            # the facet. A triangular face can disappear entirely, so it is
+            # allowed only when the whole projected triangle is a true sliver.
+            if len(face)<=3 and face_areas[face_index]>sliver_area_tolerance:
                 return False
         return True
 
