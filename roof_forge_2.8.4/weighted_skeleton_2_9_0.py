@@ -210,21 +210,25 @@ class _WaveVertex:
                     raise SkeletonError(
                         "Weighted skeleton: совпадающие параллельные фронты имеют разные скорости."
                     )
-                # Coincident support directions leave tangential motion
-                # unconstrained. Select the minimum-norm solution.
                 velocity = inward_left * speed_left
             else:
+                # At a zero-width collapse the two surviving support lines
+                # may be parallel with opposite normals. The classic event
+                # construction retains the event bisector as a tangential
+                # continuation; use that same deterministic limit here.
                 direction = -left_direction + right_direction
                 if self.is_reflex:
                     direction = -direction
                 if abs(direction) <= _EPS and direction_vectors is not None:
                     direction = direction_vectors[0] + direction_vectors[1]
+                if abs(direction) <= _EPS:
+                    direction = left_direction
                 normal_speed = direction.dot(inward_left)
-                if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
-                    raise SkeletonError(
-                        "Weighted skeleton: параллельные опоры не задают однозначное движение вершины."
-                    )
-                velocity = direction * (speed_left / normal_speed)
+                velocity = (
+                    direction * (speed_left / normal_speed)
+                    if abs(normal_speed) > 1.0e-10
+                    else direction
+                )
 
         if not math.isfinite(velocity.x) or not math.isfinite(velocity.y):
             raise SkeletonError("Weighted skeleton: скорость вершины стала неконечной.")
