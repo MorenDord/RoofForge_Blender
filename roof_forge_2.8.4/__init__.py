@@ -1186,6 +1186,9 @@ def _profile_settings_update(self, context):
 _SPATIAL_PREVIEW_COLLECTION = None
 _SPATIAL_PREVIEW_PATH = None
 _SPATIAL_PREVIEW_SIGNATURE = None
+_SPATIAL_PREVIEW_REQUEST = None
+_SPATIAL_PREVIEW_DUE = 0.0
+_SPATIAL_PREVIEW_DELAY = 0.18
 
 
 def _spatial_preview_png(
@@ -1339,8 +1342,54 @@ def _spatial_preview_png(
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',size,size,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,6))+chunk(b'IEND',b'')
 
 
-def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None):
+def _flush_spatial_preview_request():
+    global _SPATIAL_PREVIEW_REQUEST,_SPATIAL_PREVIEW_DUE
     global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
+    request = _SPATIAL_PREVIEW_REQUEST
+    if request is None:
+        return None
+    now = time.monotonic()
+    if now < _SPATIAL_PREVIEW_DUE:
+        return max(0.03, _SPATIAL_PREVIEW_DUE - now)
+
+    (points, pitch_angles, facet_polygons, source_ids,
+     signature, area) = request
+    _SPATIAL_PREVIEW_REQUEST = None
+    try:
+        if _SPATIAL_PREVIEW_COLLECTION is None:
+            _SPATIAL_PREVIEW_COLLECTION = bpy.utils.previews.new()
+        if _SPATIAL_PREVIEW_PATH is None:
+            fd, _SPATIAL_PREVIEW_PATH = tempfile.mkstemp(
+                prefix="roofforge_spatial_", suffix=".png"
+            )
+            os.close(fd)
+        with open(_SPATIAL_PREVIEW_PATH, "wb") as handle:
+            handle.write(_spatial_preview_png(
+                points,
+                pitch_angles=pitch_angles,
+                facet_polygons=facet_polygons,
+                source_ids=source_ids,
+            ))
+        if "spatial_plan" in _SPATIAL_PREVIEW_COLLECTION:
+            del _SPATIAL_PREVIEW_COLLECTION["spatial_plan"]
+        _SPATIAL_PREVIEW_COLLECTION.load(
+            "spatial_plan", _SPATIAL_PREVIEW_PATH, "IMAGE"
+        )
+        _SPATIAL_PREVIEW_SIGNATURE = signature
+        try:
+            if area is not None:
+                area.tag_redraw()
+        except (ReferenceError, RuntimeError):
+            pass
+    except Exception:
+        # A failed preview should not block roof creation or other UI work.
+        _SPATIAL_PREVIEW_REQUEST = None
+    return None
+
+
+def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None, area=None):
+    global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
+    global _SPATIAL_PREVIEW_REQUEST,_SPATIAL_PREVIEW_DUE
     if not points or len(points)<3: return 0
     if pitch_angles is None: pitch_angles=[math.radians(35.0)]*len(points)
 
@@ -1377,6 +1426,28 @@ def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None):
         saved_mesh_signature,
     )
     try:
+        if roof_obj is None and signature != _SPATIAL_PREVIEW_SIGNATURE:
+            # The source-outline preview needs its own geometry solve. Delay it
+            # until the user pauses a slider drag, then redraw only that panel.
+            _SPATIAL_PREVIEW_REQUEST = (
+                [tuple(float(value) for value in point[:3]) for point in points],
+                list(pitch_angles),
+                facet_polygons,
+                source_ids,
+                signature,
+                area,
+            )
+            _SPATIAL_PREVIEW_DUE = time.monotonic() + _SPATIAL_PREVIEW_DELAY
+            if not bpy.app.timers.is_registered(_flush_spatial_preview_request):
+                bpy.app.timers.register(
+                    _flush_spatial_preview_request,
+                    first_interval=_SPATIAL_PREVIEW_DELAY,
+                )
+            if (_SPATIAL_PREVIEW_COLLECTION is not None
+                    and 'spatial_plan' in _SPATIAL_PREVIEW_COLLECTION):
+                return _SPATIAL_PREVIEW_COLLECTION['spatial_plan'].icon_id
+            return 0
+
         if _SPATIAL_PREVIEW_COLLECTION is None:
             _SPATIAL_PREVIEW_COLLECTION=bpy.utils.previews.new()
         if signature != _SPATIAL_PREVIEW_SIGNATURE:
@@ -1401,6 +1472,14 @@ def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None):
 
 def _clear_spatial_preview():
     global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
+    global _SPATIAL_PREVIEW_REQUEST,_SPATIAL_PREVIEW_DUE
+    _SPATIAL_PREVIEW_REQUEST = None
+    _SPATIAL_PREVIEW_DUE = 0.0
+    try:
+        if bpy.app.timers.is_registered(_flush_spatial_preview_request):
+            bpy.app.timers.unregister(_flush_spatial_preview_request)
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
     if _SPATIAL_PREVIEW_COLLECTION is not None:
         try: bpy.utils.previews.remove(_SPATIAL_PREVIEW_COLLECTION)
         except Exception: pass
@@ -1948,7 +2027,9 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
                 edge_box.label(text="План крыши — номера соответствуют скатам", icon='MESH_CIRCLE')
                 pitch_values = [float(getattr(settings, f"spatial_pitch_{i:02d}"))
                                 for i in range(1, min(len(spatial_outline), 32)+1)]
-                preview_icon = _get_spatial_preview_icon(spatial_outline, pitch_values)
+                preview_icon = _get_spatial_preview_icon(
+                    spatial_outline, pitch_values, area=context.area
+                )
                 if preview_icon:
                     region_width = max(240, getattr(context.region, "width", 320))
                     preview_scale = max(4.0, min(14.0, region_width / 42.0))
@@ -1980,7 +2061,7 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
                     roof_obj.get("roofforge_spatial_pitches", "[]")
                 ))
                 preview_icon = _get_spatial_preview_icon(
-                    spatial_outline, pitch_values, roof_obj=roof_obj
+                    spatial_outline, pitch_values, roof_obj=roof_obj, area=context.area
                 ) if spatial_outline else 0
                 if preview_icon:
                     region_width = max(240, getattr(context.region, "width", 320))
