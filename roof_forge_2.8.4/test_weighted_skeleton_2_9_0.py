@@ -91,6 +91,18 @@ class WeightedWavefrontTests(unittest.TestCase):
         loops = _merge_face_patches([patch, list(patch)], 2.0)
         self.assertEqual(len(loops), 1)
 
+    def test_collinear_duplicate_split_patch_is_counted_once(self):
+        base = [
+            (0.0, 0.0, 0.0), (2.0, 0.0, 0.4),
+            (2.0, 1.0, 0.6), (0.0, 1.0, 0.2),
+        ]
+        with_middle_vertex = [
+            (0.0, 0.0, 0.0), (1.0, 0.0, 0.2), (2.0, 0.0, 0.4),
+            (2.0, 1.0, 0.6), (0.0, 1.0, 0.2),
+        ]
+        loops = _merge_face_patches([base, with_middle_vertex], 2.0)
+        self.assertEqual(len(loops), 1)
+
     def test_partial_same_direction_overlap_is_still_rejected(self):
         first = [
             (0.0, 0.0, 0.0), (2.0, 0.0, 0.0),
