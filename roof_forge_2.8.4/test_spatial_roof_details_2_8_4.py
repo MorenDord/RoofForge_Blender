@@ -4,6 +4,7 @@ import unittest
 from collections import Counter, defaultdict
 
 from spatial_roof_2_8_4 import build_spatial_roof_mesh, extend_spatial_roof_eaves
+from spatial_roof_2_9_0 import build_spatial_roof_mesh as build_spatial_roof_mesh_2_9
 from straight_skeleton_2_6_0 import extract_roof_seams, build_inset_seam_profile_mesh
 
 
@@ -192,6 +193,55 @@ class SpatialRoofDetailsTests(unittest.TestCase):
                 vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
                 end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
             )
+
+
+    def _assert_spatial_concave_profiles_closed(self, outline, pitch_degrees):
+        pitches = [math.radians(value) for value in pitch_degrees]
+        vertices, faces, sources = build_spatial_roof_mesh_2_9(outline, pitches)
+        self.assertTrue(vertices)
+        self.assertTrue(faces)
+        self.assertEqual(len(faces), len(sources))
+        seams = extract_roof_seams(
+            vertices, faces, sources, [(p[0], p[1]) for p in outline]
+        )
+        self.assertTrue(seams, "Expected a non-empty ridge/valley seam graph.")
+        ridge_edges = [edge for edge in seams if str(edge[4]).upper() == "RIDGE"]
+        valley_edges = [edge for edge in seams if str(edge[4]).upper() == "VALLEY"]
+        self.assertTrue(ridge_edges, "No ridge edges were extracted from the spatial concave roof.")
+
+        for seam_type, expected_edges in (("RIDGE", ridge_edges), ("VALLEY", valley_edges)):
+            if not expected_edges:
+                continue
+            profile_vertices, profile_faces = build_inset_seam_profile_mesh(
+                vertices, faces, seams, seam_type, 0.18 if seam_type == "RIDGE" else 0.24,
+                (0.0, 0.0, 0.015), end_offset=0.0,
+                seat_sink_offset=(0.0, 0.0, -0.0002),
+                outline=[(p[0], p[1]) for p in outline],
+                boundary_edges=None,
+            )
+            self.assertTrue(profile_vertices, seam_type + " profile has no vertices.")
+            self.assertTrue(profile_faces, seam_type + " profile has no faces.")
+            uses = edge_uses(profile_faces)
+            self.assertTrue(uses)
+            self.assertTrue(
+                all(count == 2 for count in uses.values()),
+                seam_type + " profile is not a closed manifold shell."
+            )
+
+    def test_large_nonplanar_concave_l_ridge_valley_profiles_are_closed(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(outline, [35] * len(outline))
+
+    def test_large_nonplanar_concave_u_ridge_valley_profiles_are_closed(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(outline, [35] * len(outline))
 
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
