@@ -224,9 +224,12 @@ class _WaveVertex:
                     direction = -direction
                 normal_speed = direction.dot(inward_left)
             if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
-                raise SkeletonError(
-                    "Straight skeleton: вырожденный узел не имеет устойчивого направления движения."
-                )
+                # Fully cancelling event bisectors leave only the support
+                # normal constrained. Choose its inward normal as the
+                # minimum-tangential-speed solution rather than aborting an
+                # otherwise valid simultaneous collapse.
+                direction = inward_left
+                normal_speed = 1.0
             velocity = direction * (speed_left / normal_speed)
         else:
             velocity = _V2(
