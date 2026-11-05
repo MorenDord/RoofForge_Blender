@@ -531,14 +531,34 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
 
     # Reject crossing projected boundaries. A height-field roof cannot have
     # overlapping projected cells without creating a geometric self-intersection.
+    # Sweep by the minimum X coordinate first: most edge pairs are far apart in
+    # the plan and can be discarded using their bounding boxes before the exact
+    # orientation test. The previous all-pairs loop did quadratic work even for
+    # roofs whose facets occupy disjoint regions of the plan.
+    bbox_eps = eps * 20.0
     face_edges = []
     for face_index, face in enumerate(faces):
         for i, a in enumerate(face):
             b = face[(i + 1) % len(face)]
-            face_edges.append((face_index, a, b))
-    for i, (face_a, a, b) in enumerate(face_edges):
-        for face_b, c, d in face_edges[i + 1:]:
+            pa, pb = vertices[a], vertices[b]
+            face_edges.append((
+                face_index, a, b,
+                min(pa[0], pb[0]), max(pa[0], pb[0]),
+                min(pa[1], pb[1]), max(pa[1], pb[1]),
+            ))
+    face_edges.sort(key=lambda item: item[3])
+    active_edges = []
+    for current in face_edges:
+        face_b, c, d, min_x, max_x, min_y, max_y = current
+        active_edges = [
+            item for item in active_edges
+            if item[4] >= min_x - bbox_eps
+        ]
+        for item in active_edges:
+            face_a, a, b, _min_ax, max_ax, min_ay, max_ay = item
             if face_a == face_b or len({a, b, c, d}) < 4:
+                continue
+            if max_ay < min_y - bbox_eps or max_y < min_ay - bbox_eps:
                 continue
             if _proper_segment_cross(vertices[a], vertices[b], vertices[c], vertices[d], cross_eps):
                 raise SpatialRoofError(
@@ -550,6 +570,7 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                         vertices[c][:2], vertices[d][:2],
                     )
                 )
+        active_edges.append(current)
 
     boundary_intervals = [[] for _ in range(len(outline))]
     for (a_id, b_id), uses in edge_uses.items():
@@ -612,23 +633,48 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
             )
 
     # A face centroid contained in another non-neighbouring cell indicates an
-    # overlap even when their polygon edges do not cross.
+    # overlap even when their polygon edges do not cross. Use the same X-sweep
+    # broad phase to avoid testing every facet against every other facet.
+    face_records = []
     for face_index, face in enumerate(faces):
+        points_xy = [(vertices[i][0], vertices[i][1]) for i in face]
         centroid = (
-            sum(vertices[i][0] for i in face) / len(face),
-            sum(vertices[i][1] for i in face) / len(face),
+            sum(point[0] for point in points_xy) / len(points_xy),
+            sum(point[1] for point in points_xy) / len(points_xy),
         )
-        for other_index, other in enumerate(faces):
-            if other_index == face_index:
+        face_records.append((
+            face_index,
+            min(point[0] for point in points_xy),
+            max(point[0] for point in points_xy),
+            min(point[1] for point in points_xy),
+            max(point[1] for point in points_xy),
+            centroid,
+            set(face),
+            points_xy,
+        ))
+    face_records.sort(key=lambda item: item[1])
+    active_faces = []
+    for current in face_records:
+        (face_index, min_x, max_x, min_y, max_y,
+         centroid, vertex_set, face_polygon) = current
+        active_faces = [
+            item for item in active_faces
+            if item[2] >= min_x - eps
+        ]
+        for other in active_faces:
+            (other_index, _other_min_x, _other_max_x,
+             other_min_y, other_max_y, other_centroid,
+             other_vertex_set, other_polygon) = other
+            if min(max_y, other_max_y) < max(min_y, other_min_y) - eps:
                 continue
-            shared = set(face) & set(other)
-            if len(shared) >= 2:
+            if len(vertex_set & other_vertex_set) >= 2:
                 continue
-            other_poly = [(vertices[i][0], vertices[i][1]) for i in other]
-            if _inside_or_on(centroid, other_poly, eps):
+            if (_inside_or_on(centroid, other_polygon, eps)
+                    or _inside_or_on(other_centroid, face_polygon, eps)):
                 raise SpatialRoofError(
                     "Два пространственных ската перекрывают одну область плана."
                 )
+        active_faces.append(current)
 
 
 def _collapse_near_event_slivers(vertices, faces, sources, outline, eps, scale):
