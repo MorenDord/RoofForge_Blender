@@ -66,6 +66,25 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
     return source, roof
 
 
+
+def require_closed_profile_object(roof, property_key, label):
+    object_name = str(roof.get(property_key, ""))
+    require(bool(object_name), label + " helper object name is missing.")
+    profile = bpy.data.objects.get(object_name)
+    require(profile is not None and profile.type == "MESH", label + " helper mesh is missing.")
+    require(len(profile.data.polygons) > 0, label + " profile mesh has no faces.")
+    edge_uses = {}
+    for polygon in profile.data.polygons:
+        vertices = list(polygon.vertices)
+        for a, b in zip(vertices, vertices[1:] + vertices[:1]):
+            key = tuple(sorted((int(a), int(b))))
+            edge_uses[key] = edge_uses.get(key, 0) + 1
+    require(bool(edge_uses), label + " profile mesh has no edges.")
+    require(all(count == 2 for count in edge_uses.values()),
+            label + " profile mesh is not a closed manifold shell.")
+    return profile
+
+
 def main():
     require(tuple(bpy.app.version) >= (5, 0, 0), "RoofForge requires Blender 5.0 or newer.")
     roof_forge.register()
@@ -120,6 +139,48 @@ def main():
     surface = roof_forge._spatial_profile_surface_from_source_mesh(spatial_roof)
     require(surface is not None and len(surface[1]) >= 3,
             "Existing spatial profile source mesh could not be analysed.")
+
+    # Non-planar concave L and U outlines with per-edge pitches exercise the
+    # complete 2.9 path: pitch-aware planar event topology, 3D lifting, mitered
+    # eaves, transition caps, saved face-source tags and ridge/valley profiles.
+    l_source, l_roof = create_roof_from_outline(
+        "RF_Spatial_L_VariablePitch",
+        [(0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+         (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10)],
+        [33, 35, 37, 36, 38, 34],
+        overhang=0.20,
+    )
+    require(bool(l_roof.get("roofforge_spatial_profile_source_mesh", "")),
+            "Spatial L roof profile source mesh was not persisted.")
+    l_source_mesh = bpy.data.meshes.get(l_roof["roofforge_spatial_profile_source_mesh"])
+    require(l_source_mesh is not None and
+            l_source_mesh.attributes.get("roofforge_face_source") is not None,
+            "Spatial L roof did not persist per-face source IDs.")
+    require_closed_profile_object(l_roof, "roofforge_ridges_object", "L ridge")
+    require_closed_profile_object(l_roof, "roofforge_valleys_object", "L valley")
+
+    u_source, u_roof = create_roof_from_outline(
+        "RF_Spatial_U_VariablePitch",
+        [(0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+         (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+         (3, 8, 0.24), (0, 8, 0.10)],
+        [33, 35, 37, 38, 34, 36, 32, 37],
+        overhang=0.20,
+    )
+    require(bool(u_roof.get("roofforge_spatial_profile_source_mesh", "")),
+            "Spatial U roof profile source mesh was not persisted.")
+    u_source_mesh = bpy.data.meshes.get(u_roof["roofforge_spatial_profile_source_mesh"])
+    require(u_source_mesh is not None and
+            u_source_mesh.attributes.get("roofforge_face_source") is not None,
+            "Spatial U roof did not persist per-face source IDs.")
+    require_closed_profile_object(u_roof, "roofforge_ridges_object", "U ridge")
+    require_closed_profile_object(u_roof, "roofforge_valleys_object", "U valley")
+
+    # Save a real .blend for a second Blender process to reopen and exercise
+    # Create/Update profile tools against the persisted source mesh metadata.
+    roundtrip_path = os.environ.get("ROOFFORGE_ROUNDTRIP_BLEND", "")
+    require(bool(roundtrip_path), "ROOFFORGE_ROUNDTRIP_BLEND must be set for save/reopen validation.")
+    bpy.ops.wm.save_as_mainfile(filepath=roundtrip_path)
 
     roof_forge.unregister()
     print("ROOFFORGE_BLENDER_RUNTIME_OK", bpy.app.version_string)
