@@ -260,7 +260,7 @@ def _embed_topology(template_vertices, template_faces, template_sources,
     node_height_tolerance = max(
         eps * 100.0,
         scale * 2.5e-4,
-        min(scale * 1.0e-2, eave_height_range * 0.25)
+        min(scale * 1.0e-2, eave_height_range * 0.75)
     )
     determinant_tolerance = 1.0e-11
     vertices = []
@@ -486,7 +486,7 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
     plane_eps = max(
         eps * 100.0,
         scale * 2.5e-4,
-        min(scale * 1.0e-2, eave_height_range * 0.25)
+        min(scale * 1.0e-2, eave_height_range * 0.75)
     )
     for face_index, face in enumerate(faces):
         if len(face) < 3:
