@@ -1465,6 +1465,156 @@ def _repair_internal_seam_loops(face_loops, planes, outline_vertices, eps, scale
     return face_loops
 
 
+
+def _split_polygon_by_line(poly, a, b, c, eps):
+    """Split a convex polygon by a*x+b*y+c=0 into both closed sides."""
+    positive = _clip_halfplane(poly, -a, -b, -c, eps)
+    negative = _clip_halfplane(poly, a, b, c, eps)
+    result = []
+    if len(positive) >= 3 and abs(_area(positive)) > eps * eps:
+        result.append(positive)
+    if len(negative) >= 3 and abs(_area(negative)) > eps * eps:
+        result.append(negative)
+    return result
+
+
+def _polygon_centroid_xy(poly):
+    area = _area(poly)
+    if abs(area) <= 1.0e-20:
+        return (
+            sum(point[0] for point in poly) / len(poly),
+            sum(point[1] for point in poly) / len(poly),
+        )
+    cx = cy = 0.0
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        cross = a[0] * b[1] - b[0] * a[1]
+        cx += (a[0] + b[0]) * cross
+        cy += (a[1] + b[1]) * cross
+    factor = 1.0 / (6.0 * area)
+    return cx * factor, cy * factor
+
+
+def _build_nonplanar_lower_envelope(points, planes, eps, eave_lift=0.0):
+    """Build the exact lower envelope of all support planes over the footprint.
+
+    This solver is independent of wavefront event timing. It is therefore
+    suitable for non-planar eaves where every boundary edge has its own
+    starting height.
+    """
+    xy = [(float(point[0]), float(point[1])) for point in points]
+    triangles = _triangulate_xy(xy, eps)
+    patches_by_source = defaultdict(list)
+
+    for triangle in triangles:
+        cells = [list(triangle)]
+        for source_a in range(len(planes)):
+            for source_b in range(source_a + 1, len(planes)):
+                plane_a = planes[source_a]
+                plane_b = planes[source_b]
+                line_a = float(plane_a[0]) - float(plane_b[0])
+                line_b = float(plane_a[1]) - float(plane_b[1])
+                line_c = float(plane_a[2]) - float(plane_b[2])
+                if math.hypot(line_a, line_b) <= eps:
+                    continue
+                split_cells = []
+                for cell in cells:
+                    split_cells.extend(
+                        _split_polygon_by_line(
+                            cell, line_a, line_b, line_c, eps * 5.0
+                        )
+                    )
+                cells = split_cells
+                if not cells:
+                    break
+            if not cells:
+                break
+
+        for cell in cells:
+            if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
+                continue
+            centroid = _polygon_centroid_xy(cell)
+            source_id = min(
+                range(len(planes)),
+                key=lambda index: _plane_value(
+                    planes[index], centroid[0], centroid[1]
+                ),
+            )
+            plane = planes[source_id]
+            lifted = [
+                (
+                    float(x),
+                    float(y),
+                    float(plane[0]) * x
+                    + float(plane[1]) * y
+                    + float(plane[2]),
+                )
+                for x, y in cell
+            ]
+            if _area(cell) < 0.0:
+                lifted.reverse()
+            patches_by_source[source_id].append(lifted)
+
+    if not patches_by_source:
+        raise SpatialRoofError(
+            "Не удалось построить нижнюю огибающую опорных плоскостей."
+        )
+
+    merge_scale = max(eps * 10.0, 1.0e-8)
+    face_loops = []
+    for source_id in sorted(patches_by_source):
+        for loop in _merge_face_patches(
+            patches_by_source[source_id], merge_scale
+        ):
+            if len(loop) >= 3:
+                face_loops.append((source_id, loop))
+
+    if not face_loops:
+        raise SpatialRoofError(
+            "После объединения областей нижней огибающей не осталось скатов."
+        )
+
+    face_loops = _split_global_t_junctions(face_loops, merge_scale)
+
+    # Canonicalize shared points globally without changing the source plane.
+    vertices = []
+    faces = []
+    sources = []
+    buckets = defaultdict(list)
+
+    def add_vertex(point):
+        key = tuple(int(round(float(v) / merge_scale)) for v in point)
+        for index in buckets[key]:
+            if _distance3(vertices[index], point) <= merge_scale * 2.0:
+                return index
+        index = len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        buckets[key].append(index)
+        return index
+
+    for source_id, loop in face_loops:
+        face = [add_vertex(point) for point in loop]
+        clean = []
+        for index in face:
+            if not clean or clean[-1] != index:
+                clean.append(index)
+        if len(clean) > 1 and clean[0] == clean[-1]:
+            clean.pop()
+        if len(clean) < 3:
+            continue
+        if _area([
+            (vertices[index][0], vertices[index][1])
+            for index in clean
+        ]) < 0.0:
+            clean.reverse()
+        faces.append(tuple(clean))
+        sources.append(source_id)
+
+    if not faces:
+        raise SpatialRoofError("Нижняя огибающая не сформировала ни одной грани.")
+
+    return vertices, faces, sources
+
+
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a roof from edge-specific pitches and a 3D eave loop.
 
@@ -1523,114 +1673,15 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     if z_span<=flat_tolerance:
         # With a uniform pitch use the established reflex-aware 2D topology
         # and lift its facets onto the identical support planes.
-        uniform_pitch = max(angles)-min(angles) <= 1.0e-9
-        if uniform_pitch:
-            try:
-                template_vertices,template_faces,template_sources=build_roof_mesh(
-                    xy,1.0,0.0,allow_oblique=True
-                )
-            except SkeletonError as exc:
-                raise SpatialRoofError(
-                    "Не удалось построить XY-топологию крыши: "+str(exc)
-                ) from exc
-            vertices,faces,sources=_embed_topology(
-                template_vertices,template_faces,template_sources,
-                points,planes,eps,scale
-            )
-            _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-            return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
-
-        # Individual pitches require actual weighted collapse/split times.
-        # Each support plane contributes its exact inward normal speed.
-        speeds=[]
-        for i in range(count):
-            p=points[i]
-            q=points[(i+1)%count]
-            edge_length=math.hypot(q[0]-p[0],q[1]-p[1])
-            along_grade=(q[2]-p[2])/edge_length
-            inward_grade=math.sqrt(
-                max(0.0,math.tan(angles[i])**2-along_grade**2)
-            )
-            if inward_grade<=1.0e-10:
-                raise SpatialRoofError(
-                    "Для ребра {} не хватает внутреннего уклона.".format(i+1)
-                )
-            speeds.append(1.0/inward_grade)
-        try:
-            vertices,faces,sources=build_weighted_roof_mesh(
-                xy,speeds,planes,merge_coplanar=False
-            )
-        except WeightedSkeletonError as exc:
-            raise SpatialRoofError(
-                "Взвешенный волновой фронт: "+str(exc)
-            ) from exc
-        _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-        return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
-
-    uniform_pitch = max(angles)-min(angles) <= 1.0e-9
-    if not uniform_pitch:
-        # The planar event topology must account for per-edge pitch differences.
-        # Build that topology on a flat proxy using the actual edge speeds, but
-        # lift its source facets onto the true non-planar 3D support planes.
-        flat_outline=[(p[0],p[1],0.0) for p in points]
-        flat_planes=[
-            _edge_plane(
-                flat_outline[i],flat_outline[(i+1)%count],angles[i],0.0
-            )
-            for i in range(count)
-        ]
-        flat_speeds=[1.0/math.tan(angle) for angle in angles]
-        try:
-            template_vertices,template_faces,template_sources=build_weighted_roof_mesh(
-                xy,flat_speeds,flat_planes,merge_coplanar=False
-            )
-        except WeightedSkeletonError as exc:
-            raise SpatialRoofError(
-                "Не удалось рассчитать топологию индивидуальных углов: "+str(exc)
-            ) from exc
-        vertices,faces,sources=_embed_topology(
-            template_vertices,template_faces,template_sources,
-            points,planes,eps,scale
-        )
-        vertices,faces,sources=_collapse_near_event_slivers(
-            vertices,faces,sources,points,eps,scale
-        )
-        _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-        return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
-
-    # Uniform non-planar contours use the same boundary-aware support-plane
-    # path as individual-pitch non-planar roofs.
-    flat_outline=[(p[0],p[1]) for p in points]
-    speeds=[]
-    for i in range(count):
-        p=points[i]
-        q=points[(i+1)%count]
-        edge_length=math.hypot(q[0]-p[0],q[1]-p[1])
-        along_grade=(q[2]-p[2])/edge_length
-        inward_grade=math.sqrt(
-            max(0.0,math.tan(angles[i])**2-along_grade**2)
-        )
-        if inward_grade<=1.0e-10:
-            raise SpatialRoofError(
-                "Для ребра {} недостаточен внутренний уклон.".format(i+1)
-            )
-        speeds.append(1.0/inward_grade)
-    try:
-        topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
-            flat_outline,speeds,planes
-        )
-    except WeightedSkeletonError:
-        topology_vertices,topology_faces,topology_sources=build_roof_mesh(
-            flat_outline,1.0,0.0,allow_oblique=True
-        )
-    adjacency=_derive_source_adjacency(
-        topology_vertices,topology_faces,topology_sources,
-        max(eps*10.0,1.0e-8)
-    )
-    vertices,faces,sources=_build_boundary_aware_spatial_envelope(
-        topology_vertices,topology_faces,topology_sources,
-        planes,adjacency,eps,eave_lift
+        # Non-planar eaves are solved directly as a support-plane lower
+    # envelope. Their boundary edges have different starting heights, so a
+    # common-time weighted wavefront is not a mathematically equivalent model.
+    vertices,faces,sources=_build_nonplanar_lower_envelope(
+        points,planes,eps,eave_lift=0.0
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
-    return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
+    return vertices,faces,[
+        _remap_source_id(source,source_edge_map) for source in sources
+    ]
+
 
