@@ -61,10 +61,23 @@ jobs:
             --output "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz"
           tar -xJf "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz" \
             -C "$RUNNER_TEMP/blender-dist" --strip-components=1
-      - name: Stage add-on package
+      - name: Build and validate Blender extension ZIP
+        run: |
+          mkdir -p "$RUNNER_TEMP/roof_forge_dist"
+          "$RUNNER_TEMP/blender-dist/blender" --command extension build \
+            --source-dir roof_forge_2.8.4 \
+            --output-dir "$RUNNER_TEMP/roof_forge_dist" \
+            --output-filepath "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+          "$RUNNER_TEMP/blender-dist/blender" --command extension validate \
+            "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+          unzip -t "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+      - name: Stage the exact install ZIP for runtime tests
         run: |
           mkdir -p "$RUNNER_TEMP/roof_forge_addons/roof_forge"
-          cp roof_forge_2.8.4/*.py "$RUNNER_TEMP/roof_forge_addons/roof_forge/"
+          unzip -q "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip" \
+            -d "$RUNNER_TEMP/roof_forge_addons/roof_forge"
+          test -f "$RUNNER_TEMP/roof_forge_addons/roof_forge/blender_manifest.toml"
+          test -f "$RUNNER_TEMP/roof_forge_addons/roof_forge/__init__.py"
       - name: Register add-on and generate roofs in Blender
         env:
           ROOFFORGE_ADDON_PARENT: ${{ runner.temp }}/roof_forge_addons
@@ -77,3 +90,10 @@ jobs:
           "$RUNNER_TEMP/blender-dist/blender" \
             --background "$ROOFFORGE_ROUNDTRIP_BLEND" \
             --python roof_forge_2.8.4/test_blender_roundtrip_2_9_0.py
+      - name: Upload validated RoofForge 2.9.0 extension ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof_forge_2.9.0
+          path: ${{ runner.temp }}/roof_forge_dist/roof_forge_2.9.0.zip
+          if-no-files-found: error
+          retention-days: 30
