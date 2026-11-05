@@ -205,10 +205,24 @@ class _WaveVertex:
             # retain the event bisector direction and normalize it to the
             # left support's weighted normal speed, matching the legacy
             # degenerate-event treatment without discarding the speed scale.
-            direction = -left_direction + right_direction
+            direction = _V2(0.0, 0.0)
+            if direction_vectors is not None:
+                direction = _V2(
+                    float(direction_vectors[0][0]) + float(direction_vectors[1][0]),
+                    float(direction_vectors[0][1]) + float(direction_vectors[1][1]),
+                )
+            if abs(direction) <= _EPS:
+                direction = -left_direction + right_direction
             if self.is_reflex:
                 direction = -direction
             normal_speed = direction.dot(inward_left)
+            if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
+                # The other incoming wavefront direction can be a better
+                # conditioned representative when the first pair cancels.
+                direction = -left_direction + right_direction
+                if self.is_reflex:
+                    direction = -direction
+                normal_speed = direction.dot(inward_left)
             if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
                 raise SkeletonError(
                     "Straight skeleton: вырожденный узел не имеет устойчивого направления движения."
