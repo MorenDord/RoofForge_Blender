@@ -170,6 +170,21 @@ def main():
     require_closed_profile_object(l_roof, "roofforge_ridges_object", "L ridge")
     require_closed_profile_object(l_roof, "roofforge_valleys_object", "L valley")
 
+    # Standing-seam dimensions must rebuild only the detail object. The roof
+    # mesh datablock and all its vertices must remain untouched.
+    l_roof_mesh = l_roof.data
+    roof_vertex_snapshot = [tuple(vertex.co) for vertex in l_roof.data.vertices]
+    old_standing_segments = int(l_roof.get("roofforge_standing_segment_count", 0))
+    l_roof.roofforge_settings.standing_panel_width = 0.85
+    require(l_roof.data is l_roof_mesh,
+            "Standing seam width change rebuilt the roof mesh instead of only the seam detail.")
+    require([tuple(vertex.co) for vertex in l_roof.data.vertices] == roof_vertex_snapshot,
+            "Standing seam width change modified roof vertices.")
+    require(int(l_roof.get("roofforge_standing_segment_count", 0)) > 0,
+            "Live spatial standing-seam rebuild produced no segments.")
+    require(not l_roof.get("roofforge_standing_error", ""),
+            "Live spatial standing-seam rebuild failed: " + str(l_roof.get("roofforge_standing_error")))
+
     u_source, u_roof = create_roof_from_outline(
         "RF_Spatial_U_VariablePitch",
         [(0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
