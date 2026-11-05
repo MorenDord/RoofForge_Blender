@@ -489,6 +489,9 @@ class _SLAV:
         if x is None or y is None:
             # The candidate can become ineligible after an earlier simultaneous event.
             return []
+        # Preserve the live segment selected by the fallback for local refresh.
+        event.target_start = y
+        event.target_end = x
 
         x_left = _cross(
             y.bisector.v.normalized(),
@@ -1645,6 +1648,35 @@ def _enqueue_missing_wavefront_events(slav, current_time, projected_edge_events,
     return queue_order
 
 
+def _enqueue_wavefront_events_for_vertices(vertices, current_time,
+                                              projected_edge_events, event_queue,
+                                              queue_order):
+    """Refresh only vertices affected by the latest local topology mutation.
+
+    A collapse changes its replacement vertex and two neighbours; a split
+    changes two new vertices and four re-linked endpoints. The full wavefront
+    scan remains as a queue-exhaustion recovery path, not the normal event path.
+    """
+    present = {_wavefront_event_key(item[2]) for item in event_queue}
+    seen_vertices = set()
+    for vertex in vertices:
+        if vertex is None or not getattr(vertex, "valid", False):
+            continue
+        if vertex.lav is None or vertex.uid in seen_vertices:
+            continue
+        seen_vertices.add(vertex.uid)
+        event = vertex.next_event(current_time, projected_edge_events)
+        if event is None:
+            continue
+        key = _wavefront_event_key(event)
+        if key in present:
+            continue
+        present.add(key)
+        queue_order += 1
+        heapq.heappush(event_queue, (event.distance, queue_order, event))
+    return queue_order
+
+
 def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
                           projected_edge_events=False, edge_speeds=None,
                           face_planes=None, validate_topology=True,
@@ -1850,30 +1882,47 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
             current_time = event_time
             snapshots = next_snapshots
 
-        topology_before = tuple(
-            (vertex.uid, vertex.prev.uid, vertex.next.uid,
-             vertex.edge_left.index, vertex.edge_right.index)
-            for lav in slav.lavs for vertex in lav
-        )
         if isinstance(event, _EdgeEvent):
-            new_events = slav.handle_edge_event(event, event_mode)
+            previous_vertex = event.vertex_a.prev
+            following_vertex = event.vertex_b.next
+            slav.handle_edge_event(event, event_mode)
+            topology_changed = not event.vertex_a.valid or not event.vertex_b.valid
+            if topology_changed:
+                replacement = (
+                    previous_vertex.next if previous_vertex is not None else None
+                )
+                affected_vertices = (
+                    previous_vertex, replacement, following_vertex,
+                )
+            else:
+                affected_vertices = ()
         else:
-            new_events = slav.handle_split_event(event, event_mode)
+            previous_vertex = event.vertex.prev
+            following_vertex = event.vertex.next
+            slav.handle_split_event(event, event_mode)
+            topology_changed = not event.vertex.valid
+            if topology_changed:
+                target_start = event.target_start
+                target_end = event.target_end
+                first_new = (
+                    previous_vertex.next if previous_vertex is not None else None
+                )
+                second_new = (
+                    target_start.next if target_start is not None else None
+                )
+                affected_vertices = (
+                    previous_vertex, first_new, target_end,
+                    target_start, second_new, following_vertex,
+                )
+            else:
+                affected_vertices = ()
 
-        topology_after = tuple(
-            (vertex.uid, vertex.prev.uid, vertex.next.uid,
-             vertex.edge_left.index, vertex.edge_right.index)
-            for lav in slav.lavs for vertex in lav
-        )
-        if topology_after != topology_before:
-            queue_order = _enqueue_missing_wavefront_events(
-                slav, current_time, event_mode, event_queue, queue_order
+        if topology_changed:
+            queue_order = _enqueue_wavefront_events_for_vertices(
+                affected_vertices, current_time, event_mode,
+                event_queue, queue_order,
             )
             tried_event_modes.clear()
-        else:
-            for new_event in new_events:
-                queue_order += 1
-                heapq.heappush(event_queue, (new_event.distance, queue_order, new_event))
 
         # Any split/collapse changes the active edge segments at the same wavefront time.
         snapshots = {
