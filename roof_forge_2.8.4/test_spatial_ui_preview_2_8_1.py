@@ -30,7 +30,7 @@ render = NAMESPACE["_spatial_preview_png"]
 
 
 def decode_rgba_png(png):
-    if not png.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if not png.startswith(b"\x89PNG\r\n\x1a\n"):
         raise AssertionError("Preview is not a PNG.")
     width, height = struct.unpack(">2I", png[16:24])
     position = 8
