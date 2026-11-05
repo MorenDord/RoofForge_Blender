@@ -1255,7 +1255,7 @@ def _build_boundary_aware_spatial_envelope(
 
     face_loops = _split_global_t_junctions(face_loops, merge_scale)
     face_loops = _repair_internal_seam_loops(
-        face_loops, planes, points, eps, plan_scale
+        face_loops, planes, topology_vertices, eps, plan_scale
     )
 
     vertices = []
