@@ -2300,46 +2300,28 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # First compute the combinatorial neighbour graph in the flat XY
-    # problem using the exact same per-edge pitch values. Only those pairs are
-    # allowed to become 3D seams.
-    flat_outline=[(p[0],p[1]) for p in points]
-    flat_planes=[
-        _edge_plane(
-            (points[i][0],points[i][1],0.0),
-            (points[(i+1)%count][0],points[(i+1)%count][1],0.0),
-            angles[i],0.0
-        )
-        for i in range(count)
-    ]
-    topology_error=None
+    # For a non-planar eave, the combinatorial neighbourhood is taken
+    # from the proven stable 2D skeleton. Individual angles define the 3D
+    # support planes, but do not silently renumber source edges.
     try:
-        flat_speeds=[1.0/math.tan(angle) for angle in angles]
-        topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
-            flat_outline,flat_speeds,flat_planes
+        topology_vertices,topology_faces,topology_sources=build_roof_mesh(
+            xy,1.0,0.0,allow_oblique=True
         )
-    except WeightedSkeletonError as exc:
-        topology_error=exc
-        try:
-            topology_vertices,topology_faces,topology_sources=build_roof_mesh(
-                flat_outline,1.0,0.0,allow_oblique=True
-            )
-        except SkeletonError as fallback_exc:
-            raise SpatialRoofError(
-                "Не удалось получить топологию соседства скатов: {} / {}".format(
-                    exc,fallback_exc
-                )
-            ) from fallback_exc
+    except SkeletonError as exc:
+        raise SpatialRoofError(
+            "Не удалось получить устойчивую XY-топологию: "+str(exc)
+        ) from exc
 
-    allowed_pairs=set()
     adjacency=_derive_source_adjacency(
         topology_vertices,topology_faces,topology_sources,
         max(eps*10.0,1.0e-8)
     )
+    allowed_pairs=set()
     for source_id,neighbors in adjacency.items():
         for neighbor_id in neighbors:
-            if source_id<neighbor_id:
-                allowed_pairs.add((source_id,neighbor_id))
+            a,b=sorted((int(source_id),int(neighbor_id)))
+            if a!=b:
+                allowed_pairs.add((a,b))
 
     vertices,faces,sources=_build_planar_support_arrangement(
         points,planes,eps,allowed_pairs
