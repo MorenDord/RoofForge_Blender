@@ -819,9 +819,11 @@ def _rebuild_generated_roof(roof_obj):
                 raise RoofForgeError("Число индивидуальных углов не совпадает с числом рёбер контура.")
             has_edge_pitches = bool(edge_pitches)
             if edge_pitches:
-                # Keep the unextended weighted roof as the seam/profile source.
-                profile_vertices, profile_faces, profile_sources = build_weighted_roof_mesh(
-                    source_poly, edge_pitches, settings.eave_lift
+                # Build each edge's own support plane, then lift the
+                # reflex-aware 2D roof partition onto those planes.
+                source_xyz = [(p[0], p[1], 0.0) for p in source_poly]
+                profile_vertices, profile_faces, profile_sources = build_spatial_roof_mesh(
+                    source_xyz, edge_pitches, eave_lift=settings.eave_lift
                 )
                 profile_outline = list(source_poly)
                 surface_vertices, surface_faces, face_source_ids = (
