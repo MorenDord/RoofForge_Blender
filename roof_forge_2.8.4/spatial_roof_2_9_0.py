@@ -1171,7 +1171,7 @@ def _build_boundary_aware_spatial_envelope(
                 return [(poly,winner)]
             return [(poly,challenger)]
         pieces=[]
-        low=_clip_halfplane(poly,a,b,eps*5.0)
+        low=_clip_halfplane(poly,a,b,cc,eps*5.0)
         high=_clip_halfplane(poly,-a,-b,-cc,eps*5.0)
         if len(low)>=3 and abs(_area(low))>eps*eps:
             forced=boundary_owner(low)
