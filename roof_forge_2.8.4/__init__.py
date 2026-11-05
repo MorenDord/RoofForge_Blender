@@ -1045,12 +1045,9 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
         pitch_angles = [math.radians(35.0)] * len(pts3)
     try:
         z_span = max(p[2] for p in pts3) - min(p[2] for p in pts3)
-        if z_span > 1.0e-7:
-            roof_vertices, roof_faces, source_ids = build_spatial_roof_mesh(pts3, pitch_angles)
-        else:
-            roof_vertices, roof_faces, source_ids = build_weighted_roof_mesh(
-                [(p[0], p[1]) for p in pts3], pitch_angles
-            )
+        roof_vertices, roof_faces, source_ids = build_spatial_roof_mesh(
+            pts3, pitch_angles
+        )
         facet_polygons = [[(roof_vertices[i][0], roof_vertices[i][1]) for i in face]
                           for face in roof_faces]
     except Exception:
