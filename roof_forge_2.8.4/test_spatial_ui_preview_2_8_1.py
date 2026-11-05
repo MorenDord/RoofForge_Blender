@@ -136,18 +136,24 @@ class SpatialPreviewTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(struct.unpack(">2I", png[16:24]), (128, 128))
 
-    def test_source_outline_preview_is_debounced_until_slider_pause(self):
-        self.assertIn("_SPATIAL_PREVIEW_DELAY = 0.18", SOURCE)
-        self.assertIn("_SPATIAL_PREVIEW_DUE = time.monotonic() + _SPATIAL_PREVIEW_DELAY", SOURCE)
+    def test_source_outline_preview_uses_configured_frame_rate(self):
+        self.assertIn("update_rate=30.0", SOURCE)
+        self.assertIn("preview_interval = 1.0 / max(1.0, min(60.0, float(update_rate)))", SOURCE)
+        self.assertIn("_SPATIAL_PREVIEW_DUE = time.monotonic() + preview_interval", SOURCE)
+        self.assertIn("update_rate=settings.interactive_update_rate", SOURCE)
         self.assertIn("if roof_obj is None and signature != _SPATIAL_PREVIEW_SIGNATURE", SOURCE)
         self.assertIn("_flush_spatial_preview_request", SOURCE)
         self.assertIn("area.tag_redraw()", SOURCE)
 
-    def test_generated_pitch_and_profile_callbacks_are_coalesced(self):
-        self.assertIn("_schedule_roof_update(owner, \"roof\")", SOURCE)
+    def test_generated_pitch_uses_frame_limited_roof_only_updates(self):
+        self.assertIn("_schedule_roof_update(owner, \"interactive\")", SOURCE)
         self.assertIn("_schedule_roof_update(owner, \"profiles\")", SOURCE)
-        self.assertIn("return 0.08", SOURCE)
-        self.assertIn("_ROOF_UPDATE_DELAY = 0.18", SOURCE)
+        self.assertIn("_INTERACTIVE_FINALIZE_DELAY = 0.25", SOURCE)
+        self.assertIn("interactive_update_rate: FloatProperty", SOURCE)
+        self.assertIn("rebuild_details=False", SOURCE)
+        self.assertIn("_rebuild_existing_roof_profiles(owner, (\"RIDGE\", \"VALLEY\"))", SOURCE)
+        self.assertIn("_rebuild_standing_seams_for_mesh(owner)", SOURCE)
+        self.assertNotIn("_ROOF_UPDATE_DELAY = 0.18", SOURCE)
 
     def test_profile_controls_rebuild_details_without_rebuilding_roof(self):
         start = SOURCE.index("def _profile_settings_update(self, context):")
