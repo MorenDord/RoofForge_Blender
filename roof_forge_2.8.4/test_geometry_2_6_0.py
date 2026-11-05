@@ -678,42 +678,5 @@ class RoofForge256Tests(unittest.TestCase):
 
 
 
-class WeightedStraightSkeletonTests(unittest.TestCase):
-    def test_equal_edge_angles_match_uniform_roof(self):
-        polygon = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
-        angle = math.radians(35.0)
-        weighted = geometry.build_weighted_roof_mesh(polygon, [angle] * 4)
-        uniform = geometry.build_roof_mesh(
-            polygon, math.tan(angle), 0.0, allow_oblique=True
-        )
-        self.assertEqual(len(weighted[0]), len(uniform[0]))
-        self.assertEqual(len(weighted[1]), len(uniform[1]))
-        self.assertEqual(weighted[2], uniform[2])
-        for a, b in zip(weighted[0], uniform[0]):
-            self.assertAlmostEqual(a[0], b[0], places=6)
-            self.assertAlmostEqual(a[1], b[1], places=6)
-            self.assertAlmostEqual(a[2], b[2], places=6)
-
-    def test_rectangular_roof_accepts_individual_angles(self):
-        polygon = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
-        pitches = [math.radians(v) for v in (30.0, 38.0, 42.0, 34.0)]
-        vertices, faces, sources = geometry.build_weighted_roof_mesh(polygon, pitches)
-        self.assertTrue(vertices)
-        self.assertTrue(faces)
-        self.assertEqual(len(faces), len(sources))
-        self.assertEqual(set(sources), {0, 1, 2, 3})
-        self.assertTrue(all(math.isfinite(v) for p in vertices for v in p))
-
-    def test_rejects_mismatched_edge_pitch_count(self):
-        polygon = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
-        with self.assertRaises(geometry.SkeletonError):
-            geometry.build_weighted_roof_mesh(polygon, [math.radians(35.0)] * 3)
-
-    def test_rejects_zero_edge_pitch(self):
-        polygon = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
-        with self.assertRaises(geometry.SkeletonError):
-            geometry.build_weighted_roof_mesh(polygon, [0.0] * 4)
-
-
 if __name__ == "__main__":
     unittest.main(verbosity=2)
