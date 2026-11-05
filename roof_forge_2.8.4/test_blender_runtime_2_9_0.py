@@ -45,6 +45,7 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
     settings.thickness = 0.01
     settings.show_ridges = True
     settings.show_valleys = True
+    settings.show_standing_seams = True
     for i, angle in enumerate(pitches, 1):
         setattr(settings, "spatial_pitch_{:02d}".format(i), math.radians(angle))
 
@@ -63,6 +64,16 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
     require(len(roof.data.polygons) >= 4, "Generated roof has too few faces.")
     require(roof.get("roofforge_top_faces", 0) >= 1, "Top surface face count was not stored.")
     require(bool(roof.get("roofforge_ridges_object", "")), "Ridge helper object was not created.")
+    require(int(roof.get("roofforge_standing_segment_count", 0)) > 0,
+            "Standing seam generator did not create any segments for " + name)
+    standing_name = str(roof.get("roofforge_standing_seams_object", ""))
+    standing_obj = bpy.data.objects.get(standing_name)
+    require(standing_obj is not None and standing_obj.type == "MESH",
+            "Standing seam helper object is missing for " + name)
+    require(len(standing_obj.data.polygons) > 0,
+            "Standing seam mesh has no faces for " + name)
+    require(not roof.get("roofforge_standing_error", ""),
+            "Standing seam build failed for " + name + ": " + str(roof.get("roofforge_standing_error")))
     return source, roof
 
 
