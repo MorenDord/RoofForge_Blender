@@ -780,7 +780,6 @@ def _rebuild_standing_seams_for_mesh(roof_obj):
     """Live-rebuild standing seams on a selected/generated roof mesh object."""
     if not roof_obj or roof_obj.type != 'MESH' or roof_obj.get('roofforge_standing_updating', False):
         return
-    is_spatial = bool(roof_obj.get("roofforge_spatial", False))
     roof_obj['roofforge_standing_updating'] = True
     try:
         settings = roof_obj.roofforge_settings
