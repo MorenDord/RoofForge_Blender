@@ -233,6 +233,21 @@ def main():
     require_closed_profile_object(oblique_roof, "roofforge_ridges_object", "Oblique ridge")
     require_closed_profile_object(oblique_roof, "roofforge_valleys_object", "Oblique valley")
 
+    # A four-way plus plan stresses the multi-branch ridge junction patch
+    # in the actual Blender mesh datablocks, not only the pure-Python builder.
+    plus_source, plus_roof = create_roof_from_outline(
+        "RF_Spatial_Plus_MultiBranch",
+        [(3, 0, 0.000), (7, 0, 0.020), (7, 3, 0.055), (10, 3, 0.070),
+         (10, 7, 0.045), (7, 7, 0.090), (7, 10, 0.120), (3, 10, 0.080),
+         (3, 7, 0.050), (0, 7, 0.040), (0, 3, 0.010), (3, 3, 0.015)],
+        [35] * 12,
+        overhang=0.20,
+    )
+    require(bool(plus_roof.get("roofforge_spatial_profile_source_mesh", "")),
+            "Multi-branch plus roof profile source mesh was not persisted.")
+    require_closed_profile_object(plus_roof, "roofforge_ridges_object", "Plus multi-branch ridge")
+    require_closed_profile_object(plus_roof, "roofforge_valleys_object", "Plus multi-branch valley")
+
     # Save a real .blend for a second Blender process to reopen and exercise
     # Create/Update profile tools against the persisted source mesh metadata.
     roundtrip_path = os.environ.get("ROOFFORGE_ROUNDTRIP_BLEND", "")
