@@ -1115,24 +1115,39 @@ def _derive_source_adjacency(vertices, faces, sources, tolerance):
 
 
 def _build_boundary_aware_spatial_envelope(
-    points, pitch_angles, planes, adjacency, triangles, eps, eave_lift
+    topology_vertices,
+    topology_faces,
+    topology_sources,
+    planes,
+    adjacency,
+    eps,
+    eave_lift,
 ):
-    """Build exact 3D facet cells while restricting plane competition to
-    topology-neighbour sources.
+    """Rebuild each topological roof cell from exact 3D support planes.
 
-    The weighted skeleton determines which eave planes are allowed to meet.
-    Inside every convex triangulation piece we then clip a source region by
-    only those neighbouring plane inequalities. Thus non-adjacent planes
-    cannot steal an eave edge, while every actual ridge/valley boundary is the
-    exact intersection of its two support planes.
+    The XY topology is supplied by the event solver. It acts as a hard mask,
+    so artificial diagonals from the triangulation of the original footprint
+    cannot become roof edges. Inside every source cell, neighbouring support
+    planes cut the mask at their exact intersection lines.
     """
-    patches = []
-    for source_id, plane in enumerate(planes):
-        neighbour_ids = sorted(adjacency.get(source_id, ()))
-        for triangle in triangles:
+    patches_by_source = defaultdict(list)
+    merge_scale = max(eps * 10.0, 1.0e-8)
+
+    for face_index, face in enumerate(topology_faces):
+        source_id = int(topology_sources[face_index])
+        mask = [
+            (float(topology_vertices[index][0]), float(topology_vertices[index][1]))
+            for index in face
+        ]
+        if len(mask) < 3 or abs(_area(mask)) <= eps * eps:
+            continue
+
+        mask_triangles = _triangulate_xy(mask, eps)
+        for triangle in mask_triangles:
             cell = list(triangle)
-            for neighbour_id in neighbour_ids:
+            for neighbour_id in sorted(adjacency.get(source_id, ())):
                 other = planes[neighbour_id]
+                plane = planes[source_id]
                 cell = _clip_halfplane(
                     cell,
                     plane[0] - other[0],
@@ -1144,26 +1159,31 @@ def _build_boundary_aware_spatial_envelope(
                     break
             if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
                 continue
+
+            plane = planes[source_id]
             lifted = [
-                (float(x), float(y),
-                 float(plane[0]) * x + float(plane[1]) * y + float(plane[2])
-                 + float(eave_lift))
+                (
+                    float(x),
+                    float(y),
+                    float(plane[0]) * x
+                    + float(plane[1]) * y
+                    + float(plane[2])
+                    + float(eave_lift),
+                )
                 for x, y in cell
             ]
             if _area(cell) < 0.0:
                 lifted.reverse()
-            patches.append((source_id, lifted))
+            patches_by_source[source_id].append(lifted)
 
-    if not patches:
+    if not any(patches_by_source.values()):
         raise SpatialRoofError("Не удалось получить пространственные области скатов.")
 
-    merge_scale = max(eps * 10.0, 1.0e-8)
     face_loops = []
-    grouped = defaultdict(list)
-    for source_id, patch in patches:
-        grouped[int(source_id)].append(patch)
-    for source_id, group in grouped.items():
-        for loop in _merge_face_patches(group, merge_scale):
+    for source_id in sorted(patches_by_source):
+        for loop in _merge_face_patches(
+            patches_by_source[source_id], merge_scale
+        ):
             if len(loop) >= 3:
                 face_loops.append((source_id, loop))
 
@@ -1173,6 +1193,7 @@ def _build_boundary_aware_spatial_envelope(
         )
 
     face_loops = _split_global_t_junctions(face_loops, merge_scale)
+
     vertices = []
     faces = []
     sources = []
@@ -1197,11 +1218,14 @@ def _build_boundary_aware_spatial_envelope(
         if len(clean) > 1 and clean[0] == clean[-1]:
             clean.pop()
         if len(clean) >= 3:
-            if _area([(vertices[index][0], vertices[index][1]) for index in clean]) < 0.0:
+            if _area([
+                (vertices[index][0], vertices[index][1]) for index in clean
+            ]) < 0.0:
                 clean.reverse()
             faces.append(tuple(clean))
             sources.append(int(source_id))
     return vertices, faces, sources
+
 
 
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
@@ -1367,7 +1391,8 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         max(eps*10.0,1.0e-8)
     )
     vertices,faces,sources=_build_boundary_aware_spatial_envelope(
-        points,angles,planes,adjacency,_triangulate_xy(flat_outline,eps),eps,eave_lift
+        topology_vertices,topology_faces,topology_sources,
+        planes,adjacency,eps,eave_lift
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[_remap_source_id(source,source_edge_map) for source in sources]
