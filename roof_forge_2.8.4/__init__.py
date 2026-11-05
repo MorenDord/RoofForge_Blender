@@ -30,7 +30,6 @@ from bpy.props import (
 from .straight_skeleton_2_6_0 import (
     SkeletonError,
     build_roof_mesh,
-    build_weighted_roof_mesh,
     _orthogonalize_nearly_orthogonal_contour,
     extend_roof_mesh_eaves,
     extract_roof_seams,
