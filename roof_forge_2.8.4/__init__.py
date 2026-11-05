@@ -38,7 +38,9 @@ from .straight_skeleton_2_6_0 import (
 )
 from .standing_seams_2_6_0 import build_standing_seam_mesh
 from .spatial_roof_2_8_4 import extend_spatial_roof_eaves
-from .spatial_roof_2_9_0 import build_spatial_roof_mesh, SpatialRoofError
+from .spatial_roof_2_9_0 import (
+    build_spatial_roof_mesh, SpatialRoofError, _representative_source_id,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -382,7 +384,7 @@ def _replace_mesh_data(obj, name, vertices, faces, seam_edges=None, face_source_
             name="roofforge_face_source", type="INT", domain="FACE"
         )
         for index, source_id in enumerate(face_source_ids):
-            face_attribute.data[index].value = int(source_id)
+            face_attribute.data[index].value = _representative_source_id(source_id)
     if seam_edges:
         marked = {
             (int(edge[0]), int(edge[1])) if int(edge[0]) < int(edge[1])
@@ -744,7 +746,7 @@ def _store_spatial_profile_source_mesh(roof_obj, vertices, faces, face_source_id
                 name="roofforge_face_source", type="INT", domain="FACE"
             )
             for index, source_id in enumerate(face_source_ids):
-                attribute.data[index].value = int(source_id)
+                attribute.data[index].value = _representative_source_id(source_id)
         mesh.use_fake_user = True
     except Exception:
         bpy.data.meshes.remove(mesh)
@@ -990,9 +992,24 @@ def _rebuild_generated_roof(roof_obj, rebuild_details=True):
             if edge_pitches and len(edge_pitches) != len(source_poly):
                 raise RoofForgeError("Число индивидуальных углов не совпадает с числом рёбер контура.")
             has_edge_pitches = bool(edge_pitches)
-            if edge_pitches:
-                # Build each edge's own support plane, then lift the
-                # reflex-aware 2D roof partition onto those planes.
+            if edge_pitches and max(edge_pitches) - min(edge_pitches) <= 1.0e-9:
+                # Flat equal-angle roofs take the established 2.8.4 straight-
+                # skeleton path directly. No spatial lifting or extra validator
+                # pass is needed when every support plane has the same pitch.
+                poly = list(source_poly)
+                profile_outline = list(source_poly)
+                profile_vertices, profile_faces, profile_sources = build_roof_mesh(
+                    source_poly, math.tan(float(edge_pitches[0])),
+                    settings.eave_lift, allow_oblique=True,
+                )
+                surface_vertices, surface_faces, face_source_ids = (
+                    extend_spatial_roof_eaves(
+                        profile_vertices, profile_faces, profile_sources,
+                        settings.overhang
+                    )
+                )
+            elif edge_pitches:
+                # Truly individual pitches require the weighted wavefront.
                 source_xyz = [(p[0], p[1], 0.0) for p in source_poly]
                 profile_vertices, profile_faces, profile_sources = build_spatial_roof_mesh(
                     source_xyz, edge_pitches, eave_lift=settings.eave_lift
@@ -1042,12 +1059,12 @@ def _rebuild_generated_roof(roof_obj, rebuild_details=True):
         if is_spatial or has_edge_pitches:
             surface_face_count = len(surface_faces)
             if len(mesh_faces) == surface_face_count:
-                mesh_face_source_ids = [int(source_id) for source_id in face_source_ids]
+                mesh_face_source_ids = [_representative_source_id(source_id) for source_id in face_source_ids]
             elif len(mesh_faces) >= surface_face_count * 2:
                 sidewall_count = len(mesh_faces) - surface_face_count * 2
                 mesh_face_source_ids = (
                     [-3] * surface_face_count
-                    + [int(source_id) for source_id in face_source_ids]
+                    + [_representative_source_id(source_id) for source_id in face_source_ids]
                     + [-4] * sidewall_count
                 )
             else:
@@ -1292,6 +1309,7 @@ def _flush_pending_roof_updates():
             if owner is not None:
                 owner["roofforge_interactive_mode"] = False
                 _hide_roof_helpers(owner, False)
+                _invalidate_spatial_preview_signature()
 
     if not _PENDING_ROOF_UPDATES and not _PENDING_ROOF_FINALIZATIONS:
         return None
@@ -1583,6 +1601,13 @@ def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None, area=Non
     global _SPATIAL_PREVIEW_REQUEST,_SPATIAL_PREVIEW_DUE
     if not points or len(points)<3: return 0
     if pitch_angles is None: pitch_angles=[math.radians(35.0)]*len(points)
+    if roof_obj is not None and roof_obj.get("roofforge_interactive_mode", False):
+        try:
+            if (_SPATIAL_PREVIEW_COLLECTION is not None
+                    and "spatial_plan" in _SPATIAL_PREVIEW_COLLECTION):
+                return _SPATIAL_PREVIEW_COLLECTION["spatial_plan"].icon_id
+        except (ReferenceError, RuntimeError):
+            pass
 
     facet_polygons = None
     source_ids = None
@@ -1660,6 +1685,11 @@ def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None, area=Non
         return _SPATIAL_PREVIEW_COLLECTION['spatial_plan'].icon_id
     except Exception:
         return 0
+
+
+def _invalidate_spatial_preview_signature():
+    global _SPATIAL_PREVIEW_SIGNATURE
+    _SPATIAL_PREVIEW_SIGNATURE = None
 
 
 def _clear_spatial_preview():
