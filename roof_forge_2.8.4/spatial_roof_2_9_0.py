@@ -2278,20 +2278,11 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Stable XY topology gives the correct combinatorial masks. Within
-    # each mask, let only locally crossing support planes compete; the eave
-    # boundary remains owned by its original support plane.
-    try:
-        topology_vertices,topology_faces,topology_sources=build_roof_mesh(
-            xy,1.0,0.0,allow_oblique=True
-        )
-    except SkeletonError as exc:
-        raise SpatialRoofError(
-            "Не удалось получить устойчивую XY-топологию неплоской крыши: "+str(exc)
-        ) from exc
-
-    vertices,faces,sources=_build_boundary_aware_spatial_envelope(
-        topology_vertices,topology_faces,topology_sources,
+    # Non-planar eaves: use the exact planar arrangement of all support
+    # plane intersections. Source labels propagate from their eave edges
+    # through pairwise plane seams, so height offsets never turn into a
+    # global lower-envelope decision.
+    vertices,faces,sources=_build_planar_support_arrangement(
         points,planes,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
