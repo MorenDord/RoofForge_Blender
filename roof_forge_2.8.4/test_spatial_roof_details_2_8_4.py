@@ -269,6 +269,8 @@ class SpatialRoofIntegrationSourceTests(unittest.TestCase):
         self.assertIn('name="roofforge_face_source", type="INT", domain="FACE"', source)
         self.assertIn('mesh.attributes.get("roofforge_face_source")', source)
         self.assertIn("profile_faces, profile_sources", source)
+        self.assertIn("if is_spatial or has_edge_pitches:", source)
+        self.assertIn('roofforge_edge_pitch_count', source)
         self.assertIn("if source < 0:", source)
         self.assertIn('row.operator("roofforge.create_ridges"', source)
         self.assertIn('row.operator("roofforge.create_valleys"', source)
