@@ -1142,154 +1142,145 @@ def _polygon_centroid_xy(poly):
 
 
 def _build_boundary_aware_spatial_envelope(
-    topology_vertices,
-    topology_faces,
-    topology_sources,
-    planes,
-    adjacency,
-    eps,
-    eave_lift,
+    topology_vertices, topology_faces, topology_sources,
+    points, planes, eps
 ):
-    """Build the exact lower envelope inside each topology mask."""
-    patches_by_source = defaultdict(list)
-    merge_scale = max(eps * 10.0, 1.0e-8)
+    """Evaluate all locally relevant support planes inside stable XY masks."""
+    patches_by_source=defaultdict(list)
+    merge_scale=max(eps*10.0,1.0e-8)
+    xy=[(float(p[0]),float(p[1])) for p in points]
 
-    for topology_face, topology_source in zip(topology_faces, topology_sources):
-        source_id = int(topology_source)
-        mask = [
-            (float(topology_vertices[index][0]), float(topology_vertices[index][1]))
-            for index in topology_face
+    def boundary_owner(poly):
+        owners=set()
+        for edge_id,(p,q) in enumerate(zip(xy,xy[1:]+xy[:1])):
+            for a,b in zip(poly,poly[1:]+poly[:1]):
+                oa,_,_=_point_on_segment(a,p,q,eps*10.0)
+                ob,_,_=_point_on_segment(b,p,q,eps*10.0)
+                if oa and ob and _distance2(a,b)>eps:
+                    owners.add(edge_id)
+        return next(iter(owners)) if len(owners)==1 else None
+
+    for face_index,face in enumerate(topology_faces):
+        base_source=int(topology_sources[face_index])
+        mask=[
+            (float(topology_vertices[index][0]),float(topology_vertices[index][1]))
+            for index in face
         ]
-        if len(mask) < 3 or abs(_area(mask)) <= eps * eps:
+        if len(mask)<3 or abs(_area(mask))<=eps*eps:
             continue
 
-        mask_triangles = _triangulate_xy(mask, eps)
-        for triangle in mask_triangles:
-            # Candidate sources are local to the topology cell: the original
-            # source plus every plane whose intersection line actually cuts
-            # this triangle. Distant planes cannot steal a concave boundary.
-            candidates = {source_id}
-            for other_id, other in enumerate(planes):
-                if other_id == source_id:
+        triangles=_triangulate_xy(mask,eps)
+        for triangle in triangles:
+            candidates={base_source}
+            for other_id,other in enumerate(planes):
+                if other_id==base_source:
                     continue
-                plane = planes[source_id]
-                values = [
-                    (plane[0] - other[0]) * point[0]
-                    + (plane[1] - other[1]) * point[1]
-                    + (plane[2] - other[2])
-                    for point in triangle
+                plane=planes[base_source]
+                values=[
+                    (plane[0]-other[0])*p[0]
+                    +(plane[1]-other[1])*p[1]
+                    +(plane[2]-other[2])
+                    for p in triangle
                 ]
-                if min(values) <= eps * 5.0 and max(values) >= -eps * 5.0:
+                if min(values)<=eps*10.0 and max(values)>=-eps*10.0:
                     candidates.add(other_id)
 
-            cells = [list(triangle)]
-            candidate_list = sorted(candidates)
-            for i, source_a in enumerate(candidate_list):
-                for source_b in candidate_list[i + 1:]:
-                    pa = planes[source_a]
-                    pb = planes[source_b]
-                    a = float(pa[0]) - float(pb[0])
-                    b = float(pa[1]) - float(pb[1])
-                    cc = float(pa[2]) - float(pb[2])
-                    if math.hypot(a, b) <= eps:
+            candidate_list=sorted(candidates)
+            cells=[list(triangle)]
+            for ia in range(len(candidate_list)):
+                for ib in range(ia+1,len(candidate_list)):
+                    pa=planes[candidate_list[ia]]
+                    pb=planes[candidate_list[ib]]
+                    a=pa[0]-pb[0]
+                    b=pa[1]-pb[1]
+                    cc=pa[2]-pb[2]
+                    if math.hypot(a,b)<=eps:
                         continue
-                    split = []
+                    split=[]
                     for cell in cells:
-                        split.extend(
-                            _split_polygon_by_line(
-                                cell, a, b, cc, eps * 5.0
-                            )
-                        )
-                    cells = split
+                        split.extend(_split_polygon_by_line(cell,a,b,cc,eps*5.0))
+                    cells=split
                     if not cells:
                         break
                 if not cells:
                     break
 
             for cell in cells:
-                if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
+                if len(cell)<3 or abs(_area(cell))<=eps*eps:
                     continue
-                centroid = _polygon_centroid_xy(cell)
-                winning_source = min(
-                    candidate_list,
-                    key=lambda index: _plane_value(
-                        planes[index], centroid[0], centroid[1]
-                    ),
-                )
-                plane = planes[winning_source]
-                lifted = [
-                    (
-                        float(x),
-                        float(y),
-                        float(plane[0]) * x
-                        + float(plane[1]) * y
-                        + float(plane[2]),
+                forced=boundary_owner(cell)
+                centroid=_polygon_centroid_xy(cell)
+                source_id=(
+                    forced
+                    if forced is not None
+                    else min(
+                        candidate_list,
+                        key=lambda source:_plane_value(
+                            planes[source],centroid[0],centroid[1]
+                        )
                     )
-                    for x, y in cell
+                )
+                plane=planes[source_id]
+                patch=[
+                    (
+                        float(x),float(y),
+                        _plane_value(plane,float(x),float(y))
+                    )
+                    for x,y in cell
                 ]
-                if _area(cell) < 0.0:
-                    lifted.reverse()
-                patches_by_source[winning_source].append(lifted)
+                if _area(cell)<0.0:
+                    patch.reverse()
+                patches_by_source[source_id].append(patch)
 
-    if not any(patches_by_source.values()):
+    if not patches_by_source:
         raise SpatialRoofError("Не удалось получить области пространственной крыши.")
 
-    face_loops = []
-    for source_id, patches in sorted(patches_by_source.items()):
-        for loop in _merge_face_patches(patches, merge_scale):
-            if len(loop) >= 3:
-                face_loops.append((source_id, loop))
+    grouped=[]
+    for source_id,patches in sorted(patches_by_source.items()):
+        for loop in _merge_face_patches(patches,merge_scale):
+            if len(loop)>=3:
+                grouped.append((source_id,loop))
 
-    if not face_loops:
+    if not grouped:
         raise SpatialRoofError(
             "После объединения пространственных фрагментов не осталось скатов."
         )
 
-    face_loops = _split_global_t_junctions(face_loops, merge_scale)
-    plan_points = [
-        (float(vertex[0]), float(vertex[1]))
-        for vertex in topology_vertices
-    ]
-    plan_scale = max(
-        max(point[0] for point in plan_points) - min(point[0] for point in plan_points),
-        max(point[1] for point in plan_points) - min(point[1] for point in plan_points),
-        1.0,
-    )
-    face_loops = _repair_internal_seam_loops(
-        face_loops, planes, topology_vertices, eps, plan_scale
-    )
-
-    vertices = []
-    faces = []
-    sources = []
-    buckets = defaultdict(list)
+    vertices=[]
+    faces=[]
+    sources=[]
+    buckets=defaultdict(list)
 
     def add_point(point):
-        key = tuple(int(round(float(v) / merge_scale)) for v in point)
+        key=tuple(int(round(float(v)/merge_scale)) for v in point)
         for index in buckets[key]:
-            if _distance3(vertices[index], point) <= merge_scale * 2.0:
+            if _distance3(vertices[index],point)<=merge_scale*2.0:
                 return index
-        index = len(vertices)
+        index=len(vertices)
         vertices.append(tuple(float(v) for v in point))
         buckets[key].append(index)
         return index
 
-    for source_id, loop in face_loops:
-        face = [add_point(point) for point in loop]
-        clean = []
+    for source_id,loop in grouped:
+        face=[add_point(point) for point in loop]
+        clean=[]
         for index in face:
-            if not clean or clean[-1] != index:
+            if not clean or clean[-1]!=index:
                 clean.append(index)
-        if len(clean) > 1 and clean[0] == clean[-1]:
+        if len(clean)>1 and clean[0]==clean[-1]:
             clean.pop()
-        if len(clean) < 3:
+        if len(clean)<3:
             continue
-        if _area([(vertices[index][0], vertices[index][1]) for index in clean]) < 0.0:
+        if _area([(vertices[i][0],vertices[i][1]) for i in clean])<0.0:
             clean.reverse()
         faces.append(tuple(clean))
-        sources.append(source_id)
+        sources.append(int(source_id))
 
-    return vertices, faces, sources
+    vertices,faces,sources=_merge_coplanar_roof_faces(
+        vertices,faces,sources,scale=max(merge_scale,eps*10.0)
+    )
+    return vertices,faces,sources
+
 
 
 def _point_to_line_parameter(point, line_point, direction):
@@ -2160,9 +2151,9 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Non-planar eaves keep the stable XY event topology. The 3D geometry
-    # is then clipped by exact pairwise support-plane seams only between
-    # source facets that are actual neighbours in that topology.
+    # Stable XY topology gives the correct combinatorial masks. Within
+    # each mask, let only locally crossing support planes compete; the eave
+    # boundary remains owned by its original support plane.
     try:
         topology_vertices,topology_faces,topology_sources=build_roof_mesh(
             xy,1.0,0.0,allow_oblique=True
@@ -2172,13 +2163,9 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
             "Не удалось получить устойчивую XY-топологию неплоской крыши: "+str(exc)
         ) from exc
 
-    adjacency=_derive_source_adjacency(
+    vertices,faces,sources=_build_boundary_aware_spatial_envelope(
         topology_vertices,topology_faces,topology_sources,
-        max(eps*10.0,1.0e-8)
-    )
-    vertices,faces,sources=_build_mask_clipped_spatial_roof(
-        topology_vertices,topology_faces,topology_sources,
-        planes,adjacency,eps
+        points,planes,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
