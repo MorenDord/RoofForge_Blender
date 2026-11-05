@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
       - name: Compile spatial modules
         working-directory: roof_forge_2.8.4
-        run: python -m py_compile __init__.py spatial_roof_2_9_0.py straight_skeleton_2_6_0.py weighted_skeleton_2_9_0.py test_weighted_skeleton_2_9_0.py
+        run: python -m py_compile __init__.py spatial_roof_2_9_0.py straight_skeleton_2_6_0.py weighted_skeleton_2_9_0.py test_weighted_skeleton_2_9_0.py test_blender_runtime_2_9_0.py
       - name: Run spatial topology-lifting tests
         working-directory: roof_forge_2.8.4
         run: python -m unittest -v test_spatial_roof_2_9_0.py
@@ -48,3 +48,27 @@ jobs:
       - name: Run spatial eave and profile regressions
         working-directory: roof_forge_2.8.4
         run: python -m unittest -v test_spatial_roof_details_2_8_4.py
+
+  blender-5x-runtime-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Blender 5.2.3 LTS
+        run: |
+          mkdir -p "$RUNNER_TEMP/blender-dist"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            https://download.blender.org/release/Blender5.2/blender-5.2.3-linux-x64.tar.xz \
+            --output "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz"
+          tar -xJf "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz" \
+            -C "$RUNNER_TEMP/blender-dist" --strip-components=1
+      - name: Stage add-on package
+        run: |
+          mkdir -p "$RUNNER_TEMP/roof_forge_addons/roof_forge"
+          cp roof_forge_2.8.4/*.py "$RUNNER_TEMP/roof_forge_addons/roof_forge/"
+      - name: Register add-on and generate roofs in Blender
+        env:
+          ROOFFORGE_ADDON_PARENT: ${{ runner.temp }}/roof_forge_addons
+        run: |
+          "$RUNNER_TEMP/blender-dist/blender" \
+            --background --factory-startup \
+            --python roof_forge_2.8.4/test_blender_runtime_2_9_0.py
