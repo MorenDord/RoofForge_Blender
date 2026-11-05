@@ -205,6 +205,18 @@ class SpatialRoofDetailsTests(unittest.TestCase):
             vertices, faces, sources, [(p[0], p[1]) for p in outline]
         )
         self.assertTrue(seams, "Expected a non-empty ridge/valley seam graph.")
+
+        # The same roof must also accept its spatial mitered eave extension.
+        extended_vertices, extended_faces, extended_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.20
+        )
+        self.assertEqual(len(extended_faces), len(extended_sources))
+        extended_uses = edge_uses(extended_faces)
+        self.assertTrue(extended_uses)
+        self.assertTrue(all(count in (1, 2) for count in extended_uses.values()))
+        source_boundary_count = sum(count == 1 for count in edge_uses(faces).values())
+        extended_boundary_count = sum(count == 1 for count in extended_uses.values())
+        self.assertEqual(extended_boundary_count, source_boundary_count)
         ridge_edges = [edge for edge in seams if str(edge[4]).upper() == "RIDGE"]
         valley_edges = [edge for edge in seams if str(edge[4]).upper() == "VALLEY"]
         self.assertTrue(ridge_edges, "No ridge edges were extracted from the spatial concave roof.")
@@ -242,6 +254,26 @@ class SpatialRoofDetailsTests(unittest.TestCase):
             (3, 8, 0.24), (0, 8, 0.10),
         ]
         self._assert_spatial_concave_profiles_closed(outline, [35] * len(outline))
+
+
+    def test_large_nonplanar_concave_l_individual_pitch_profiles_and_overhang(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(
+            outline, [33, 35, 37, 36, 38, 34]
+        )
+
+    def test_large_nonplanar_concave_u_individual_pitch_profiles_and_overhang(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(
+            outline, [33, 35, 37, 38, 34, 36, 32, 37]
+        )
 
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
