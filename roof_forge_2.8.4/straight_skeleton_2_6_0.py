@@ -2458,6 +2458,8 @@ def build_inset_seam_profile_mesh(
     tolerance = max(1.0e-8, scale * 1.0e-8)
     xy_epsilon = max(1.0e-10, scale * 1.0e-10)
     weld_tolerance = max(1.0e-8, scale * 1.0e-8)
+    input_face_planarity_tolerance = max(1.0e-5, scale * 5.0e-4)
+    output_quad_planarity_tolerance = max(1.0e-10, scale * 1.0e-10)
 
     def point_key3(point):
         return _key3(point, weld_tolerance)
@@ -2559,6 +2561,18 @@ def build_inset_seam_profile_mesh(
 
         plane = roof_face_plane(surface_vertices, face)
         pa, pb, pc = plane
+        max_face_residual = max(
+            abs(surface_vertices[index][2] - (pa*surface_vertices[index][0]
+                + pb*surface_vertices[index][1] + pc))
+            for index in face
+        )
+        if max_face_residual > input_face_planarity_tolerance:
+            raise SkeletonError(
+                "Грань крыши слишком сильно отклоняется от собственной опорной плоскости "
+                "({:.6g} м > {:.6g} м). Разбейте её на более мелкие плоские грани.".format(
+                    max_face_residual, input_face_planarity_tolerance
+                )
+            )
         plane_normal = norm3((-pa, -pb, 1.0))
         polygon_xy = [(surface_vertices[i][0], surface_vertices[i][1]) for i in face]
         edge_data = []
@@ -2699,14 +2713,46 @@ def build_inset_seam_profile_mesh(
                     if vertex_id not in unique_ids:
                         unique_ids.append(vertex_id)
                 if len(unique_ids) >= 3:
-                    base_faces.append(tuple(unique_ids))
+                    faces_to_add = [tuple(unique_ids)]
+                    if len(unique_ids) == 4:
+                        p0, p1, p2, p3 = [base_vertices[index] for index in unique_ids]
+                        normal = cross3(
+                            (p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]),
+                            (p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]),
+                        )
+                        normal_length = length3(normal)
+                        warp = (
+                            abs(normal[0]*(p3[0]-p0[0])
+                                + normal[1]*(p3[1]-p0[1])
+                                + normal[2]*(p3[2]-p0[2])) / normal_length
+                            if normal_length > 1.0e-14 else float("inf")
+                        )
+                        if warp > output_quad_planarity_tolerance:
+                            diagonal_02 = length3((
+                                p0[0]-p2[0], p0[1]-p2[1], p0[2]-p2[2]
+                            ))
+                            diagonal_13 = length3((
+                                p1[0]-p3[0], p1[1]-p3[1], p1[2]-p3[2]
+                            ))
+                            if diagonal_02 <= diagonal_13:
+                                faces_to_add = [
+                                    (unique_ids[0], unique_ids[1], unique_ids[2]),
+                                    (unique_ids[0], unique_ids[2], unique_ids[3]),
+                                ]
+                            else:
+                                faces_to_add = [
+                                    (unique_ids[0], unique_ids[1], unique_ids[3]),
+                                    (unique_ids[1], unique_ids[2], unique_ids[3]),
+                                ]
                     seam_vertex_a, seam_vertex_b = face[i], face[j]
                     seam_edge_key = (
                         (seam_vertex_a, seam_vertex_b)
                         if seam_vertex_a < seam_vertex_b
                         else (seam_vertex_b, seam_vertex_a)
                     )
-                    base_face_meta.append((seam_edge_key, face_index))
+                    for profile_face in faces_to_add:
+                        base_faces.append(profile_face)
+                        base_face_meta.append((seam_edge_key, face_index))
                     # ids are (original_a, original_b, inset_b, inset_a).
                     endpoint_corner_map[(seam_edge_key, seam_vertex_a, face_index)] = ids[3]
                     endpoint_corner_map[(seam_edge_key, seam_vertex_b, face_index)] = ids[2]
