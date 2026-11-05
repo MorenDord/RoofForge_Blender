@@ -64,12 +64,15 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
     require(len(roof.data.polygons) >= 4, "Generated roof has too few faces.")
     require(roof.get("roofforge_top_faces", 0) >= 1, "Top surface face count was not stored.")
     require(bool(roof.get("roofforge_ridges_object", "")), "Ridge helper object was not created.")
+    require_sibling_helper(roof, "roofforge_ridges_object", "Ridge")
+    require_sibling_helper(roof, "roofforge_valleys_object", "Valley")
     require(int(roof.get("roofforge_standing_segment_count", 0)) > 0,
             "Standing seam generator did not create any segments for " + name)
     standing_name = str(roof.get("roofforge_standing_seams_object", ""))
     standing_obj = bpy.data.objects.get(standing_name)
     require(standing_obj is not None and standing_obj.type == "MESH",
             "Standing seam helper object is missing for " + name)
+    require_sibling_helper(roof, "roofforge_standing_seams_object", "Standing seam")
     require(len(standing_obj.data.polygons) > 0,
             "Standing seam mesh has no faces for " + name)
     require(not roof.get("roofforge_standing_error", ""),
@@ -81,10 +84,35 @@ def create_roof_from_outline(name, points, pitches, overhang=0.0):
 def flush_pending_roof_update(roof):
     key = roof.name
     require(key in roof_forge._PENDING_ROOF_UPDATES,
-            "Expected a debounced RoofForge update for " + key)
+            "Expected a pending RoofForge update for " + key)
     owner, _due_time, update_kind = roof_forge._PENDING_ROOF_UPDATES[key]
     roof_forge._PENDING_ROOF_UPDATES[key] = (owner, 0.0, update_kind)
     roof_forge._flush_pending_roof_updates()
+
+
+def flush_pending_roof_finalization(roof):
+    key = roof.name
+    require(key in roof_forge._PENDING_ROOF_FINALIZATIONS,
+            "Expected a pending detail finalization for " + key)
+    owner, _due_time = roof_forge._PENDING_ROOF_FINALIZATIONS[key]
+    roof_forge._PENDING_ROOF_FINALIZATIONS[key] = (owner, 0.0)
+    roof_forge._flush_pending_roof_updates()
+
+
+def require_sibling_helper(roof, property_key, label):
+    helper_name = str(roof.get(property_key, ""))
+    helper = bpy.data.objects.get(helper_name)
+    require(helper is not None, label + " helper is missing.")
+    require(helper.parent is None, label + " must be a sibling of the roof, not its child.")
+    follow = next(
+        (constraint for constraint in helper.constraints
+         if constraint.type == "COPY_TRANSFORMS"
+         and constraint.name == "RoofForge Follow Roof"),
+        None,
+    )
+    require(follow is not None and follow.target is roof,
+            label + " must follow the roof transform with a sibling constraint.")
+    return helper
 
 
 def require_closed_profile_object(roof, property_key, label):
@@ -179,22 +207,48 @@ def main():
     require_closed_profile_object(l_roof, "roofforge_ridges_object", "L ridge")
     require_closed_profile_object(l_roof, "roofforge_valleys_object", "L valley")
 
-    # Per-edge pitch controls are debounced during a slider drag. A sequence
-    # of edits must keep only one pending geometry rebuild until the user pauses.
+    # Individual pitch edits rebuild only the roof surface at the configured
+    # frame rate. Detail meshes stay hidden and untouched until the user pauses.
     l_roof_before_pitch = l_roof.data
+    ridge_name = str(l_roof.get("roofforge_ridges_object", ""))
+    valley_name = str(l_roof.get("roofforge_valleys_object", ""))
+    standing_name = str(l_roof.get("roofforge_standing_seams_object", ""))
+    ridge_object = bpy.data.objects.get(ridge_name)
+    valley_object = bpy.data.objects.get(valley_name)
+    standing_object = bpy.data.objects.get(standing_name)
+    require(ridge_object is not None and valley_object is not None and standing_object is not None,
+            "Detail helper meshes must exist before interactive pitch editing.")
+    ridge_before = ridge_object.data
+    valley_before = valley_object.data
+    standing_before = standing_object.data
     l_roof.roofforge_settings.spatial_pitch_01 = math.radians(34.2)
     l_roof.roofforge_settings.spatial_pitch_01 = math.radians(34.5)
+    require(roof_forge._PENDING_ROOF_UPDATES[l_roof.name][2] == "interactive",
+            "Spatial pitch change did not queue a roof-only interactive update.")
+    require(ridge_object.hide_get() and valley_object.hide_get() and standing_object.hide_get(),
+            "Detail meshes were not hidden while adjusting pitch angles.")
     require(l_roof.data is l_roof_before_pitch,
-            "Spatial pitch slider rebuilt the roof before the debounce interval.")
-    require(roof_forge._PENDING_ROOF_UPDATES[l_roof.name][2] == "roof",
-            "Spatial pitch change did not queue a roof rebuild.")
+            "The scheduled roof-only update ran before the test explicitly flushed it.")
     flush_pending_roof_update(l_roof)
     require(l_roof.data is not l_roof_before_pitch,
-            "Spatial pitch debounce did not rebuild the generated roof mesh.")
+            "Interactive pitch update did not rebuild the generated roof mesh.")
+    require(ridge_object.data is ridge_before and valley_object.data is valley_before
+            and standing_object.data is standing_before,
+            "Interactive pitch update recalculated profile or standing-seam meshes.")
+    require(ridge_object.hide_get() and valley_object.hide_get() and standing_object.hide_get(),
+            "Detail meshes became visible before interactive editing finished.")
     require(not l_roof.get("roofforge_error", ""),
             "Live spatial pitch rebuild failed: " + str(l_roof.get("roofforge_error")))
+    flush_pending_roof_finalization(l_roof)
+    require(ridge_object.data is not ridge_before and valley_object.data is not valley_before,
+            "Pitch finalization did not rebuild ridge and valley details.")
+    require(standing_object.data is not standing_before,
+            "Pitch finalization did not rebuild standing seams.")
+    require(not ridge_object.hide_get() and not valley_object.hide_get()
+            and not standing_object.hide_get(),
+            "Detail meshes were not restored after pitch editing.")
     require(int(l_roof.get("roofforge_standing_segment_count", 0)) > 0,
-            "Spatial pitch rebuild did not regenerate standing seams.")
+            "Pitch finalization did not regenerate standing seams.")
 
     # Ridge width changes rebuild only ridge/valley detail meshes, not the roof.
     l_roof_mesh_before_profile = l_roof.data
