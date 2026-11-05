@@ -15,7 +15,7 @@ import math
 from collections import defaultdict
 
 try:
-    from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError, _merge_coplanar_roof_faces
     from .weighted_skeleton_2_9_0 import (
         build_weighted_roof_mesh,
         _merge_face_patches,
@@ -23,7 +23,7 @@ try:
         SkeletonError as WeightedSkeletonError,
     )
 except ImportError:
-    from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError, _merge_coplanar_roof_faces
     from weighted_skeleton_2_9_0 import (
         build_weighted_roof_mesh,
         _merge_face_patches,
@@ -1884,34 +1884,14 @@ def _build_planar_support_arrangement(points,planes,eps):
             )
         )
 
-    patches_by_source=defaultdict(list)
-    for face_id,loop in enumerate(faces):
-        source_id=face_source[face_id]
-        plane=planes[source_id]
-        polygon=[vertices[index] for index in loop]
-        lifted=[
-            (
-                float(x),float(y),
-                float(plane[0])*x+float(plane[1])*y+float(plane[2])
-            )
-            for x,y in polygon
-        ]
-        if _area(polygon)<0.0:
-            lifted.reverse()
-        patches_by_source[source_id].append(lifted)
-
-    merge_scale=max(eps*10.0,1.0e-8)
-    face_loops=[]
-    for source_id,patches in sorted(patches_by_source.items()):
-        for loop in _merge_face_patches(patches,merge_scale):
-            if len(loop)>=3:
-                face_loops.append((source_id,loop))
-    face_loops=_split_global_t_junctions(face_loops,merge_scale)
-
+    # Lift arrangement cells to their own support planes. Shared XY points
+    # at a real seam become identical 3D points because both support planes
+    # intersect there; same-source cells therefore share exact edges.
     out_vertices=[]
     out_faces=[]
     out_sources=[]
     out_buckets=defaultdict(list)
+    merge_scale=max(eps*10.0,1.0e-8)
 
     def add_out(point):
         key=tuple(int(round(float(v)/merge_scale)) for v in point)
@@ -1923,20 +1903,33 @@ def _build_planar_support_arrangement(points,planes,eps):
         out_buckets[key].append(index)
         return index
 
-    for source_id,loop in face_loops:
-        face=[add_out(point) for point in loop]
+    for face_id,loop in enumerate(faces):
+        source_id=int(face_source[face_id])
+        plane=planes[source_id]
+        face=[]
+        for vertex_index in loop:
+            x,y=vertices[vertex_index]
+            point=(x,y,_plane_value(plane,x,y))
+            face.append(add_out(point))
         clean=[]
         for index in face:
             if not clean or clean[-1]!=index:
                 clean.append(index)
-        if len(clean)>=3:
-            if _area([(out_vertices[index][0],out_vertices[index][1]) for index in clean])<0:
-                clean.reverse()
-            out_faces.append(tuple(clean))
-            out_sources.append(int(source_id))
+        if len(clean)>1 and clean[0]==clean[-1]:
+            clean.pop()
+        if len(clean)<3:
+            continue
+        if _area([(out_vertices[index][0],out_vertices[index][1]) for index in clean])<0.0:
+            clean.reverse()
+        out_faces.append(tuple(clean))
+        out_sources.append(source_id)
 
     if not out_faces:
         raise SpatialRoofError("Planar arrangement не сформировал скатов.")
+
+    out_vertices,out_faces,out_sources=_merge_coplanar_roof_faces(
+        out_vertices,out_faces,out_sources,scale=max(merge_scale,eps*10.0)
+    )
     return out_vertices,out_faces,out_sources
 
 
