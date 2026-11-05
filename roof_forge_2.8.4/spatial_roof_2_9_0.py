@@ -1648,6 +1648,331 @@ def _build_mask_clipped_spatial_roof(
     return vertices,faces,sources
 
 
+def _line_segment_intersections(a,b,c,points,eps):
+    """Clip a*x+b*y+c=0 to a simple polygon, returning disjoint segments."""
+    length=math.hypot(a,b)
+    if length<=eps:
+        return []
+    # Point on the infinite line.
+    if abs(a)>=abs(b):
+        origin=(-c/a,0.0)
+    else:
+        origin=(0.0,-c/b)
+    direction=(b/length,-a/length)
+
+    values=[]
+    for p,q in zip(points,points[1:]+points[:1]):
+        fp=a*p[0]+b*p[1]+c
+        fq=a*q[0]+b*q[1]+c
+        if abs(fp)<=eps:
+            values.append(_point_to_line_parameter(p,origin,direction))
+        if fp*fq<-(eps*eps):
+            t=fp/(fp-fq)
+            hit=(p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t)
+            values.append(_point_to_line_parameter(hit,origin,direction))
+    values=sorted(values)
+    unique=[]
+    for value in values:
+        if not unique or abs(value-unique[-1])>eps:
+            unique.append(value)
+    segments=[]
+    for t0,t1 in zip(unique,unique[1:]):
+        if t1-t0<=eps:
+            continue
+        tm=(t0+t1)*0.5
+        midpoint=(origin[0]+direction[0]*tm,origin[1]+direction[1]*tm)
+        if _inside_or_on(midpoint,points,eps*20.0):
+            p0=(origin[0]+direction[0]*t0,origin[1]+direction[1]*t0)
+            p1=(origin[0]+direction[0]*t1,origin[1]+direction[1]*t1)
+            segments.append((p0,p1))
+    return segments
+
+
+def _segment_pair_parameters(a,b,c,d,eps):
+    r=(b[0]-a[0],b[1]-a[1])
+    s=(d[0]-c[0],d[1]-c[1])
+    den=_cross2(r,s)
+    q=(c[0]-a[0],c[1]-a[1])
+    if abs(den)>eps:
+        t=_cross2(q,s)/den
+        u=_cross2(q,r)/den
+        if -eps<=t<=1.0+eps and -eps<=u<=1.0+eps:
+            return [(max(0.0,min(1.0,t)),max(0.0,min(1.0,u)))]
+        return []
+    if abs(_cross2(q,r))>eps:
+        return []
+    rr=r[0]*r[0]+r[1]*r[1]
+    ss=s[0]*s[0]+s[1]*s[1]
+    result=[]
+    if rr>eps*eps:
+        for p in (c,d):
+            result.append((
+                ((p[0]-a[0])*r[0]+(p[1]-a[1])*r[1])/rr,
+                0.0,
+            ))
+    if ss>eps*eps:
+        for p in (a,b):
+            result.append((
+                0.0,
+                ((p[0]-c[0])*s[0]+(p[1]-c[1])*s[1])/ss,
+            ))
+    return [
+        (max(0.0,min(1.0,t)),max(0.0,min(1.0,u)))
+        for t,u in result
+        if -eps<=t<=1.0+eps and -eps<=u<=1.0+eps
+    ]
+
+
+def _build_planar_support_arrangement(points,planes,eps):
+    """Exact planar arrangement with boundary-owned roof cells."""
+    xy=[(float(p[0]),float(p[1])) for p in points]
+    raw_segments=[]
+
+    # Ordered boundary segments carry their eave source id.
+    for edge_id,(p,q) in enumerate(zip(xy,xy[1:]+xy[:1])):
+        raw_segments.append({
+            "a":p,"b":q,"kind":"boundary","label":edge_id,"params":[0.0,1.0]
+        })
+
+    # Every plane pair contributes all interior intersection segments.
+    for source_a in range(len(planes)):
+        for source_b in range(source_a+1,len(planes)):
+            pa=planes[source_a]; pb=planes[source_b]
+            a=pa[0]-pb[0]; b=pa[1]-pb[1]; cc=pa[2]-pb[2]
+            for p0,p1 in _line_segment_intersections(a,b,cc,xy,eps*5.0):
+                raw_segments.append({
+                    "a":p0,"b":p1,"kind":"pair",
+                    "label":(source_a,source_b),"params":[0.0,1.0]
+                })
+
+    for i,first in enumerate(raw_segments):
+        a,b=first["a"],first["b"]
+        for j in range(i+1,len(raw_segments)):
+            second=raw_segments[j]
+            for t,u in _segment_pair_parameters(a,b,second["a"],second["b"],eps*5.0):
+                first["params"].append(t)
+                second["params"].append(u)
+
+    vertices=[]
+    buckets=defaultdict(list)
+    merge_tol=max(eps*5.0,1.0e-9)
+
+    def add_point(point):
+        key=(int(round(point[0]/merge_tol)),int(round(point[1]/merge_tol)))
+        for index in buckets[key]:
+            if _distance2(vertices[index],point)<=merge_tol*2.0:
+                return index
+        index=len(vertices)
+        vertices.append((float(point[0]),float(point[1])))
+        buckets[key].append(index)
+        return index
+
+    edges={}
+    boundary_directed=defaultdict(set)
+    for data in raw_segments:
+        a,b=data["a"],data["b"]
+        params=sorted(set(max(0.0,min(1.0,float(v))) for v in data["params"]))
+        for t0,t1 in zip(params,params[1:]):
+            if t1-t0<=eps:
+                continue
+            p0=(a[0]+(b[0]-a[0])*t0,a[1]+(b[1]-a[1])*t0)
+            p1=(a[0]+(b[0]-a[0])*t1,a[1]+(b[1]-a[1])*t1)
+            u=add_point(p0); v=add_point(p1)
+            if u==v:
+                continue
+            key=(min(u,v),max(u,v))
+            meta=edges.setdefault(key,{"pairs":set(),"boundaries":set()})
+            if data["kind"]=="boundary":
+                meta["boundaries"].add(int(data["label"]))
+                boundary_directed[(u,v)].add(int(data["label"]))
+            else:
+                meta["pairs"].add(tuple(sorted(data["label"])))
+
+    adjacency=defaultdict(list)
+    for u,v in edges:
+        adjacency[u].append(v)
+        adjacency[v].append(u)
+    for u in adjacency:
+        adjacency[u].sort(key=lambda v:math.atan2(
+            vertices[v][1]-vertices[u][1],vertices[v][0]-vertices[u][0]
+        ))
+
+    halfedge_face={}
+    faces=[]
+    visited=set()
+    for u,v in list(edges.keys()):
+        for start in ((u,v),(v,u)):
+            if start in visited:
+                continue
+            loop=[]
+            current=start
+            guard=0
+            while True:
+                guard+=1
+                if guard>len(edges)*4+20:
+                    raise SpatialRoofError("Не удалось замкнуть planar arrangement.")
+                if current in visited:
+                    break
+                visited.add(current)
+                a,b=current
+                loop.append(a)
+                outs=adjacency.get(b,())
+                if not outs:
+                    break
+                reverse_angle=math.atan2(
+                    vertices[a][1]-vertices[b][1],
+                    vertices[a][0]-vertices[b][0]
+                )
+                ranked=[]
+                for candidate in outs:
+                    angle=math.atan2(
+                        vertices[candidate][1]-vertices[b][1],
+                        vertices[candidate][0]-vertices[b][0]
+                    )
+                    turn=(reverse_angle-angle)%(2.0*math.pi)
+                    ranked.append((turn,candidate))
+                current=(b,min(ranked)[1])
+                if current==start:
+                    break
+            if len(loop)<3:
+                continue
+            polygon=[vertices[index] for index in loop]
+            area=_area(polygon)
+            if area<=eps*eps:
+                continue
+            centroid=_polygon_centroid_xy(polygon)
+            if not _inside_or_on(centroid,xy,eps*20.0):
+                continue
+            face_id=len(faces)
+            faces.append(loop)
+            for a,b in zip(loop,loop[1:]+loop[:1]):
+                halfedge_face[(a,b)]=face_id
+
+    if not faces:
+        raise SpatialRoofError("Planar arrangement не создал ячеек крыши.")
+
+    edge_faces=defaultdict(set)
+    for (a,b),face_id in halfedge_face.items():
+        edge_faces[(min(a,b),max(a,b))].add(face_id)
+
+    face_source=[None]*len(faces)
+    for directed,source_ids in boundary_directed.items():
+        face_id=halfedge_face.get(directed)
+        if face_id is None:
+            continue
+        for source_id in source_ids:
+            if face_source[face_id] is None:
+                face_source[face_id]=source_id
+            elif face_source[face_id]!=source_id:
+                raise SpatialRoofError(
+                    "Внутренняя arrangement-ячейка касается двух рёбер карниза."
+                )
+
+    changed=True
+    while changed:
+        changed=False
+        for edge_key,face_ids in edge_faces.items():
+            faces_list=list(face_ids)
+            if len(faces_list)!=2:
+                continue
+            meta=edges[edge_key]
+            pair_list=list(meta["pairs"])
+            if not pair_list:
+                continue
+            a_id,b_id=faces_list
+            sa,sb=face_source[a_id],face_source[b_id]
+            for pair in pair_list:
+                p,q=pair
+                if sa==p and sb is None:
+                    face_source[b_id]=q; changed=True
+                elif sa==q and sb is None:
+                    face_source[b_id]=p; changed=True
+                elif sb==p and sa is None:
+                    face_source[a_id]=q; changed=True
+                elif sb==q and sa is None:
+                    face_source[a_id]=p; changed=True
+
+    # Any disconnected internal pocket gets the plane that is lowest at its centroid.
+    for face_id,loop in enumerate(faces):
+        if face_source[face_id] is None:
+            polygon=[vertices[index] for index in loop]
+            centroid=_polygon_centroid_xy(polygon)
+            face_source[face_id]=min(
+                range(len(planes)),
+                key=lambda source_id:_plane_value(
+                    planes[source_id],centroid[0],centroid[1]
+                )
+            )
+
+    # Validate each internal arrangement edge against the labels of its two cells.
+    for edge_key,face_ids in edge_faces.items():
+        if len(face_ids)!=2:
+            continue
+        meta=edges[edge_key]
+        sa,sb=[face_source[index] for index in face_ids]
+        if sa==sb:
+            continue
+        if not any(sa in pair and sb in pair for pair in meta["pairs"]):
+            raise SpatialRoofError(
+                "Arrangement-edge получил несовместимые источники скатов."
+            )
+
+    patches_by_source=defaultdict(list)
+    for face_id,loop in enumerate(faces):
+        source_id=face_source[face_id]
+        plane=planes[source_id]
+        polygon=[vertices[index] for index in loop]
+        lifted=[
+            (
+                float(x),float(y),
+                float(plane[0])*x+float(plane[1])*y+float(plane[2])
+            )
+            for x,y in polygon
+        ]
+        if _area(polygon)<0.0:
+            lifted.reverse()
+        patches_by_source[source_id].append(lifted)
+
+    merge_scale=max(eps*10.0,1.0e-8)
+    face_loops=[]
+    for source_id,patches in sorted(patches_by_source.items()):
+        for loop in _merge_face_patches(patches,merge_scale):
+            if len(loop)>=3:
+                face_loops.append((source_id,loop))
+    face_loops=_split_global_t_junctions(face_loops,merge_scale)
+
+    out_vertices=[]
+    out_faces=[]
+    out_sources=[]
+    out_buckets=defaultdict(list)
+
+    def add_out(point):
+        key=tuple(int(round(float(v)/merge_scale)) for v in point)
+        for index in out_buckets[key]:
+            if _distance3(out_vertices[index],point)<=merge_scale*2.0:
+                return index
+        index=len(out_vertices)
+        out_vertices.append(tuple(float(v) for v in point))
+        out_buckets[key].append(index)
+        return index
+
+    for source_id,loop in face_loops:
+        face=[add_out(point) for point in loop]
+        clean=[]
+        for index in face:
+            if not clean or clean[-1]!=index:
+                clean.append(index)
+        if len(clean)>=3:
+            if _area([(out_vertices[index][0],out_vertices[index][1]) for index in clean])<0:
+                clean.reverse()
+            out_faces.append(tuple(clean))
+            out_sources.append(int(source_id))
+
+    if not out_faces:
+        raise SpatialRoofError("Planar arrangement не сформировал скатов.")
+    return out_vertices,out_faces,out_sources
+
+
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a roof from edge-specific pitches and a 3D eave loop.
 
@@ -1750,45 +2075,8 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[_remap_source_id(source, source_edge_map) for source in sources]
 
-    # Non-planar eaves: preserve the established 2D event topology and
-    # compute every facet boundary directly from neighbouring 3D planes.
-    xy2=[(p[0],p[1]) for p in points]
-    uniform_pitch=max(angles)-min(angles)<=1.0e-9
-    if uniform_pitch:
-        try:
-            topology_vertices,topology_faces,topology_sources=build_roof_mesh(
-                xy2,1.0,0.0,allow_oblique=True
-            )
-        except SkeletonError as exc:
-            raise SpatialRoofError("Не удалось получить XY-топологию: "+str(exc)) from exc
-    else:
-        flat_planes=[
-            _edge_plane(
-                (points[i][0],points[i][1],0.0),
-                (points[(i+1)%count][0],points[(i+1)%count][1],0.0),
-                angles[i],0.0
-            )
-            for i in range(count)
-        ]
-        flat_speeds=[1.0/math.tan(angle) for angle in angles]
-        try:
-            topology_vertices,topology_faces,topology_sources=build_weighted_roof_mesh(
-                xy2,flat_speeds,flat_planes
-            )
-        except WeightedSkeletonError:
-            try:
-                topology_vertices,topology_faces,topology_sources=build_roof_mesh(
-                    xy2,1.0,0.0,allow_oblique=True
-                )
-            except SkeletonError as exc:
-                raise SpatialRoofError("Не удалось получить topology индивидуальных углов: "+str(exc)) from exc
-    adjacency=_derive_source_adjacency(
-        topology_vertices,topology_faces,topology_sources,
-        max(eps*10.0,1.0e-8)
-    )
-    vertices,faces,sources=_build_mask_clipped_spatial_roof(
-        topology_vertices,topology_faces,topology_sources,
-        planes,adjacency,eps
+    vertices,faces,sources=_build_planar_support_arrangement(
+        points,planes,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
