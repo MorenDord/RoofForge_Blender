@@ -649,8 +649,11 @@ def _rebuild_existing_roof_profiles(roof_obj, kinds=None):
     roof_obj['roofforge_profiles_updating'] = True
     try:
         source_surface = None
-        if roof_obj.get("roofforge_generated", False) and roof_obj.get("roofforge_spatial", False):
-            source_surface = _spatial_profile_surface_from_source_mesh(roof_obj)
+        if roof_obj.get("roofforge_generated", False):
+            has_edge_pitches = int(roof_obj.get("roofforge_edge_pitch_count", 0)) >= 3
+            has_saved_source = bool(roof_obj.get("roofforge_spatial_profile_source_mesh", ""))
+            if roof_obj.get("roofforge_spatial", False) or has_edge_pitches or has_saved_source:
+                source_surface = _spatial_profile_surface_from_source_mesh(roof_obj)
         surface_vertices, surface_faces, seam_graph, boundary_edges = (
             source_surface if source_surface is not None
             else _world_surface_from_mesh_object(roof_obj)
@@ -874,7 +877,7 @@ def _rebuild_generated_roof(roof_obj):
 
         _replace_mesh_data(roof_obj, roof_obj.name + "_Mesh", mesh_vertices, mesh_faces)
         _update_roof_modifiers(roof_obj, settings)
-        if is_spatial:
+        if is_spatial or has_edge_pitches:
             _store_spatial_profile_source_mesh(
                 roof_obj, profile_cap_surface_vertices, profile_faces, profile_sources
             )
