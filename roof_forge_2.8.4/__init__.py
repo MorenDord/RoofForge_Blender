@@ -814,6 +814,13 @@ def _rebuild_existing_roof_profiles(roof_obj, kinds=None):
             source_surface if source_surface is not None
             else _world_surface_from_mesh_object(roof_obj)
         )
+        roof_obj["roofforge_seam_edges"] = len(seam_graph)
+        roof_obj["roofforge_ridge_edge_count"] = sum(
+            1 for edge in seam_graph if str(edge[4]).upper() == "RIDGE"
+        )
+        roof_obj["roofforge_valley_edge_count"] = sum(
+            1 for edge in seam_graph if str(edge[4]).upper() == "VALLEY"
+        )
         inverse = roof_obj.matrix_world.inverted_safe()
         for kind in kinds:
             if kind == 'RIDGE':
@@ -1180,9 +1187,14 @@ def _rebuild_generated_roof(roof_obj, rebuild_details=True):
         roof_obj["roofforge_last_type"] = settings.roof_type
         roof_obj["roofforge_top_vertices"] = len(surface_vertices)
         roof_obj["roofforge_top_faces"] = len(surface_faces)
-        roof_obj["roofforge_seam_edges"] = len(seams)
-        roof_obj["roofforge_ridge_edge_count"] = sum(1 for edge in seams if str(edge[4]).upper() == "RIDGE")
-        roof_obj["roofforge_valley_edge_count"] = sum(1 for edge in seams if str(edge[4]).upper() == "VALLEY")
+        if rebuild_details:
+            roof_obj["roofforge_seam_edges"] = len(seams)
+            roof_obj["roofforge_ridge_edge_count"] = sum(
+                1 for edge in seams if str(edge[4]).upper() == "RIDGE"
+            )
+            roof_obj["roofforge_valley_edge_count"] = sum(
+                1 for edge in seams if str(edge[4]).upper() == "VALLEY"
+            )
     except Exception as exc:
         roof_obj["roofforge_error"] = str(exc)
     finally:
