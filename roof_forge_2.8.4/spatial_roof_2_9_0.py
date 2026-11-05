@@ -627,6 +627,106 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 )
 
 
+def _weld_nearby_spatial_event_vertices(vertices, faces, sources, outline, eps, scale):
+    """Weld nearly coincident interior event nodes after spatial lifting.
+
+    Small eave height changes can separate two independently computed
+    skeleton nodes by a few millimetres in XYZ even though they represent one
+    projected event. Merge only interior vertices within a tolerance derived
+    from the eave height range; boundary vertices are fixed to the original
+    XYZ contour and are never pulled toward an interior node.
+    """
+    height_range=max(float(p[2]) for p in outline)-min(float(p[2]) for p in outline)
+    event_tolerance=max(
+        eps*100.0,
+        min(scale*1.0e-2,height_range*0.75)
+        if height_range>eps*100.0 else scale*1.0e-7
+    )
+    event_tolerance=max(event_tolerance,eps*100.0)
+    if event_tolerance<=eps*100.0:
+        return list(vertices),list(faces),list(sources)
+
+    def is_boundary(point):
+        for edge_id,p in enumerate(outline):
+            q=outline[(edge_id+1)%len(outline)]
+            on,t,distance=_point_on_segment(point[:2],p[:2],q[:2],eps*20.0)
+            if not on:
+                continue
+            t=max(0.0,min(1.0,t))
+            expected_z=p[2]+(q[2]-p[2])*t
+            if abs(point[2]-expected_z)<=max(eps*100.0,scale*2.5e-4):
+                return True
+        return False
+
+    welded=[]
+    counts=[]
+    sums=[]
+    boundary_fixed=[]
+    buckets=defaultdict(list)
+    old_to_new=[]
+
+    for raw in vertices:
+        point=tuple(float(v) for v in raw)
+        if is_boundary(point):
+            index=len(welded)
+            welded.append(point)
+            counts.append(1)
+            sums.append(list(point))
+            boundary_fixed.append(True)
+            old_to_new.append(index)
+            continue
+
+        cell=tuple(int(math.floor(point[k]/event_tolerance)) for k in range(3))
+        best=None
+        best_distance=float("inf")
+        for dx in (-1,0,1):
+            for dy in (-1,0,1):
+                for dz in (-1,0,1):
+                    for candidate_id in buckets.get((cell[0]+dx,cell[1]+dy,cell[2]+dz),()):
+                        if boundary_fixed[candidate_id]:
+                            continue
+                        distance=_distance3(point,welded[candidate_id])
+                        if distance<=event_tolerance and distance<best_distance:
+                            best,best_distance=candidate_id,distance
+        if best is None:
+            best=len(welded)
+            welded.append(point)
+            counts.append(1)
+            sums.append(list(point))
+            boundary_fixed.append(False)
+            buckets[cell].append(best)
+        else:
+            for axis in range(3):
+                sums[best][axis]+=point[axis]
+            counts[best]+=1
+            welded[best]=tuple(value/counts[best] for value in sums[best])
+        old_to_new.append(best)
+
+    remapped_faces=[]
+    remapped_sources=[]
+    for face,source in zip(faces,sources):
+        mapped=[]
+        for old_id in face:
+            new_id=old_to_new[old_id]
+            if not mapped or mapped[-1]!=new_id:
+                mapped.append(new_id)
+        if len(mapped)>1 and mapped[0]==mapped[-1]:
+            mapped.pop()
+        if len(set(mapped))<3:
+            raise SpatialRoofError(
+                "Сваривание близких пространственных узлов схлопнуло одну из граней ската."
+            )
+        remapped_faces.append(tuple(mapped))
+        remapped_sources.append(source)
+
+    # Compact unused vertices but keep all source-face labels in the same order.
+    used=sorted({index for face in remapped_faces for index in face})
+    index_map={old:new for new,old in enumerate(used)}
+    compact_vertices=[welded[index] for index in used]
+    compact_faces=[tuple(index_map[index] for index in face) for face in remapped_faces]
+    return compact_vertices,compact_faces,remapped_sources
+
+
 def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a non-planar concave or convex roof from a 3D eave loop.
 
@@ -693,6 +793,9 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
     vertices, faces, sources = _embed_topology(
         template_vertices, template_faces, template_sources,
         points, planes, eps, span
+    )
+    vertices, faces, sources = _weld_nearby_spatial_event_vertices(
+        vertices, faces, sources, points, eps, span
     )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
     return vertices, faces, [
