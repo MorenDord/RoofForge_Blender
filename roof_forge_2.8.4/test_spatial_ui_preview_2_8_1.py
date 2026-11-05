@@ -136,6 +136,13 @@ class SpatialPreviewTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(struct.unpack(">2I", png[16:24]), (128, 128))
 
+    def test_source_outline_preview_is_debounced_until_slider_pause(self):
+        self.assertIn("_SPATIAL_PREVIEW_DELAY = 0.18", SOURCE)
+        self.assertIn("_SPATIAL_PREVIEW_DUE = time.monotonic() + _SPATIAL_PREVIEW_DELAY", SOURCE)
+        self.assertIn("if roof_obj is None and signature != _SPATIAL_PREVIEW_SIGNATURE", SOURCE)
+        self.assertIn("_flush_spatial_preview_request", SOURCE)
+        self.assertIn("area.tag_redraw()", SOURCE)
+
     def test_generated_pitch_and_profile_callbacks_are_coalesced(self):
         self.assertIn("_schedule_roof_update(owner, \"roof\")", SOURCE)
         self.assertIn("_schedule_roof_update(owner, \"profiles\")", SOURCE)
