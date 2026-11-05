@@ -204,25 +204,31 @@ def _best_concurrent_point(planes, source_ids, determinant_eps, residual_eps):
 
 
 def _face_corner_direction(vertices, face, vertex_id):
+    """Return the midpoint angle of the face's actual interior corner sector.
+
+    The normalized-vector sum always chooses the smaller angle and therefore
+    misorders reflex (>180 degree) corners. Roof facets around a split node
+    must be sorted by their oriented interior wedge, not by the shortest
+    bisector between adjacent boundary rays.
+    """
     position = face.index(vertex_id)
     centre = vertices[vertex_id]
     previous = vertices[face[(position - 1) % len(face)]]
     following = vertices[face[(position + 1) % len(face)]]
-    u = (previous[0] - centre[0], previous[1] - centre[1])
-    v = (following[0] - centre[0], following[1] - centre[1])
-    ul = math.hypot(*u)
-    vl = math.hypot(*v)
-    if ul > 1.0e-12:
-        u = (u[0] / ul, u[1] / ul)
-    if vl > 1.0e-12:
-        v = (v[0] / vl, v[1] / vl)
-    direction = (u[0] + v[0], u[1] + v[1])
-    if math.hypot(*direction) <= 1.0e-10:
+    angle_previous = math.atan2(
+        previous[1] - centre[1], previous[0] - centre[0]
+    )
+    angle_following = math.atan2(
+        following[1] - centre[1], following[0] - centre[0]
+    )
+    # Faces are oriented counter-clockwise in XY. The interior sector runs
+    # counter-clockwise from the outgoing ray to the incoming ray.
+    span = (angle_previous - angle_following) % (2.0 * math.pi)
+    if span <= 1.0e-10:
         cx = sum(vertices[i][0] for i in face) / len(face)
         cy = sum(vertices[i][1] for i in face) / len(face)
-        direction = (cx - centre[0], cy - centre[1])
-    return math.atan2(direction[1], direction[0])
-
+        return math.atan2(cy - centre[1], cx - centre[0])
+    return (angle_following + 0.5 * span) % (2.0 * math.pi)
 
 def _proper_segment_cross(a, b, c, d, eps):
     """True for a proper XY crossing; shared endpoints are allowed."""
