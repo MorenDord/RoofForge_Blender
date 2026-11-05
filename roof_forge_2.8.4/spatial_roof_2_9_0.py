@@ -317,13 +317,13 @@ def _embed_topology(template_vertices, template_faces, template_sources,
                 _plane_value(planes[source_id], target[0], target[1])
                 for source_id in incident_sources
             ]
-            if max(z_values) - min(z_values) <= node_height_tolerance:
-                point = (target[0], target[1], sum(z_values) / len(z_values))
-            else:
-                point = _two_plane_projection(
-                    planes[incident_sources[0]], planes[incident_sources[1]],
-                    target, determinant_tolerance
-                )
+            # Keep the event's XY location. Projecting a two-plane line back
+            # to its nearest point can move a reflex event across a sibling
+            # wavefront edge and invert the projected facet partition. A
+            # shared least-squares height retains the tested 2D topology;
+            # the residual bound in _validate_lifted_mesh limits the local
+            # 3D compromise.
+            point = (target[0], target[1], sum(z_values) / len(z_values))
             vertex_map[vertex_id] = append_vertex(point)
             continue
 
