@@ -538,8 +538,13 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 continue
             if _proper_segment_cross(vertices[a], vertices[b], vertices[c], vertices[d], cross_eps):
                 raise SpatialRoofError(
-                    "Проекции соседних скатов пересекаются после 3D-совмещения; "
-                    "для этих высот и углов нужна другая последовательность событий."
+                    "Проекции скатов пересекаются: face {} (source {}), edge {}-{} "
+                    "и face {} (source {}), edge {}-{}. Координаты XY: {} {} / {} {}.".format(
+                        face_a, sources[face_a], a, b,
+                        face_b, sources[face_b], c, d,
+                        vertices[a][:2], vertices[b][:2],
+                        vertices[c][:2], vertices[d][:2],
+                    )
                 )
 
     boundary_intervals = [[] for _ in range(len(outline))]
