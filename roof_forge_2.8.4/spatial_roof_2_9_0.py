@@ -1465,9 +1465,7 @@ def _repair_internal_seam_loops(face_loops, planes, outline_vertices, eps, scale
     return face_loops
 
 
-
 def _split_polygon_by_line(poly, a, b, c, eps):
-    """Split a convex polygon by a*x+b*y+c=0 into both closed sides."""
     positive = _clip_halfplane(poly, -a, -b, -c, eps)
     negative = _clip_halfplane(poly, a, b, c, eps)
     result = []
@@ -1494,13 +1492,8 @@ def _polygon_centroid_xy(poly):
     return cx * factor, cy * factor
 
 
-def _build_nonplanar_lower_envelope(points, planes, eps, eave_lift=0.0):
-    """Build the exact lower envelope of all support planes over the footprint.
-
-    This solver is independent of wavefront event timing. It is therefore
-    suitable for non-planar eaves where every boundary edge has its own
-    starting height.
-    """
+def _build_nonplanar_lower_envelope(points, planes, eps):
+    """Exact lower envelope of all edge-support planes over the XY footprint."""
     xy = [(float(point[0]), float(point[1])) for point in points]
     triangles = _triangulate_xy(xy, eps)
     patches_by_source = defaultdict(list)
@@ -1509,21 +1502,17 @@ def _build_nonplanar_lower_envelope(points, planes, eps, eave_lift=0.0):
         cells = [list(triangle)]
         for source_a in range(len(planes)):
             for source_b in range(source_a + 1, len(planes)):
-                plane_a = planes[source_a]
-                plane_b = planes[source_b]
-                line_a = float(plane_a[0]) - float(plane_b[0])
-                line_b = float(plane_a[1]) - float(plane_b[1])
-                line_c = float(plane_a[2]) - float(plane_b[2])
-                if math.hypot(line_a, line_b) <= eps:
+                pa = planes[source_a]
+                pb = planes[source_b]
+                a = float(pa[0]) - float(pb[0])
+                b = float(pa[1]) - float(pb[1])
+                cc = float(pa[2]) - float(pb[2])
+                if math.hypot(a, b) <= eps:
                     continue
-                split_cells = []
+                split = []
                 for cell in cells:
-                    split_cells.extend(
-                        _split_polygon_by_line(
-                            cell, line_a, line_b, line_c, eps * 5.0
-                        )
-                    )
-                cells = split_cells
+                    split.extend(_split_polygon_by_line(cell, a, b, cc, eps * 5.0))
+                cells = split
                 if not cells:
                     break
             if not cells:
@@ -1535,47 +1524,36 @@ def _build_nonplanar_lower_envelope(points, planes, eps, eave_lift=0.0):
             centroid = _polygon_centroid_xy(cell)
             source_id = min(
                 range(len(planes)),
-                key=lambda index: _plane_value(
-                    planes[index], centroid[0], centroid[1]
-                ),
+                key=lambda index: _plane_value(planes[index], centroid[0], centroid[1]),
             )
             plane = planes[source_id]
-            lifted = [
+            patch = [
                 (
                     float(x),
                     float(y),
-                    float(plane[0]) * x
-                    + float(plane[1]) * y
-                    + float(plane[2]),
+                    float(plane[0]) * x + float(plane[1]) * y + float(plane[2]),
                 )
                 for x, y in cell
             ]
             if _area(cell) < 0.0:
-                lifted.reverse()
-            patches_by_source[source_id].append(lifted)
+                patch.reverse()
+            patches_by_source[source_id].append(patch)
 
     if not patches_by_source:
-        raise SpatialRoofError(
-            "Не удалось построить нижнюю огибающую опорных плоскостей."
-        )
+        raise SpatialRoofError("Не удалось построить нижнюю огибающую опорных плоскостей.")
 
     merge_scale = max(eps * 10.0, 1.0e-8)
     face_loops = []
-    for source_id in sorted(patches_by_source):
-        for loop in _merge_face_patches(
-            patches_by_source[source_id], merge_scale
-        ):
+    for source_id, patches in sorted(patches_by_source.items()):
+        for loop in _merge_face_patches(patches, merge_scale):
             if len(loop) >= 3:
                 face_loops.append((source_id, loop))
 
     if not face_loops:
-        raise SpatialRoofError(
-            "После объединения областей нижней огибающей не осталось скатов."
-        )
+        raise SpatialRoofError("Нижняя огибающая не сформировала ни одного ската.")
 
     face_loops = _split_global_t_junctions(face_loops, merge_scale)
 
-    # Canonicalize shared points globally without changing the source plane.
     vertices = []
     faces = []
     sources = []
@@ -1601,16 +1579,10 @@ def _build_nonplanar_lower_envelope(points, planes, eps, eave_lift=0.0):
             clean.pop()
         if len(clean) < 3:
             continue
-        if _area([
-            (vertices[index][0], vertices[index][1])
-            for index in clean
-        ]) < 0.0:
+        if _area([(vertices[index][0], vertices[index][1]) for index in clean]) < 0.0:
             clean.reverse()
         faces.append(tuple(clean))
         sources.append(source_id)
-
-    if not faces:
-        raise SpatialRoofError("Нижняя огибающая не сформировала ни одной грани.")
 
     return vertices, faces, sources
 
@@ -1673,15 +1645,14 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     if z_span<=flat_tolerance:
         # With a uniform pitch use the established reflex-aware 2D topology
         # and lift its facets onto the identical support planes.
-        # Non-planar eaves are solved directly as a support-plane lower
-    # envelope. Their boundary edges have different starting heights, so a
-    # common-time weighted wavefront is not a mathematically equivalent model.
+        # Non-planar eaves have different edge starting heights, so use the
+    # exact lower envelope of their support planes rather than a common-time
+    # weighted wavefront.
     vertices,faces,sources=_build_nonplanar_lower_envelope(
-        points,planes,eps,eave_lift=0.0
+        points,planes,eps
     )
     _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
     return vertices,faces,[
         _remap_source_id(source,source_edge_map) for source in sources
     ]
-
 
