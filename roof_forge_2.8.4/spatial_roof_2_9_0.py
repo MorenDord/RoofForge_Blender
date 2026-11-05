@@ -550,26 +550,13 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
                     float(pitch_angles[i]), float(eave_lift))
         for i in range(count)
     ]
-    # The projected wavefront speed is determined by the inward component
-    # of each 3D facet gradient. For a flat eave this reduces to cot(pitch);
-    # on a sloping eave it accounts for the along-edge grade.
-    effective_angles = []
-    for i in range(count):
-        p = points[i]
-        q = points[(i + 1) % count]
-        length = math.hypot(q[0] - p[0], q[1] - p[1])
-        grade = (q[2] - p[2]) / length
-        tangent = math.tan(float(pitch_angles[i]))
-        inward_grade = math.sqrt(max(0.0, tangent * tangent - grade * grade))
-        if inward_grade <= 1.0e-10:
-            raise SpatialRoofError(
-                "Для ребра {} не хватает уклона внутрь контура с учётом перепада высот карниза.".format(i + 1)
-            )
-        effective_angles.append(math.atan(inward_grade))
-
+    # Use the proven reflex-aware straight-skeleton topology as a candidate
+    # partition, then lift every facet onto its own 3D eave support plane.
+    # The strict geometric validator below rejects cases where independent
+    # pitches change the event order enough to invalidate that partition.
     try:
-        template_vertices, template_faces, template_sources = build_weighted_roof_mesh(
-            xy, effective_angles, 0.0
+        template_vertices, template_faces, template_sources = build_roof_mesh(
+            xy, 1.0, 0.0, allow_oblique=True
         )
     except SkeletonError as exc:
         raise SpatialRoofError("Не удалось построить топологию wavefront: " + str(exc)) from exc
