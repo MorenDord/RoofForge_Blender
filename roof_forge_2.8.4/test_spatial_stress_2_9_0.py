@@ -57,17 +57,22 @@ class MultiReflexSpatialStressTests(unittest.TestCase):
         self.assertIn("VALLEY", seam_types)
 
         for kind, width in (("RIDGE", 0.18), ("VALLEY", 0.22)):
-            profile_vertices, profile_faces = build_inset_seam_profile_mesh(
-                vertices,
-                faces,
-                seams,
-                kind,
-                width,
-                (0.0, 0.0, 0.015),
-                end_offset=0.0,
-                seat_sink_offset=(0.0, 0.0, -0.0002),
-                outline=[(point[0], point[1]) for point in outline],
-            )
+            try:
+                profile_vertices, profile_faces = build_inset_seam_profile_mesh(
+                    vertices,
+                    faces,
+                    seams,
+                    kind,
+                    width,
+                    (0.0, 0.0, 0.015),
+                    end_offset=0.0,
+                    seat_sink_offset=(0.0, 0.0, -0.0002),
+                    outline=[(point[0], point[1]) for point in outline],
+                )
+            except Exception as exc:
+                raise AssertionError(
+                    "{} profile construction failed: {}".format(kind, exc)
+                ) from exc
             self.assertTrue(profile_vertices, kind + " profile has no vertices")
             self.assertTrue(profile_faces, kind + " profile has no faces")
             profile_uses = edge_uses(profile_faces)
