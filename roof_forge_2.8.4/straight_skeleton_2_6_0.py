@@ -208,8 +208,8 @@ class _WaveVertex:
             direction = _V2(0.0, 0.0)
             if direction_vectors is not None:
                 direction = _V2(
-                    float(direction_vectors[0][0]) + float(direction_vectors[1][0]),
-                    float(direction_vectors[0][1]) + float(direction_vectors[1][1]),
+                    float(direction_vectors[0].x) + float(direction_vectors[1].x),
+                    float(direction_vectors[0].y) + float(direction_vectors[1].y),
                 )
             if abs(direction) <= _EPS:
                 direction = -left_direction + right_direction
