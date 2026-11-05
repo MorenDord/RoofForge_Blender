@@ -1,0 +1,31 @@
+name: RoofForge spatial geometry tests
+
+on:
+  push:
+    branches:
+      - feature/spatial-roof-2.9.0
+  pull_request:
+
+jobs:
+  pure-python-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile spatial modules
+        working-directory: roof_forge_2.8.4
+        run: python -m py_compile spatial_roof_2_9_0.py straight_skeleton_2_6_0.py
+      - name: Run spatial topology-lifting tests
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_spatial_roof_2_9_0.py
+      - name: Run existing geometry regressions
+        working-directory: roof_forge_2.8.4
+        run: >-
+          python -m unittest -v
+          test_geometry_2_6_0.py
+          test_user_world_loop_2_6_0.py
+          test_user_oblique_contour_2_6_0.py
+          test_spatial_roof_2_8_4.py
+          test_spatial_roof_details_2_8_4.py
