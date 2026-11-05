@@ -1199,18 +1199,6 @@ def _spatial_outline_for_panel(active,roof_obj,is_generated):
     return None
 
 
-def _spatial_outline_for_panel(active,roof_obj,is_generated):
-    if is_generated and roof_obj.get('roofforge_spatial',False):
-        try: return json.loads(roof_obj.get('roofforge_outline','[]'))
-        except Exception: return None
-    try:
-        points=_extract_loop_from_object(active)
-        if len(points)>=3 and max(float(p.z) for p in points)-min(float(p.z) for p in points)>1.0e-5:
-            return [(float(p.x),float(p.y),float(p.z)) for p in points]
-    except Exception: pass
-    return None
-
-
 def _spatial_pitch_settings_update(self, context):
     owner = getattr(self, "id_data", None)
     if not isinstance(owner, bpy.types.Object) or not owner.get("roofforge_generated", False):
