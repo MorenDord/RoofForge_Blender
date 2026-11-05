@@ -1,7 +1,7 @@
 bl_info = {
     "name": "RoofForge - Parametric Roof Generator",
     "author": "OpenAI",
-    "version": (2, 8, 4),
+    "version": (2, 9, 0),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > RoofForge",
     "description": "Low-poly roofs and automatic lightweight standing-seam layout",
