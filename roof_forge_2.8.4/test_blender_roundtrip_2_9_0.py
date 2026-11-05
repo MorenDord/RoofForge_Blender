@@ -51,9 +51,13 @@ def main():
     roofs = [
         obj for obj in bpy.context.scene.objects
         if obj.type == "MESH" and obj.get("roofforge_generated", False)
-        and obj.name in {"RF_Spatial_L_VariablePitch_Roof", "RF_Spatial_U_VariablePitch_Roof"}
+        and obj.name in {
+            "RF_Spatial_L_VariablePitch_Roof",
+            "RF_Spatial_U_VariablePitch_Roof",
+            "RF_Spatial_ObliqueMultiReflex_Roof",
+        }
     ]
-    require(len(roofs) == 2, "Expected saved spatial L/U roofs after reopening the .blend.")
+    require(len(roofs) == 3, "Expected saved spatial L/U and oblique multi-reflex roofs after reopening the .blend.")
 
     for roof in roofs:
         source_name = str(roof.get("roofforge_spatial_profile_source_mesh", ""))
