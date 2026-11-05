@@ -9,7 +9,8 @@ import unittest
 from collections import Counter
 
 from spatial_roof_2_9_0 import (
-    build_spatial_roof_mesh, SpatialRoofError, _face_corner_direction
+    build_spatial_roof_mesh, SpatialRoofError, _face_corner_direction,
+    _representative_source_id, _source_id_values,
 )
 
 
@@ -279,6 +280,11 @@ class SpatialTopologyLiftTests(unittest.TestCase):
             for source_id in a[2]
         ]
         self.assertEqual(b[2], expected_reversed_sources)
+
+    def test_merged_source_ids_are_safe_for_integer_face_attributes(self):
+        self.assertEqual(_source_id_values((4, 2)), (4, 2))
+        self.assertEqual(_representative_source_id((4, 2)), 2)
+        self.assertEqual(_representative_source_id((-2, 3)), -2)
 
     def test_rejects_pitch_below_eave_grade(self):
         outline = [(0, 0, 0), (1, 0, 2), (1, 1, 2), (0, 1, 0)]
