@@ -57,6 +57,24 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         ]
         self.assert_closed_footprint_mesh(outline, [math.radians(35)] * 8)
 
+
+    def test_flat_concave_l_individual_pitches(self):
+        outline = [
+            (0, 0, 0), (8, 0, 0), (8, 4, 0),
+            (4, 4, 0), (4, 8, 0), (0, 8, 0),
+        ]
+        pitches = [math.radians(v) for v in (30, 36, 42, 34, 39, 32)]
+        self.assert_closed_footprint_mesh(outline, pitches)
+
+    def test_flat_concave_u_individual_pitches(self):
+        outline = [
+            (0, 0, 0), (10, 0, 0), (10, 8, 0),
+            (7, 8, 0), (7, 3, 0), (3, 3, 0),
+            (3, 8, 0), (0, 8, 0),
+        ]
+        pitches = [math.radians(v) for v in (32, 35, 38, 40, 34, 37, 31, 36)]
+        self.assert_closed_footprint_mesh(outline, pitches)
+
     def test_reversed_winding_preserves_build(self):
         outline = [(0, 0, 0), (8, 0, .2), (8, 5, .4), (0, 5, .1)]
         pitches = [math.radians(v) for v in (35, 38, 40, 36)]
