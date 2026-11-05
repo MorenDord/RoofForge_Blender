@@ -133,7 +133,7 @@ class SpatialPreviewTests(unittest.TestCase):
         finally:
             NAMESPACE["build_spatial_roof_mesh"] = original
 
-        self.assertTrue(png.startswith(b"\\x89PNG"))
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(struct.unpack(">2I", png[16:24]), (128, 128))
 
     def test_generated_pitch_and_profile_callbacks_are_coalesced(self):
