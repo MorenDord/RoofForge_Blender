@@ -1022,93 +1022,153 @@ _SPATIAL_PREVIEW_PATH = None
 _SPATIAL_PREVIEW_SIGNATURE = None
 
 
-def _spatial_preview_png(points, size=256, text_scale=1.0):
-    """Build a small RGBA top-view diagram with edge numbers (1-based)."""
-    pts = [(float(p[0]), float(p[1])) for p in points]
-    if len(pts) < 3:
+def _spatial_preview_png(points, size=320, pitch_angles=None):
+    """Transparent, antialiased plan view of every generated roof facet."""
+    pts3 = [tuple(float(v) for v in p[:3]) if len(p) >= 3
+            else (float(p[0]), float(p[1]), 0.0) for p in points]
+    if len(pts3) < 3:
         raise ValueError("Для схемы нужно не менее трёх точек.")
-    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    if pitch_angles is None or len(pitch_angles) != len(pts3):
+        pitch_angles = [math.radians(35.0)] * len(pts3)
+    try:
+        z_span = max(p[2] for p in pts3) - min(p[2] for p in pts3)
+        if z_span > 1.0e-7:
+            roof_vertices, roof_faces, source_ids = build_spatial_roof_mesh(pts3, pitch_angles)
+        else:
+            roof_vertices, roof_faces, source_ids = build_weighted_roof_mesh(
+                [(p[0], p[1]) for p in pts3], pitch_angles
+            )
+        facet_polygons = [[(roof_vertices[i][0], roof_vertices[i][1]) for i in face]
+                          for face in roof_faces]
+    except Exception:
+        facet_polygons = [[(p[0], p[1]) for p in pts3]]
+
+    all_xy = [p for poly in facet_polygons for p in poly]
+    min_x, max_x = min(p[0] for p in all_xy), max(p[0] for p in all_xy)
+    min_y, max_y = min(p[1] for p in all_xy), max(p[1] for p in all_xy)
     span = max(max_x-min_x, max_y-min_y, 1.0e-9)
-    margin = 38
-    scale = (size-2*margin)/span
-    extra_x = (size-2*margin-(max_x-min_x)*scale)*0.5
-    extra_y = (size-2*margin-(max_y-min_y)*scale)*0.5
-    screen = [(int(round(margin+(x-min_x)*scale+extra_x)),
-               int(round(size-margin-(y-min_y)*scale-extra_y))) for x,y in pts]
-    # Monochrome technical drawing: white paper, black contour and labels.
-    pixels = bytearray([255,255,255,255]*(size*size))
-    def px(x,y,c):
-        if 0 <= x < size and 0 <= y < size:
-            i=(y*size+x)*4; pixels[i:i+4]=bytes((*c,255))
-    def disk(x,y,r,c):
-        for yy in range(y-r,y+r+1):
-            for xx in range(x-r,x+r+1):
-                if (xx-x)**2+(yy-y)**2 <= r*r: px(xx,yy,c)
-    def line(x0,y0,x1,y1,c,w=4):
-        dx,dy=abs(x1-x0),abs(y1-y0); sx=1 if x0<x1 else -1; sy=1 if y0<y1 else -1; err=dx-dy
-        while True:
-            disk(x0,y0,w//2,c)
-            if x0==x1 and y0==y1: break
-            e=2*err
-            if e > -dy: err-=dy; x0+=sx
-            if e < dx: err+=dx; y0+=sy
-    # Polygon fill using even/odd scanline rule.
-    for y in range(size):
-        hits=[]
-        for i,(x1,y1) in enumerate(screen):
-            x2,y2=screen[(i+1)%len(screen)]
-            if (y1<=y<y2) or (y2<=y<y1): hits.append(int(x1+(y-y1)*(x2-x1)/(y2-y1)))
-        hits.sort()
-        for j in range(0,len(hits)-1,2):
-            for x in range(max(0,hits[j]),min(size,hits[j+1]+1)):
-                px(x,y,(255,255,255))
+    margin = max(20.0, size*0.09)
+    scale = (size-2.0*margin)/span
+    ox = (size-(max_x-min_x)*scale)*0.5
+    oy = (size-(max_y-min_y)*scale)*0.5
+    ss = 4
+    high = size*ss
+    alpha = bytearray(high*high)
+
+    def screen(p):
+        return ((ox+(p[0]-min_x)*scale)*ss,
+                (size-(oy+(p[1]-min_y)*scale))*ss)
+
+    def segment(a,b,radius):
+        ax,ay=screen(a); bx,by=screen(b)
+        dx,dy=bx-ax,by-ay
+        den=dx*dx+dy*dy
+        x0=max(0,int(math.floor(min(ax,bx)-radius-1)))
+        x1=min(high-1,int(math.ceil(max(ax,bx)+radius+1)))
+        y0=max(0,int(math.floor(min(ay,by)-radius-1)))
+        y1=min(high-1,int(math.ceil(max(ay,by)+radius+1)))
+        for yy in range(y0,y1+1):
+            for xx in range(x0,x1+1):
+                px,py=xx+0.5,yy+0.5
+                t=0.0 if den<=1.0e-12 else max(0.0,min(1.0,((px-ax)*dx+(py-ay)*dy)/den))
+                qx,qy=ax+t*dx,ay+t*dy
+                if (px-qx)**2+(py-qy)**2<=radius*radius:
+                    alpha[yy*high+xx]=255
+
+    def inside(p,poly):
+        x,y=p; result=False
+        for i,a in enumerate(poly):
+            b=poly[(i+1)%len(poly)]
+            if (a[1]>y)!=(b[1]>y):
+                ix=a[0]+(y-a[1])*(b[0]-a[0])/(b[1]-a[1])
+                if x<ix: result=not result
+        return result
+
+    def boundary_distance(p,poly):
+        x,y=p; best=float("inf")
+        for i,a in enumerate(poly):
+            b=poly[(i+1)%len(poly)]
+            dx,dy=b[0]-a[0],b[1]-a[1]
+            den=dx*dx+dy*dy
+            t=0.0 if den<1.0e-20 else max(0.0,min(1.0,((x-a[0])*dx+(y-a[1])*dy)/den))
+            best=min(best,math.hypot(x-a[0]-t*dx,y-a[1]-t*dy))
+        return best
+
+    def label_anchor(poly):
+        best=(sum(p[0] for p in poly)/len(poly),sum(p[1] for p in poly)/len(poly))
+        score=-1.0
+        for gy in range(1,17):
+            for gx in range(1,17):
+                p=(min_x+(max_x-min_x)*gx/17.0,min_y+(max_y-min_y)*gy/17.0)
+                if inside(p,poly):
+                    d=boundary_distance(p,poly)
+                    if d>score: best,score=p,d
+        return best
+
     glyphs={
       '0':('111','101','101','101','111'),'1':('010','110','010','010','111'),
       '2':('111','001','111','100','111'),'3':('111','001','111','001','111'),
       '4':('101','101','111','001','001'),'5':('111','100','111','001','111'),
       '6':('111','100','111','101','111'),'7':('111','001','010','010','010'),
       '8':('111','101','111','101','111'),'9':('111','101','111','001','111')}
-    area=sum(pts[k][0]*pts[(k+1)%len(pts)][1]-pts[(k+1)%len(pts)][0]*pts[k][1] for k in range(len(pts)))
-    orient=1.0 if area>0 else -1.0
-    for i,(a,b) in enumerate(zip(screen,screen[1:]+screen[:1]),1):
-        line(a[0],a[1],b[0],b[1],(0,0,0),max(2,int(round(size/128))))
-        dx,dy=b[0]-a[0],b[1]-a[1]; ln=max((dx*dx+dy*dy)**0.5,1.0)
-        # Plain drafting numerals, positioned just outside each edge.
-        offset=max(12.0, 15.0*float(text_scale))
-        lx=int(round((a[0]+b[0])*0.5+orient*dy/ln*offset))
-        ly=int(round((a[1]+b[1])*0.5+orient*dx/ln*offset))
-        text=str(i); cell=max(1,int(round(4.0*float(text_scale))))
-        glyph_w=3*cell; glyph_h=5*cell
-        width=len(text)*(glyph_w+cell)-cell; sx=lx-width//2; sy=ly-glyph_h//2
-        for gi,ch in enumerate(text):
+    for fi,poly in enumerate(facet_polygons):
+        if len(poly)<3: continue
+        for i,a in enumerate(poly):
+            segment(a,poly[(i+1)%len(poly)],ss*0.48)
+        source=int(source_ids[fi]) if len(source_ids)==len(facet_polygons) else fi
+        label=str(source+1)
+        cx,cy=screen(label_anchor(poly))
+        cell=max(2,int(round(size/160.0))*ss)
+        gw,gh=3*cell,5*cell
+        width=len(label)*(gw+cell)-cell
+        sx,sy=int(round(cx-width/2)),int(round(cy-gh/2))
+        for ci,ch in enumerate(label):
             for gy,row in enumerate(glyphs.get(ch,())):
                 for gx,bit in enumerate(row):
-                    if bit=='1':
-                        for yy in range(cell):
-                            for xx in range(cell):
-                                px(sx+gi*(glyph_w+cell)+gx*cell+xx,sy+gy*cell+yy,(0,0,0))
-    raw=b''.join(b'\x00'+bytes(pixels[y*size*4:(y+1)*size*4]) for y in range(size))
+                    if bit=="1":
+                        for yy in range(sy+gy*cell,sy+(gy+1)*cell):
+                            for xx in range(sx+ci*(gw+cell)+gx*cell,sx+ci*(gw+cell)+(gx+1)*cell):
+                                if 0<=xx<high and 0<=yy<high: alpha[yy*high+xx]=255
+
+    rgba=bytearray(size*size*4)
+    for y in range(size):
+        for x in range(size):
+            total=0
+            for sy in range(ss):
+                start=(y*ss+sy)*high+x*ss
+                total+=sum(alpha[start:start+ss])
+            a=int(round(total/(ss*ss)))
+            i=(y*size+x)*4
+            rgba[i:i+4]=bytes((255,255,255,a))
+    raw=b''.join(b'\x00'+bytes(rgba[y*size*4:(y+1)*size*4]) for y in range(size))
     import struct,zlib
-    def chunk(tag,data): return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
+    def chunk(tag,data):
+        return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',size,size,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,6))+chunk(b'IEND',b'')
 
 
-def _get_spatial_preview_icon(points, text_scale=1.0):
+def _get_spatial_preview_icon(points, pitch_angles=None):
     global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
     if not points or len(points)<3: return 0
-    signature=(tuple(tuple(round(float(c),6) for c in p[:2]) for p in points), round(float(text_scale),2))
+    if pitch_angles is None: pitch_angles=[math.radians(35.0)]*len(points)
+    signature=(tuple(tuple(round(float(c),6) for c in p[:3]) for p in points),
+               tuple(round(float(v),6) for v in pitch_angles))
     try:
-        if _SPATIAL_PREVIEW_COLLECTION is None: _SPATIAL_PREVIEW_COLLECTION=bpy.utils.previews.new()
+        if _SPATIAL_PREVIEW_COLLECTION is None:
+            _SPATIAL_PREVIEW_COLLECTION=bpy.utils.previews.new()
         if signature != _SPATIAL_PREVIEW_SIGNATURE:
             if _SPATIAL_PREVIEW_PATH is None:
-                fd,_SPATIAL_PREVIEW_PATH=tempfile.mkstemp(prefix='roofforge_spatial_',suffix='.png'); os.close(fd)
-            with open(_SPATIAL_PREVIEW_PATH,'wb') as f: f.write(_spatial_preview_png(points, text_scale=text_scale))
-            if 'spatial_plan' in _SPATIAL_PREVIEW_COLLECTION: del _SPATIAL_PREVIEW_COLLECTION['spatial_plan']
+                fd,_SPATIAL_PREVIEW_PATH=tempfile.mkstemp(prefix='roofforge_spatial_',suffix='.png')
+                os.close(fd)
+            with open(_SPATIAL_PREVIEW_PATH,'wb') as f:
+                f.write(_spatial_preview_png(points,pitch_angles=pitch_angles))
+            if 'spatial_plan' in _SPATIAL_PREVIEW_COLLECTION:
+                del _SPATIAL_PREVIEW_COLLECTION['spatial_plan']
             _SPATIAL_PREVIEW_COLLECTION.load('spatial_plan',_SPATIAL_PREVIEW_PATH,'IMAGE')
             _SPATIAL_PREVIEW_SIGNATURE=signature
         return _SPATIAL_PREVIEW_COLLECTION['spatial_plan'].icon_id
-    except Exception: return 0
+    except Exception:
+        return 0
 
 
 def _clear_spatial_preview():
@@ -1122,6 +1182,21 @@ def _clear_spatial_preview():
         except OSError: pass
         _SPATIAL_PREVIEW_PATH=None
     _SPATIAL_PREVIEW_SIGNATURE=None
+
+
+def _spatial_outline_for_panel(active,roof_obj,is_generated):
+    if is_generated and roof_obj and roof_obj.get('roofforge_generated',False):
+        try:
+            return json.loads(roof_obj.get('roofforge_outline','[]'))
+        except Exception:
+            return None
+    try:
+        points=_extract_loop_from_object(active)
+        if len(points)>=3:
+            return [(float(p.x),float(p.y),float(p.z)) for p in points]
+    except Exception:
+        pass
+    return None
 
 
 def _spatial_outline_for_panel(active,roof_obj,is_generated):
