@@ -175,7 +175,7 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         ]
         faces = [(0, 1, 2, 3), (1, 4, 5, 2)]
         seams = extract_roof_seams(vertices, faces, [-1, -1], [])
-        with self.assertRaisesRegex(ValueError, "слишком сильно отклоняется"):
+        with self.assertRaisesRegex(RuntimeError, "слишком сильно отклоняется"):
             build_inset_seam_profile_mesh(
                 vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
                 end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
