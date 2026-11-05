@@ -18,12 +18,16 @@ try:
     from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
     from .weighted_skeleton_2_9_0 import (
         build_weighted_roof_mesh,
+        _merge_face_patches,
+        _split_global_t_junctions,
         SkeletonError as WeightedSkeletonError,
     )
 except ImportError:
     from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
     from weighted_skeleton_2_9_0 import (
         build_weighted_roof_mesh,
+        _merge_face_patches,
+        _split_global_t_junctions,
         SkeletonError as WeightedSkeletonError,
     )
 
@@ -958,8 +962,16 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
         topology_vertices, topology_faces, topology_sources = build_weighted_roof_mesh(
             xy, speeds, planes
         )
-    except SkeletonError as exc:
-        raise SpatialRoofError("Не удалось получить топологию скатов: " + str(exc)) from exc
+    except WeightedSkeletonError:
+        # A modest non-planar eave can alter 3D heights without altering the
+        # underlying XY event topology. Fall back to the proven unit-speed
+        # skeleton for adjacency instead of rejecting the roof here.
+        try:
+            topology_vertices, topology_faces, topology_sources = build_roof_mesh(
+                xy, 1.0, 0.0, allow_oblique=True
+            )
+        except SkeletonError as exc:
+            raise SpatialRoofError("Не удалось получить топологию скатов: " + str(exc)) from exc
 
     adjacency = _derive_source_adjacency(
         topology_vertices,
@@ -1100,113 +1112,6 @@ def _derive_source_adjacency(vertices, faces, sources, tolerance):
             adjacency[clean[0]].add(clean[1])
             adjacency[clean[1]].add(clean[0])
     return adjacency
-
-
-def _merge_planar_patches(vertices, faces, sources, tolerance):
-    """Merge triangle-clipped fragments source-by-source."""
-    result_vertices = list(vertices)
-    result_faces = []
-    result_sources = []
-
-    for source in sorted(set(sources)):
-        source_indices = [i for i, value in enumerate(sources) if value == source]
-        if not source_indices:
-            continue
-
-        points = []
-        point_map = {}
-        uses = defaultdict(int)
-
-        def local_id(point):
-            key = tuple(int(round(float(v) / tolerance)) for v in point)
-            candidates = point_map.get(key, ())
-            for candidate in candidates:
-                if _distance3(points[candidate], point) <= tolerance * 2.0:
-                    return candidate
-            index = len(points)
-            points.append(tuple(float(v) for v in point))
-            point_map[key] = tuple(list(candidates) + [index])
-            return index
-
-        for face_index in source_indices:
-            face = faces[face_index]
-            ids = [local_id(vertices[index]) for index in face]
-            for a, b in zip(ids, ids[1:] + ids[:1]):
-                if a != b:
-                    uses[(a, b)] += 1
-
-        boundary = []
-        for (a, b), count in uses.items():
-            net = count - uses.get((b, a), 0)
-            if net == 1:
-                boundary.append((a, b))
-            elif net > 1:
-                raise SpatialRoofError(
-                    "Скат {} получил неманифолдную границу при объединении областей.".format(source + 1)
-                )
-
-        outgoing = defaultdict(list)
-        for edge in boundary:
-            outgoing[edge[0]].append(edge)
-
-        unused = set(boundary)
-        while unused:
-            first = min(unused)
-            start = first[0]
-            current = first
-            loop = [start]
-            guard = 0
-            while True:
-                guard += 1
-                if guard > len(boundary) + 4:
-                    raise SpatialRoofError(
-                        "Скат {}: не удалось замкнуть границу после клиппинга.".format(source + 1)
-                    )
-                if current not in unused:
-                    raise SpatialRoofError(
-                        "Скат {}: повторное использование границы.".format(source + 1)
-                    )
-                unused.remove(current)
-                a, b = current
-                loop.append(b)
-                if b == start:
-                    break
-                candidates = [edge for edge in outgoing.get(b, ()) if edge in unused]
-                if not candidates:
-                    raise SpatialRoofError(
-                        "Скат {}: после клиппинга осталось незамкнутое ребро.".format(source + 1)
-                    )
-                current = min(candidates)
-
-            loop = loop[:-1]
-            if len(loop) < 3:
-                continue
-            face = []
-            for local_index in loop:
-                point = points[local_index]
-                existing = None
-                for global_index, global_point in enumerate(result_vertices):
-                    if _distance3(global_point, point) <= tolerance * 2.0:
-                        existing = global_index
-                        break
-                if existing is None:
-                    existing = len(result_vertices)
-                    result_vertices.append(point)
-                face.append(existing)
-
-            clean = []
-            for index in face:
-                if not clean or clean[-1] != index:
-                    clean.append(index)
-            if len(clean) > 1 and clean[0] == clean[-1]:
-                clean.pop()
-            if len(clean) >= 3:
-                if _area([(result_vertices[i][0], result_vertices[i][1]) for i in clean]) < 0.0:
-                    clean.reverse()
-                result_faces.append(tuple(clean))
-                result_sources.append(source)
-
-    return result_vertices, result_faces, result_sources
 
 
 def _build_boundary_aware_spatial_envelope(
