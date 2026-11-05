@@ -17,7 +17,7 @@ from collections import defaultdict
 try:
     from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
 except ImportError:
-    from straight_skeleton_2_6_0 import build_roof_mesh, build_weighted_roof_mesh, SkeletonError
+    from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
 
 
 class SpatialRoofError(ValueError):
