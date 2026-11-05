@@ -1923,20 +1923,57 @@ def _build_planar_support_arrangement(points,planes,eps):
         edge_faces[(min(a,b),max(a,b))].add(face_id)
 
     face_source=[None]*len(faces)
+
+    # Seed source labels from the original eave boundary. Every interior roof
+    # facet ultimately has to be connected to one of these boundary sources.
     for directed,source_ids in boundary_directed.items():
         face_id=halfedge_face.get(directed)
         if face_id is None:
             continue
-        for source_id in source_ids:
+        for source_id in sorted(source_ids):
             if face_source[face_id] is None:
-                face_source[face_id]=source_id
-            elif face_source[face_id]!=source_id:
-                raise SpatialRoofError(
-                    "Внутренняя arrangement-ячейка касается двух рёбер карниза."
-                )
+                face_source[face_id]=int(source_id)
+                break
 
-    # Boundary-adjacent cells are forced to their original eave source.
-    # Interior cells use the actual lowest support plane at their centroid.
+    edge_faces=defaultdict(set)
+    for (a,b),face_id in halfedge_face.items():
+        edge_faces[(min(a,b),max(a,b))].add(face_id)
+
+    # Propagate source labels across exact support-plane intersections.
+    # Crossing an (i,j) arrangement edge switches from source i to source j.
+    changed=True
+    while changed:
+        changed=False
+        for edge_key,face_ids in edge_faces.items():
+            if len(face_ids)!=2:
+                continue
+            meta=edges.get(edge_key)
+            if not meta or not meta["pairs"]:
+                continue
+            a_face,b_face=tuple(face_ids)
+            sa,sb=face_source[a_face],face_source[b_face]
+            for pair in sorted(meta["pairs"]):
+                p,q=pair
+                if sa==p and sb is None:
+                    face_source[b_face]=q
+                    changed=True
+                    break
+                if sa==q and sb is None:
+                    face_source[b_face]=p
+                    changed=True
+                    break
+                if sb==p and sa is None:
+                    face_source[a_face]=q
+                    changed=True
+                    break
+                if sb==q and sa is None:
+                    face_source[a_face]=p
+                    changed=True
+                    break
+
+    # Disconnected arrangement components are rare but possible at coincident
+    # events. Choose the lowest plane only for such a component; it is never
+    # used to overwrite a boundary-propagated source.
     for face_id,loop in enumerate(faces):
         if face_source[face_id] is not None:
             continue
@@ -1948,6 +1985,22 @@ def _build_planar_support_arrangement(points,planes,eps):
                 planes[source_id],centroid[0],centroid[1]
             )
         )
+
+    # Every internal edge between different source cells must be the exact
+    # pair of support planes carried by that arrangement edge.
+    for edge_key,face_ids in edge_faces.items():
+        if len(face_ids)!=2:
+            continue
+        sa,sb=[face_source[index] for index in face_ids]
+        if sa==sb:
+            continue
+        meta=edges.get(edge_key)
+        if not meta or not any(
+            sa in pair and sb in pair for pair in meta["pairs"]
+        ):
+            raise SpatialRoofError(
+                "Arrangement-ячейки получили несовместимые источники по внутреннему ребру."
+            )
 
     # Lift arrangement cells to their own support planes. Shared XY points
     # at a real seam become identical 3D points because both support planes
