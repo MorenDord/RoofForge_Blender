@@ -1622,7 +1622,8 @@ def _enqueue_missing_wavefront_events(slav, current_time, projected_edge_events,
 
 def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
                           projected_edge_events=False, edge_speeds=None,
-                          face_planes=None, validate_topology=True):
+                          face_planes=None, validate_topology=True,
+                          merge_coplanar=True):
     """Build an exact low-poly roof from a simple CCW XY polygon.
 
     Returns (vertices, faces, face_source_ids). Each source id is the index of
@@ -1909,9 +1910,10 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
     vertices, faces, face_source_ids = _resolve_triangle_spike_junctions(
         vertices, faces, face_source_ids, polygon_ccw, scale
     )
-    vertices, faces, face_source_ids = _merge_coplanar_roof_faces(
-        vertices, faces, face_source_ids, scale
-    )
+    if merge_coplanar:
+        vertices, faces, face_source_ids = _merge_coplanar_roof_faces(
+            vertices, faces, face_source_ids, scale
+        )
 
     _validate_face_planarity(vertices, faces, max(scale * 1.0e-7, 1.0e-8))
     if validate_topology:
@@ -1924,7 +1926,7 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
 
 
 def build_weighted_roof_mesh(polygon_ccw, edge_speeds, face_planes,
-                             validate_topology=True):
+                             validate_topology=True, merge_coplanar=True):
     """Build a roof with an independent normal speed/support plane per eave edge."""
     count = len(polygon_ccw)
     if count < 3 or len(edge_speeds) != count or len(face_planes) != count:
@@ -1946,6 +1948,7 @@ def build_weighted_roof_mesh(polygon_ccw, edge_speeds, face_planes,
         edge_speeds=speeds,
         face_planes=planes,
         validate_topology=bool(validate_topology),
+        merge_coplanar=bool(merge_coplanar),
     )
 
 
