@@ -335,6 +335,18 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         ]
         self._assert_spatial_standing_seams(outline, [33, 35, 37, 38, 34, 36, 32, 37])
 
+
+    def test_oblique_multi_reflex_spatial_roof_profiles_and_standing_seams(self):
+        outline = [
+            (0.0, 0.0, 0.00), (10.0, 0.0, 0.04),
+            (10.0, 8.0, 0.10), (7.0, 8.0, 0.14),
+            (6.6, 3.2, 0.09), (3.4, 3.2, 0.16),
+            (3.0, 8.0, 0.22), (0.0, 8.0, 0.12),
+        ]
+        pitches = [33, 35, 37, 36, 38, 34, 32, 37]
+        self._assert_spatial_concave_profiles_closed(outline, pitches)
+        self._assert_spatial_standing_seams(outline, pitches)
+
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
         pitches = list(reversed(self.pitches))
