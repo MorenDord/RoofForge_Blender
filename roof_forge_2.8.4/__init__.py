@@ -1740,13 +1740,17 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
         if is_generated or (not is_profile_source and not is_standing_source):
             layout.separator()
             layout.label(text="Геометрия крыши", icon='MOD_BUILD')
-            if is_generated and int(roof_obj.get("roofforge_edge_pitch_count", 0)) >= 3:
+            edge_pitch_count = int(roof_obj.get(
+                "roofforge_edge_pitch_count",
+                roof_obj.get("roofforge_spatial_edge_count", 0)
+            )) if is_generated else 0
+            if is_generated and edge_pitch_count >= 3:
                 layout.label(
                     text=("Пространственный карниз: индивидуальные углы" if is_spatial_generated
                           else "Индивидуальные углы скатов"),
                     icon='ORIENTATION_GLOBAL'
                 )
-                edge_count = int(roof_obj.get("roofforge_edge_pitch_count", 0))
+                edge_count = edge_pitch_count
                 spatial_outline = _spatial_outline_for_panel(active, roof_obj, True)
                 pitch_values = json.loads(roof_obj.get(
                     "roofforge_edge_pitches",
