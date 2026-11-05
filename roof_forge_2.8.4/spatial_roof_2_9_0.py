@@ -965,14 +965,41 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
         return vertices,faces,[source_edge_map[source] for source in sources]
 
-    # Non-planar contours currently use the validated support-plane lifting
-    # path. For reflex L/U outlines, small node incompatibilities are reconciled
-    # locally; larger event-order changes are rejected by strict overlap tests.
-    try:
-        vertices,faces,sources=_build_spatial_roof_mesh_template(
-            points,angles,eave_lift=float(eave_lift),tolerance=tolerance
+    uniform_pitch = max(angles)-min(angles) <= 1.0e-9
+    if not uniform_pitch:
+        # The planar event topology must account for per-edge pitch differences.
+        # Build that topology on a flat proxy using the actual edge speeds, but
+        # lift its source facets onto the true non-planar 3D support planes.
+        flat_outline=[(p[0],p[1],0.0) for p in points]
+        flat_planes=[
+            _edge_plane(
+                flat_outline[i],flat_outline[(i+1)%count],angles[i],0.0
+            )
+            for i in range(count)
+        ]
+        flat_speeds=[1.0/math.tan(angle) for angle in angles]
+        try:
+            template_vertices,template_faces,template_sources=build_weighted_roof_mesh(
+                xy,flat_speeds,flat_planes,merge_coplanar=False
+            )
+        except WeightedSkeletonError as exc:
+            raise SpatialRoofError(
+                "Не удалось рассчитать топологию индивидуальных углов: "+str(exc)
+            ) from exc
+        vertices,faces,sources=_embed_topology(
+            template_vertices,template_faces,template_sources,
+            points,planes,eps,scale
         )
-    except SpatialRoofError:
-        raise
+        vertices,faces,sources=_collapse_near_event_slivers(
+            vertices,faces,sources,points,eps,scale
+        )
+        _validate_lifted_mesh(vertices,faces,sources,points,planes,eps,scale)
+        return vertices,faces,[source_edge_map[source] for source in sources]
+
+    # Uniform pitches on non-planar contours retain the established reflex-aware
+    # topology; only their 3D source planes and junction heights differ.
+    vertices,faces,sources=_build_spatial_roof_mesh_template(
+        points,angles,eave_lift=float(eave_lift),tolerance=tolerance
+    )
     return vertices,faces,[source_edge_map[source] for source in sources]
 
