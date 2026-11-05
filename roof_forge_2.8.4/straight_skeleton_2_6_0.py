@@ -1581,7 +1581,8 @@ def _enqueue_missing_wavefront_events(slav, current_time, projected_edge_events,
     return queue_order
 
 
-def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_events=False):
+def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
+                          projected_edge_events=False, merge_coplanar=True):
     """Build an exact low-poly roof from a simple CCW XY polygon.
 
     Returns (vertices, faces, face_source_ids). Each source id is the index of
@@ -1829,9 +1830,10 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_
     vertices, faces, face_source_ids = _resolve_triangle_spike_junctions(
         vertices, faces, face_source_ids, polygon_ccw, scale
     )
-    vertices, faces, face_source_ids = _merge_coplanar_roof_faces(
-        vertices, faces, face_source_ids, scale
-    )
+    if merge_coplanar:
+        vertices, faces, face_source_ids = _merge_coplanar_roof_faces(
+            vertices, faces, face_source_ids, scale
+        )
 
     _validate_face_planarity(vertices, faces, max(scale * 1.0e-7, 1.0e-8))
     _validate_roof_mesh_topology(
@@ -1841,7 +1843,8 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0, projected_edge_
 
 
 
-def build_roof_mesh(polygon_ccw, pitch_tan, eave_lift=0.0, allow_oblique=False):
+def build_roof_mesh(polygon_ccw, pitch_tan, eave_lift=0.0,
+                    allow_oblique=False, merge_coplanar=True):
     """Build a roof from a simple CCW contour.
 
     ``allow_oblique=False`` preserves the established event construction.
@@ -1851,12 +1854,18 @@ def build_roof_mesh(polygon_ccw, pitch_tan, eave_lift=0.0, allow_oblique=False):
     straight-skeleton model and the same topology/planarity validators.
     """
     if not allow_oblique:
-        return _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift, False)
+        return _build_roof_mesh_impl(
+            polygon_ccw, pitch_tan, eave_lift, False, merge_coplanar
+        )
     try:
-        return _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift, True)
+        return _build_roof_mesh_impl(
+            polygon_ccw, pitch_tan, eave_lift, True, merge_coplanar
+        )
     except SkeletonError as projected_error:
         try:
-            return _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift, False)
+            return _build_roof_mesh_impl(
+                polygon_ccw, pitch_tan, eave_lift, False, merge_coplanar
+            )
         except SkeletonError as classic_error:
             raise SkeletonError(
                 "Режим свободных углов не смог корректно завершить wavefront. "
