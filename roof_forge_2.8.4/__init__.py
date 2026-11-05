@@ -1033,12 +1033,20 @@ def _rebuild_generated_roof(roof_obj):
             for vertex in cap_surface_vertices:
                 world_point = roof_obj.matrix_world @ Vector(vertex)
                 world_surface.append((float(world_point.x), float(world_point.y), float(world_point.z)))
+            standing_face_pairs = [
+                (face, source_id)
+                for face, source_id in zip(surface_faces, face_source_ids)
+                if source_id != -2
+            ]
+            standing_faces = [face for face, _source_id in standing_face_pairs]
+            standing_sources = [source_id for _face, source_id in standing_face_pairs]
             world_ridge_graph = extract_roof_seams(
-                world_surface, surface_faces, face_source_ids, source_poly
+                world_surface, standing_faces, standing_sources,
+                profile_outline if (is_spatial or has_edge_pitches) else source_poly
             )
             seam_world_vertices, seam_faces, seam_stats = build_standing_seam_mesh(
                 world_surface,
-                surface_faces,
+                standing_faces,
                 world_ridge_graph,
                 panel_width=settings.standing_panel_width,
                 seam_height=settings.standing_seam_height,
@@ -1046,7 +1054,7 @@ def _rebuild_generated_roof(roof_obj):
                 roof_thickness=(settings.thickness if settings.make_solid else 0.0),
                 ridge_height=settings.ridge_extrusion,
                 end_offset=settings.standing_end_offset,
-                boundary_edges=_mesh_boundary_segments(world_surface, surface_faces),
+                boundary_edges=_mesh_boundary_segments(world_surface, standing_faces),
             )
             inverse_world = roof_obj.matrix_world.inverted_safe()
             seam_vertices = []
@@ -1088,8 +1096,6 @@ def _settings_update(self, context):
     elif owner.get("roofforge_profile_source", False):
         _rebuild_existing_roof_profiles(owner)
     if owner.get("roofforge_standing_source", False):
-        _rebuild_standing_seams_for_mesh(owner)
-    elif owner.get("roofforge_generated", False) and owner.roofforge_settings.show_standing_seams:
         _rebuild_standing_seams_for_mesh(owner)
 
 
