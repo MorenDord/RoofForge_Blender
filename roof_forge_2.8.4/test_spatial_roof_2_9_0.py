@@ -196,6 +196,45 @@ class SpatialTopologyLiftTests(unittest.TestCase):
             outline, [math.radians(35)] * len(outline)
         )
 
+
+    def test_nonplanar_concave_l_twenty_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.000), (8, 0, 0.008), (8, 4, 0.012),
+            (4, 4, 0.016), (4, 8, 0.020), (0, 8, 0.010),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_u_twenty_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.000), (10, 0, 0.008), (10, 8, 0.012),
+            (7, 8, 0.020), (7, 3, 0.0096), (3, 3, 0.014),
+            (3, 8, 0.0192), (0, 8, 0.008),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_l_fifty_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.000), (8, 0, 0.020), (8, 4, 0.030),
+            (4, 4, 0.040), (4, 8, 0.050), (0, 8, 0.025),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
+    def test_nonplanar_concave_u_fifty_millimetre_variation(self):
+        outline = [
+            (0, 0, 0.000), (10, 0, 0.020), (10, 8, 0.030),
+            (7, 8, 0.050), (7, 3, 0.024), (3, 3, 0.035),
+            (3, 8, 0.048), (0, 8, 0.020),
+        ]
+        self.assert_closed_footprint_mesh(
+            outline, [math.radians(35)] * len(outline)
+        )
+
     def test_reversed_winding_preserves_build(self):
         outline = [(0, 0, 0), (8, 0, .2), (8, 5, .4), (0, 5, .1)]
         pitches = [math.radians(v) for v in (35, 38, 40, 36)]
