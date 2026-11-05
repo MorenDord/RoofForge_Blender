@@ -15,9 +15,15 @@ import math
 from collections import defaultdict
 
 try:
-    from .straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from .straight_skeleton_2_6_0 import (
+        build_roof_mesh, SkeletonError,
+        _merge_face_patches, _split_global_t_junctions,
+    )
 except ImportError:
-    from straight_skeleton_2_6_0 import build_roof_mesh, SkeletonError
+    from straight_skeleton_2_6_0 import (
+        build_roof_mesh, SkeletonError,
+        _merge_face_patches, _split_global_t_junctions,
+    )
 
 
 class SpatialRoofError(ValueError):
@@ -500,7 +506,7 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
                 )
 
 
-def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
+def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
     """Build a non-planar concave or convex roof from a 3D eave loop.
 
     pitch_angles contains one radian value per ordered eave edge. The
@@ -569,3 +575,318 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
     return vertices, faces, [source_edge_map[source_id] for source_id in sources]
+
+
+def _triangulate_footprint_xy(polygon, eps):
+    """Ear-clip a simple CCW polygon; collinear boundary samples are retained
+    by the caller's edge data but omitted from the area triangulation."""
+    points = [(float(p[0]), float(p[1])) for p in polygon]
+    if _area(points) < 0.0:
+        points.reverse()
+
+    active = list(range(len(points)))
+    changed = True
+    while changed and len(active) > 3:
+        changed = False
+        for pos, index in enumerate(active):
+            prev_i = active[(pos - 1) % len(active)]
+            next_i = active[(pos + 1) % len(active)]
+            a, b, c = points[prev_i], points[index], points[next_i]
+            ab = (b[0]-a[0], b[1]-a[1])
+            bc = (c[0]-b[0], c[1]-b[1])
+            cross = _cross2(ab, bc)
+            if abs(cross) <= eps * max(math.hypot(*ab), math.hypot(*bc), 1.0) and (
+                ab[0]*bc[0] + ab[1]*bc[1] >= -eps
+            ):
+                active.pop(pos)
+                changed = True
+                break
+
+    if len(active) < 3:
+        raise SpatialRoofError("Контур крыши вырожден после удаления коллинеарных точек для триангуляции.")
+
+    def in_triangle(point, a, b, c, area_eps):
+        c1 = _cross2((b[0]-a[0], b[1]-a[1]), (point[0]-a[0], point[1]-a[1]))
+        c2 = _cross2((c[0]-b[0], c[1]-b[1]), (point[0]-b[0], point[1]-b[1]))
+        c3 = _cross2((a[0]-c[0], a[1]-c[1]), (point[0]-c[0], point[1]-c[1]))
+        return c1 >= -area_eps and c2 >= -area_eps and c3 >= -area_eps
+
+    triangles = []
+    guard = 0
+    while len(active) > 3:
+        ear_found = False
+        for pos, index in enumerate(active):
+            prev_i = active[(pos-1) % len(active)]
+            next_i = active[(pos+1) % len(active)]
+            a, b, c = points[prev_i], points[index], points[next_i]
+            cross = _cross2((b[0]-a[0], b[1]-a[1]), (c[0]-b[0], c[1]-b[1]))
+            if cross <= eps * max(
+                math.hypot(b[0]-a[0], b[1]-a[1]),
+                math.hypot(c[0]-b[0], c[1]-b[1]), 1.0
+            ):
+                continue
+            area_eps = eps * max(
+                math.hypot(b[0]-a[0], b[1]-a[1]),
+                math.hypot(c[0]-b[0], c[1]-b[1]), 1.0
+            )
+            blocked = False
+            for other in active:
+                if other in (prev_i, index, next_i):
+                    continue
+                if in_triangle(points[other], a, b, c, area_eps):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            triangles.append((a, b, c))
+            active.pop(pos)
+            ear_found = True
+            break
+        guard += 1
+        if not ear_found or guard > len(points) * len(points):
+            raise SpatialRoofError(
+                "Не удалось триангулировать вогнутый контур: проверьте самопересечения, "
+                "почти совпадающие и слишком острые вершины."
+            )
+
+    last = tuple(points[i] for i in active)
+    if abs(_area(last)) <= eps * eps:
+        raise SpatialRoofError("Последний треугольник плана имеет нулевую площадь.")
+    if _area(last) < 0.0:
+        last = tuple(reversed(last))
+    triangles.append(last)
+    return triangles
+
+
+def _clip_convex_polygon_halfplane(poly, a, b, c, value_eps, point_eps):
+    """Clip a convex XY polygon to a*x+b*y+c <= 0."""
+    if not poly:
+        return []
+
+    def value(p):
+        return a*p[0] + b*p[1] + c
+
+    result = []
+    previous = poly[-1]
+    previous_value = value(previous)
+    previous_inside = previous_value <= value_eps
+
+    for current in poly:
+        current_value = value(current)
+        current_inside = current_value <= value_eps
+
+        if current_inside != previous_inside:
+            denominator = previous_value - current_value
+            if abs(denominator) > 1.0e-30:
+                t = previous_value / denominator
+                t = max(0.0, min(1.0, t))
+                intersection = (
+                    previous[0] + (current[0]-previous[0])*t,
+                    previous[1] + (current[1]-previous[1])*t,
+                )
+                if not result or _distance2(intersection, result[-1]) > point_eps:
+                    result.append(intersection)
+
+        if current_inside:
+            if not result or _distance2(current, result[-1]) > point_eps:
+                result.append(current)
+
+        previous = current
+        previous_value = current_value
+        previous_inside = current_inside
+
+    if len(result) > 1 and _distance2(result[0], result[-1]) <= point_eps:
+        result.pop()
+    return result
+
+
+def _same_support_plane(a, b, slope_eps, height_eps):
+    return (
+        abs(a[0]-b[0]) <= slope_eps
+        and abs(a[1]-b[1]) <= slope_eps
+        and abs(a[2]-b[2]) <= height_eps
+    )
+
+
+def _envelope_vertex_index(point, vertices, buckets, tolerance):
+    cell = tuple(int(math.floor(float(v)/tolerance)) for v in point)
+    best = None
+    best_distance = float("inf")
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                near = (cell[0]+dx, cell[1]+dy, cell[2]+dz)
+                for index in buckets.get(near, ()):
+                    distance = _distance3(point, vertices[index])
+                    if distance <= tolerance and distance < best_distance:
+                        best = index
+                        best_distance = distance
+    if best is None:
+        best = len(vertices)
+        vertices.append(tuple(float(v) for v in point))
+        buckets[cell].append(best)
+    return best
+
+
+def _build_spatial_roof_mesh_envelope(points, pitches, planes, eps, scale):
+    """Build the exact lower envelope of the 3D edge-support planes.
+
+    The footprint is triangulated only as a clipping domain. For source plane
+    i, each triangle is clipped by every half-plane z_i <= z_j. The resulting
+    patches are unions of the actual winning region of that support plane.
+    This recomputes facet adjacency from the planes themselves, so L/U reflex
+    events and non-concurrent multi-facet junctions need no inherited 2D event
+    ordering.
+    """
+    polygon_xy = [(p[0], p[1]) for p in points]
+    triangles = _triangulate_footprint_xy(polygon_xy, eps)
+
+    value_eps = max(eps * 50.0, scale * 1.0e-8)
+    point_eps = max(eps * 20.0, scale * 1.0e-9)
+    slope_eps = max(1.0e-10, eps / max(scale, 1.0))
+    height_eps = max(eps * 50.0, scale * 1.0e-8)
+
+    # Identical support planes represent one physical facet, not duplicate
+    # overlapping faces. Keep their first original boundary-edge ID.
+    representatives = []
+    for source_id, plane in enumerate(planes):
+        if any(_same_support_plane(plane, planes[other], slope_eps, height_eps)
+               for other in representatives):
+            continue
+        representatives.append(source_id)
+
+    face_loops = []
+    plane_area_eps = max(eps * eps * 10.0, scale * scale * 1.0e-14)
+    for source_id in representatives:
+        source_plane = planes[source_id]
+        patches = []
+        for triangle in triangles:
+            clipped = list(triangle)
+            for other_id in representatives:
+                if other_id == source_id or not clipped:
+                    continue
+                other_plane = planes[other_id]
+                clipped = _clip_convex_polygon_halfplane(
+                    clipped,
+                    source_plane[0]-other_plane[0],
+                    source_plane[1]-other_plane[1],
+                    source_plane[2]-other_plane[2],
+                    value_eps,
+                    point_eps,
+                )
+            if len(clipped) < 3:
+                continue
+            area = abs(_area(clipped))
+            if area <= plane_area_eps:
+                continue
+            lifted = [
+                (x, y, _plane_value(source_plane, x, y))
+                for x, y in clipped
+            ]
+            if _area([(p[0], p[1]) for p in lifted]) < 0.0:
+                lifted.reverse()
+            patches.append(lifted)
+
+        if not patches:
+            continue
+        try:
+            loops = _merge_face_patches(patches, scale)
+        except SkeletonError as exc:
+            raise SpatialRoofError(
+                "Не удалось объединить области влияния ската {}: {}".format(source_id+1, exc)
+            ) from exc
+        for loop in loops:
+            if len(loop) >= 3:
+                face_loops.append((source_id, loop))
+
+    if not face_loops:
+        raise SpatialRoofError("Нижняя огибающая опорных плоскостей не создала ни одного ската.")
+
+    face_loops = _split_global_t_junctions(face_loops, scale)
+    weld_tolerance = max(1.0e-8, scale * 1.0e-8)
+    vertices = []
+    buckets = defaultdict(list)
+    faces = []
+    sources = []
+    for source_id, loop in face_loops:
+        face = []
+        for point in loop:
+            index = _envelope_vertex_index(point, vertices, buckets, weld_tolerance)
+            if not face or face[-1] != index:
+                face.append(index)
+        if len(face) > 1 and face[0] == face[-1]:
+            face.pop()
+        if len(set(face)) < 3:
+            continue
+        face_points = [vertices[index] for index in face]
+        if _area([(p[0], p[1]) for p in face_points]) < 0.0:
+            face.reverse()
+        faces.append(tuple(face))
+        sources.append(source_id)
+
+    if not faces:
+        raise SpatialRoofError("После объединения областей влияния не осталось граней.")
+    _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, scale)
+    return vertices, faces, sources
+
+
+def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
+    """Build a spatial roof as the lower envelope of per-edge support planes.
+
+    Each edge defines one plane containing its 3D eave edge and rising inward
+    at the requested pitch. The roof is the minimum of those planes over the
+    footprint. Facet adjacency and all junctions are derived from the plane
+    arrangement, rather than copied from a flat straight-skeleton template.
+
+    Returns (vertices, faces, source_edge_ids), or raises SpatialRoofError if
+    the chosen planes do not cover the complete eave boundary as one manifold
+    height-field surface.
+    """
+    points = [tuple(float(v) for v in point) for point in outline_xyz]
+    count = len(points)
+    if count < 3 or len(pitch_angles) != count:
+        raise SpatialRoofError(
+            "Нужно минимум три вершины и ровно один угол на каждое ребро контура."
+        )
+    if any(len(point) != 3 or not all(math.isfinite(v) for v in point) for point in points):
+        raise SpatialRoofError("Координаты карниза должны быть конечными XYZ.")
+    if any(not math.isfinite(float(value)) for value in pitch_angles):
+        raise SpatialRoofError("Углы скатов должны быть конечными числами.")
+
+    xy = [(point[0], point[1]) for point in points]
+    scale = max(
+        max(p[0] for p in xy)-min(p[0] for p in xy),
+        max(p[1] for p in xy)-min(p[1] for p in xy),
+        1.0,
+    )
+    eps = max(float(tolerance) if tolerance is not None else scale*1.0e-9, 1.0e-9)
+    signed_area = _area(xy)
+    if abs(signed_area) <= eps*eps:
+        raise SpatialRoofError("XY-проекция контура имеет нулевую площадь.")
+
+    source_edge_map = list(range(count))
+    if signed_area < 0.0:
+        old_points = list(points)
+        old_pitches = list(pitch_angles)
+        points = list(reversed(old_points))
+        pitch_angles = [old_pitches[(count-2-i)%count] for i in range(count)]
+        source_edge_map = [(count-2-i)%count for i in range(count)]
+        xy = [(p[0],p[1]) for p in points]
+
+    for i in range(count):
+        if _distance2(xy[i],xy[(i+1)%count]) <= eps:
+            raise SpatialRoofError("Ребро {} имеет нулевую длину в XY.".format(i+1))
+
+    planes = [
+        _edge_plane(points[i],points[(i+1)%count],float(pitch_angles[i]),float(eave_lift))
+        for i in range(count)
+    ]
+    try:
+        vertices, faces, sources = _build_spatial_roof_mesh_envelope(
+            points,pitch_angles,planes,eps,scale
+        )
+    except SkeletonError as exc:
+        raise SpatialRoofError("Не удалось построить нижнюю огибающую крыши: "+str(exc)) from exc
+
+    return vertices, faces, [source_edge_map[source_id] for source_id in sources]
+
