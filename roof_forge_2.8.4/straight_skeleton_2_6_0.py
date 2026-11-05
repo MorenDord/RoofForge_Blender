@@ -197,14 +197,28 @@ class _WaveVertex:
         inward_left = _V2(left_direction.y, -left_direction.x)
         inward_right = _V2(right_direction.y, -right_direction.x)
         determinant = _cross(inward_left, inward_right)
-        if abs(determinant) <= 1.0e-10:
-            raise SkeletonError("Straight skeleton: соседние рёбра образуют неопределённую биссектрису.")
         speed_left = float(getattr(edge_left, "speed", 1.0))
         speed_right = float(getattr(edge_right, "speed", 1.0))
-        velocity = _V2(
-            (speed_left * inward_right.y - inward_left.y * speed_right) / determinant,
-            (inward_left.x * speed_right - speed_left * inward_right.x) / determinant,
-        )
+        if abs(determinant) <= 1.0e-10:
+            # Edge-collapse events can create a vertex whose two surviving
+            # support lines are parallel. There is no unique 2x2 solution;
+            # retain the event bisector direction and normalize it to the
+            # left support's weighted normal speed, matching the legacy
+            # degenerate-event treatment without discarding the speed scale.
+            direction = -left_direction + right_direction
+            if self.is_reflex:
+                direction = -direction
+            normal_speed = direction.dot(inward_left)
+            if abs(direction) <= _EPS or abs(normal_speed) <= 1.0e-10:
+                raise SkeletonError(
+                    "Straight skeleton: вырожденный узел не имеет устойчивого направления движения."
+                )
+            velocity = direction * (speed_left / normal_speed)
+        else:
+            velocity = _V2(
+                (speed_left * inward_right.y - inward_left.y * speed_right) / determinant,
+                (inward_left.x * speed_right - speed_left * inward_right.x) / determinant,
+            )
         if not math.isfinite(velocity.x) or not math.isfinite(velocity.y):
             raise SkeletonError("Straight skeleton: скорость вершины стала неконечной.")
         self.bisector = _Ray2(point, velocity)
