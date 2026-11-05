@@ -1841,58 +1841,79 @@ def _build_planar_support_arrangement(points,planes,eps):
             vertices[v][1]-vertices[u][1],vertices[v][0]-vertices[u][0]
         ))
 
+    # Standard DCEL traversal. Every directed edge belongs to exactly one
+    # face; the next edge is the outgoing half-edge immediately clockwise
+    # from the reverse incoming half-edge.
+    halfedges=[]
+    outgoing=defaultdict(list)
+    for u,v in edges:
+        halfedges.append((u,v))
+        halfedges.append((v,u))
+        outgoing[u].append((u,v))
+        outgoing[v].append((v,u))
+
+    outgoing_order={}
+    angle_index={}
+    for vertex_id,items in outgoing.items():
+        ordered=sorted(
+            items,
+            key=lambda edge:math.atan2(
+                vertices[edge[1]][1]-vertices[vertex_id][1],
+                vertices[edge[1]][0]-vertices[vertex_id][0]
+            )
+        )
+        outgoing_order[vertex_id]=ordered
+        for index,edge in enumerate(ordered):
+            angle_index[edge]=index
+
+    next_halfedge={}
+    for u,v in halfedges:
+        ordered=outgoing_order.get(v,())
+        if not ordered:
+            continue
+        reverse=(v,u)
+        reverse_index=angle_index.get(reverse)
+        if reverse_index is None:
+            continue
+        next_halfedge[(u,v)]=ordered[
+            (reverse_index-1)%len(ordered)
+        ]
+
     halfedge_face={}
     faces=[]
     visited=set()
-    for u,v in list(edges.keys()):
-        for start in ((u,v),(v,u)):
-            if start in visited:
-                continue
-            loop=[]
-            current=start
-            guard=0
-            while True:
-                guard+=1
-                if guard>len(edges)*4+20:
-                    raise SpatialRoofError("Не удалось замкнуть planar arrangement.")
-                if current in visited:
-                    break
-                visited.add(current)
-                a,b=current
-                loop.append(a)
-                outs=adjacency.get(b,())
-                if not outs:
-                    break
-                reverse_angle=math.atan2(
-                    vertices[a][1]-vertices[b][1],
-                    vertices[a][0]-vertices[b][0]
-                )
-                ranked=[]
-                for candidate in outs:
-                    if candidate==a and len(outs)>1:
-                        continue
-                    angle=math.atan2(
-                        vertices[candidate][1]-vertices[b][1],
-                        vertices[candidate][0]-vertices[b][0]
-                    )
-                    turn=(reverse_angle-angle)%(2.0*math.pi)
-                    ranked.append((turn,candidate))
-                current=(b,min(ranked)[1])
-                if current==start:
-                    break
-            if len(loop)<3:
-                continue
-            polygon=[vertices[index] for index in loop]
-            area=_area(polygon)
-            if area<=eps*eps:
-                continue
-            centroid=_polygon_centroid_xy(polygon)
-            if not _inside_or_on(centroid,xy,eps*20.0):
-                continue
-            face_id=len(faces)
-            faces.append(loop)
-            for a,b in zip(loop,loop[1:]+loop[:1]):
-                halfedge_face[(a,b)]=face_id
+    for start_edge in halfedges:
+        if start_edge in visited:
+            continue
+        current=start_edge
+        loop=[]
+        local=set()
+        guard=0
+        while current not in local and current not in visited:
+            guard+=1
+            if guard>len(halfedges)+4:
+                raise SpatialRoofError("Не удалось замкнуть half-edge planar arrangement.")
+            local.add(current)
+            visited.add(current)
+            loop.append(current[0])
+            current=next_halfedge.get(current)
+            if current is None:
+                break
+
+        if current!=start_edge or len(loop)<3:
+            continue
+
+        polygon=[vertices[index] for index in loop]
+        area=_area(polygon)
+        if area<=eps*eps:
+            continue
+
+        # The left-face traversal yields positive orientation for bounded
+        # cells and negative orientation for the unbounded exterior face.
+        face_id=len(faces)
+        faces.append(loop)
+        for a,b in zip(loop,loop[1:]+loop[:1]):
+            halfedge_face[(a,b)]=face_id
 
     if not faces:
         raise SpatialRoofError("Planar arrangement не создал ячеек крыши.")
