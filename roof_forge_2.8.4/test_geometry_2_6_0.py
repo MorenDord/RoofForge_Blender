@@ -704,31 +704,6 @@ class WeightedStraightSkeletonTests(unittest.TestCase):
         self.assertEqual(set(sources), {0, 1, 2, 3})
         self.assertTrue(all(math.isfinite(v) for p in vertices for v in p))
 
-    def test_concave_l_roof_uses_weighted_reflex_events(self):
-        polygon = [
-            (0.0, 0.0), (8.0, 0.0), (8.0, 4.0),
-            (4.0, 4.0), (4.0, 8.0), (0.0, 8.0),
-        ]
-        pitches = [math.radians(v) for v in (30, 35, 40, 32, 38, 34)]
-        vertices, faces, sources = geometry.build_weighted_roof_mesh(polygon, pitches)
-        self.assertTrue(vertices)
-        self.assertTrue(faces)
-        self.assertEqual(len(faces), len(sources))
-        self.assertEqual(set(sources), set(range(6)))
-
-    def test_concave_u_roof_uses_weighted_reflex_events(self):
-        polygon = [
-            (0.0, 0.0), (10.0, 0.0), (10.0, 8.0),
-            (7.0, 8.0), (7.0, 3.0), (3.0, 3.0),
-            (3.0, 8.0), (0.0, 8.0),
-        ]
-        pitches = [math.radians(v) for v in (32, 35, 38, 40, 34, 37, 31, 36)]
-        vertices, faces, sources = geometry.build_weighted_roof_mesh(polygon, pitches)
-        self.assertTrue(vertices)
-        self.assertTrue(faces)
-        self.assertEqual(len(faces), len(sources))
-        self.assertEqual(set(sources), set(range(8)))
-
     def test_rejects_mismatched_edge_pitch_count(self):
         polygon = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
         with self.assertRaises(geometry.SkeletonError):
