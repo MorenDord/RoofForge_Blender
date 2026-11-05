@@ -5,6 +5,7 @@ on:
     branches:
       - feature/spatial-roof-2.9.0
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   pure-python-geometry:
