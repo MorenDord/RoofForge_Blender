@@ -90,6 +90,22 @@ def main():
                 roof.name + " valley update error: " + str(roof.get("roofforge_valley_error")))
         require_closed_profile(roof, "roofforge_valleys_object", roof.name + " valley update")
 
+        # The persisted FACE-domain source tags also drive standing-seam
+        # analysis after reopening, including transition-cap suppression.
+        roof_forge._rebuild_standing_seams_for_mesh(roof)
+        require(not roof.get("roofforge_standing_error", ""),
+                roof.name + " standing seam error: " + str(roof.get("roofforge_standing_error")))
+        require(int(roof.get("roofforge_standing_segment_count", 0)) > 0,
+                roof.name + " standing seam rebuild produced no segments.")
+        standing_name = str(roof.get("roofforge_standing_seams_object", ""))
+        standing = bpy.data.objects.get(standing_name)
+        require(standing is not None and standing.type == "MESH",
+                roof.name + " standing seam helper mesh is missing.")
+        require(len(standing.data.polygons) > 0,
+                roof.name + " standing seam helper has no faces.")
+        require(any(edge.use_seam for edge in standing.data.edges),
+                roof.name + " standing seam shoulder edges were not marked Seam.")
+
     roof_forge.unregister()
     print("ROOFFORGE_BLENDER_ROUNDTRIP_OK", bpy.app.version_string)
 
