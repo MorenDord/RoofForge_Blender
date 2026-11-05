@@ -16,6 +16,7 @@ import math
 import os
 import struct
 import tempfile
+import time
 import zlib
 from collections import defaultdict
 from mathutils import Vector
@@ -736,7 +737,8 @@ def _rebuild_existing_roof_profiles(roof_obj, kinds=None):
             else:
                 continue
 
-            if not roof_obj.get('roofforge_external_' + kind.lower(), False):
+            if (not roof_obj.get('roofforge_generated', False)
+                    and not roof_obj.get('roofforge_external_' + kind.lower(), False)):
                 continue
             if not enabled:
                 _remove_helper_object(roof_obj, custom_key)
@@ -1086,12 +1088,74 @@ def _rebuild_generated_roof(roof_obj):
         roof_obj["roofforge_updating"] = False
 
 
+# Property callbacks can fire dozens of times while a Blender slider is dragged.
+# Coalesce them and run the expensive mesh work once the user pauses.
+_PENDING_ROOF_UPDATES = {}
+_ROOF_UPDATE_DELAY = 0.18
+
+
+def _flush_pending_roof_updates():
+    now = time.monotonic()
+    pending_again = False
+
+    for key, record in list(_PENDING_ROOF_UPDATES.items()):
+        owner, due_time, update_kind = record
+        if now < due_time:
+            pending_again = True
+            continue
+
+        _PENDING_ROOF_UPDATES.pop(key, None)
+        try:
+            if owner is None or owner.name not in bpy.data.objects:
+                continue
+            if not owner.get("roofforge_generated", False):
+                continue
+            if update_kind == "roof":
+                _rebuild_generated_roof(owner)
+            elif update_kind == "profiles":
+                _rebuild_existing_roof_profiles(owner, ("RIDGE", "VALLEY"))
+        except (ReferenceError, RuntimeError):
+            # The object may have been deleted while the timer was pending.
+            continue
+
+    if _PENDING_ROOF_UPDATES:
+        return 0.08
+    return None
+
+
+def _schedule_roof_update(owner, update_kind="roof"):
+    if not owner or owner.get("roofforge_updating", False):
+        return
+
+    key = owner.name
+    previous = _PENDING_ROOF_UPDATES.get(key)
+    # A full roof rebuild supersedes a detail-only update; the reverse must
+    # never downgrade a pending geometry rebuild.
+    if previous and previous[2] == "roof":
+        update_kind = "roof"
+    _PENDING_ROOF_UPDATES[key] = (
+        owner,
+        time.monotonic() + _ROOF_UPDATE_DELAY,
+        update_kind,
+    )
+
+    try:
+        if not bpy.app.timers.is_registered(_flush_pending_roof_updates):
+            bpy.app.timers.register(
+                _flush_pending_roof_updates,
+                first_interval=_ROOF_UPDATE_DELAY,
+            )
+    except (AttributeError, ReferenceError, RuntimeError):
+        # Keep Blender property edits usable in restricted startup contexts.
+        _rebuild_generated_roof(owner)
+
+
 def _settings_update(self, context):
     owner = getattr(self, "id_data", None)
     if not isinstance(owner, bpy.types.Object):
         return
     if owner.get("roofforge_generated", False):
-        _rebuild_generated_roof(owner)
+        _schedule_roof_update(owner, "roof")
     elif owner.get("roofforge_profile_source", False):
         _rebuild_existing_roof_profiles(owner)
     if owner.get("roofforge_standing_source", False):
@@ -1099,14 +1163,14 @@ def _settings_update(self, context):
 
 
 def _profile_settings_update(self, context):
-    """Profile-only callback; manual profiles never invoke the roof skeleton."""
+    """Rebuild only the ridge/valley details; do not run the roof solver."""
     owner = getattr(self, "id_data", None)
     if not isinstance(owner, bpy.types.Object) or owner.get("roofforge_profiles_updating", False):
         return
     if owner.get("roofforge_profile_source", False):
         _rebuild_existing_roof_profiles(owner)
     elif owner.get("roofforge_generated", False):
-        _rebuild_generated_roof(owner)
+        _schedule_roof_update(owner, "profiles")
     if owner.get("roofforge_standing_source", False):
         _rebuild_standing_seams_for_mesh(owner)
     elif owner.get("roofforge_profile_source", False) and owner.get("roofforge_generated", False):
@@ -1124,22 +1188,34 @@ _SPATIAL_PREVIEW_PATH = None
 _SPATIAL_PREVIEW_SIGNATURE = None
 
 
-def _spatial_preview_png(points, size=320, pitch_angles=None):
-    """Transparent, antialiased plan view of every generated roof facet."""
+def _spatial_preview_png(
+    points, size=320, pitch_angles=None, facet_polygons=None, source_ids=None
+):
+    """Transparent, antialiased plan view; reuse supplied facets when available."""
     pts3 = [tuple(float(v) for v in p[:3]) if len(p) >= 3
             else (float(p[0]), float(p[1]), 0.0) for p in points]
     if len(pts3) < 3:
         raise ValueError("Для схемы нужно не менее трёх точек.")
     if pitch_angles is None or len(pitch_angles) != len(pts3):
         pitch_angles = [math.radians(35.0)] * len(pts3)
-    try:
-        z_span = max(p[2] for p in pts3) - min(p[2] for p in pts3)
-        roof_vertices, roof_faces, source_ids = build_spatial_roof_mesh(
-            pts3, pitch_angles
-        )
-        facet_polygons = [[(roof_vertices[i][0], roof_vertices[i][1]) for i in face]
-                          for face in roof_faces]
-    except Exception:
+    if facet_polygons is not None:
+        facet_polygons = [
+            [(float(point[0]), float(point[1])) for point in polygon]
+            for polygon in facet_polygons if len(polygon) >= 3
+        ]
+        if source_ids is None or len(source_ids) != len(facet_polygons):
+            source_ids = list(range(len(facet_polygons)))
+    else:
+        try:
+            roof_vertices, roof_faces, source_ids = build_spatial_roof_mesh(
+                pts3, pitch_angles
+            )
+            facet_polygons = [[(roof_vertices[i][0], roof_vertices[i][1]) for i in face]
+                              for face in roof_faces]
+        except Exception:
+            facet_polygons = [[(p[0], p[1]) for p in pts3]]
+            source_ids = [0]
+    if not facet_polygons:
         facet_polygons = [[(p[0], p[1]) for p in pts3]]
         source_ids = [0]
 
@@ -1151,7 +1227,7 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
     scale = (size-2.0*margin)/span
     ox = (size-(max_x-min_x)*scale)*0.5
     oy = (size-(max_y-min_y)*scale)*0.5
-    ss = 4
+    ss = 2
     high = size*ss
     alpha = bytearray(high*high)
 
@@ -1199,9 +1275,9 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
         pxs=[p[0] for p in poly]; pys=[p[1] for p in poly]
         lo_x,hi_x=min(pxs),max(pxs); lo_y,hi_y=min(pys),max(pys)
         score=-1.0
-        for gy in range(1,21):
-            for gx in range(1,21):
-                p=(lo_x+(hi_x-lo_x)*gx/21.0,lo_y+(hi_y-lo_y)*gy/21.0)
+        for gy in range(1,13):
+            for gx in range(1,13):
+                p=(lo_x+(hi_x-lo_x)*gx/13.0,lo_y+(hi_y-lo_y)*gy/13.0)
                 if inside(p,poly):
                     d=boundary_distance(p,poly)
                     if d>score: best,score=p,d
@@ -1263,12 +1339,43 @@ def _spatial_preview_png(points, size=320, pitch_angles=None):
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',size,size,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,6))+chunk(b'IEND',b'')
 
 
-def _get_spatial_preview_icon(points, pitch_angles=None):
+def _get_spatial_preview_icon(points, pitch_angles=None, roof_obj=None):
     global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
     if not points or len(points)<3: return 0
     if pitch_angles is None: pitch_angles=[math.radians(35.0)]*len(points)
-    signature=(tuple(tuple(round(float(c),6) for c in p[:3]) for p in points),
-               tuple(round(float(v),6) for v in pitch_angles))
+
+    facet_polygons = None
+    source_ids = None
+    saved_mesh_signature = None
+    if roof_obj is not None and roof_obj.get("roofforge_generated", False):
+        try:
+            mesh_name = str(roof_obj.get("roofforge_spatial_profile_source_mesh", ""))
+            source_mesh = bpy.data.meshes.get(mesh_name) if mesh_name else None
+            if source_mesh is not None and source_mesh.polygons:
+                facet_polygons = [
+                    [tuple(source_mesh.vertices[index].co) for index in polygon.vertices]
+                    for polygon in source_mesh.polygons
+                ]
+                source_attribute = source_mesh.attributes.get("roofforge_face_source")
+                if source_attribute is not None and len(source_attribute.data) == len(facet_polygons):
+                    source_ids = [int(item.value) for item in source_attribute.data]
+                else:
+                    source_ids = list(range(len(facet_polygons)))
+                saved_mesh_signature = (
+                    source_mesh.name,
+                    len(source_mesh.vertices),
+                    len(source_mesh.polygons),
+                )
+        except (ReferenceError, RuntimeError, TypeError):
+            facet_polygons = None
+            source_ids = None
+            saved_mesh_signature = None
+
+    signature=(
+        tuple(tuple(round(float(c),6) for c in p[:3]) for p in points),
+        tuple(round(float(v),6) for v in pitch_angles),
+        saved_mesh_signature,
+    )
     try:
         if _SPATIAL_PREVIEW_COLLECTION is None:
             _SPATIAL_PREVIEW_COLLECTION=bpy.utils.previews.new()
@@ -1277,7 +1384,12 @@ def _get_spatial_preview_icon(points, pitch_angles=None):
                 fd,_SPATIAL_PREVIEW_PATH=tempfile.mkstemp(prefix='roofforge_spatial_',suffix='.png')
                 os.close(fd)
             with open(_SPATIAL_PREVIEW_PATH,'wb') as f:
-                f.write(_spatial_preview_png(points,pitch_angles=pitch_angles))
+                f.write(_spatial_preview_png(
+                    points,
+                    pitch_angles=pitch_angles,
+                    facet_polygons=facet_polygons,
+                    source_ids=source_ids,
+                ))
             if 'spatial_plan' in _SPATIAL_PREVIEW_COLLECTION:
                 del _SPATIAL_PREVIEW_COLLECTION['spatial_plan']
             _SPATIAL_PREVIEW_COLLECTION.load('spatial_plan',_SPATIAL_PREVIEW_PATH,'IMAGE')
@@ -1329,7 +1441,7 @@ def _spatial_pitch_settings_update(self, context):
     # Keep the legacy key populated for existing spatial roof files.
     if owner.get("roofforge_spatial", False):
         owner["roofforge_spatial_pitches"] = json.dumps(values, separators=(",", ":"))
-    _rebuild_generated_roof(owner)
+    _schedule_roof_update(owner, "roof")
 
 
 def _standing_seam_settings_update(self, context):
@@ -1867,7 +1979,9 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
                     "roofforge_edge_pitches",
                     roof_obj.get("roofforge_spatial_pitches", "[]")
                 ))
-                preview_icon = _get_spatial_preview_icon(spatial_outline, pitch_values) if spatial_outline else 0
+                preview_icon = _get_spatial_preview_icon(
+                    spatial_outline, pitch_values, roof_obj=roof_obj
+                ) if spatial_outline else 0
                 if preview_icon:
                     region_width = max(240, getattr(context.region, "width", 320))
                     preview_scale = max(4.0, min(14.0, region_width / 42.0))
@@ -2103,6 +2217,12 @@ def register():
 
 def unregister():
     _clear_spatial_preview()
+    _PENDING_ROOF_UPDATES.clear()
+    try:
+        if bpy.app.timers.is_registered(_flush_pending_roof_updates):
+            bpy.app.timers.unregister(_flush_pending_roof_updates)
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
     if _roofforge_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_roofforge_load_post)
 
