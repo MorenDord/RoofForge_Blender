@@ -3,7 +3,9 @@ import math
 import unittest
 from collections import Counter
 
-from weighted_skeleton_2_9_0 import build_weighted_roof_mesh
+from weighted_skeleton_2_9_0 import (
+    build_weighted_roof_mesh, _merge_face_patches, SkeletonError,
+)
 
 
 def support_plane(p, q, pitch):
@@ -80,6 +82,26 @@ class WeightedWavefrontTests(unittest.TestCase):
     def test_nonplanar_l_equal_pitch(self):
         outline=[(0,0,0),(8,0,.08),(8,4,.12),(4,4,.16),(4,8,.20),(0,8,.10)]
         self.build(outline,[38]*6)
+
+    def test_identical_swept_patch_is_counted_once(self):
+        patch = [
+            (0.0, 0.0, 0.0), (2.0, 0.0, 0.4),
+            (2.0, 1.0, 0.6), (0.0, 1.0, 0.2),
+        ]
+        loops = _merge_face_patches([patch, list(patch)], 2.0)
+        self.assertEqual(len(loops), 1)
+
+    def test_partial_same_direction_overlap_is_still_rejected(self):
+        first = [
+            (0.0, 0.0, 0.0), (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.0), (0.0, 2.0, 0.0),
+        ]
+        second = [
+            (1.0, 0.0, 0.0), (3.0, 0.0, 0.0),
+            (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+        ]
+        with self.assertRaisesRegex(SkeletonError, "неманифолдную границу"):
+            _merge_face_patches([first, second], 3.0)
 
 
 if __name__ == "__main__":
