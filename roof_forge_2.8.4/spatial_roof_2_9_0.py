@@ -936,24 +936,42 @@ def _build_spatial_roof_mesh_template(outline_xyz, pitch_angles, eave_lift=0.0, 
                     float(pitch_angles[i]), float(eave_lift))
         for i in range(count)
     ]
-    # Use the proven reflex-aware straight-skeleton topology as a candidate
-    # partition, then lift every facet onto its own 3D eave support plane.
-    # The strict geometric validator below rejects cases where independent
-    # pitches change the event order enough to invalidate that partition.
+    # Weighted wavefront supplies the actual edge-to-edge topology.
+    speeds = []
+    for edge_id in range(count):
+        p = points[edge_id]
+        q = points[(edge_id + 1) % count]
+        edge_length = math.hypot(q[0] - p[0], q[1] - p[1])
+        along_grade = (q[2] - p[2]) / edge_length
+        inward_grade = math.sqrt(
+            max(0.0, math.tan(float(pitch_angles[edge_id])) ** 2 - along_grade ** 2)
+        )
+        if inward_grade <= 1.0e-10:
+            raise SpatialRoofError(
+                "Для ребра карниза {} недостаточен угол ската после учёта перепада высот.".format(
+                    edge_id + 1
+                )
+            )
+        speeds.append(1.0 / inward_grade)
+
     try:
-        template_vertices, template_faces, template_sources = build_roof_mesh(
-            xy, 1.0, 0.0, allow_oblique=True, merge_coplanar=False
+        topology_vertices, topology_faces, topology_sources = build_weighted_roof_mesh(
+            xy, speeds, planes
         )
     except SkeletonError as exc:
-        raise SpatialRoofError("Не удалось построить топологию wavefront: " + str(exc)) from exc
+        raise SpatialRoofError("Не удалось получить топологию скатов: " + str(exc)) from exc
 
-    vertices, faces, sources = _embed_topology(
-        template_vertices, template_faces, template_sources,
-        points, planes, eps, span
+    adjacency = _derive_source_adjacency(
+        topology_vertices,
+        topology_faces,
+        topology_sources,
+        max(eps * 10.0, 1.0e-8),
     )
-    vertices, faces, sources = _collapse_near_event_slivers(
-        vertices, faces, sources, points, eps, span
+    triangles = _triangulate_xy(xy, eps)
+    vertices, faces, sources = _build_boundary_aware_spatial_envelope(
+        points, pitch_angles, planes, adjacency, triangles, eps, eave_lift
     )
+
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
     return vertices, faces, [
         source_edge_map[source_id] if source_id >= 0 else source_id
@@ -972,6 +990,280 @@ def _is_convex_xy_outline(points, eps):
         if _cross2(ab,bc) < -eps*max(math.hypot(*ab),math.hypot(*bc),1.0):
             return False
     return True
+
+
+
+def _triangulate_xy(poly, eps):
+    points = [tuple(p) for p in poly]
+    if _area(points) < 0.0:
+        points.reverse()
+    indices = list(range(len(points)))
+    triangles = []
+
+    def triangle_contains(point, a, b, c):
+        return (
+            _cross2((b[0] - a[0], b[1] - a[1]), (point[0] - a[0], point[1] - a[1])) >= -eps
+            and _cross2((c[0] - b[0], c[1] - b[1]), (point[0] - b[0], point[1] - b[1])) >= -eps
+            and _cross2((a[0] - c[0], a[1] - c[1]), (point[0] - c[0], point[1] - c[1])) >= -eps
+        )
+
+    guard = 0
+    while len(indices) > 3:
+        guard += 1
+        if guard > len(points) * len(points) * 2:
+            raise SpatialRoofError("Не удалось триангулировать XY-контур крыши.")
+        found = False
+        for position in range(len(indices)):
+            ia = indices[position - 1]
+            ib = indices[position]
+            ic = indices[(position + 1) % len(indices)]
+            a, b, c = points[ia], points[ib], points[ic]
+            if _cross2((b[0] - a[0], b[1] - a[1]),
+                       (c[0] - b[0], c[1] - b[1])) <= eps:
+                continue
+            if any(
+                triangle_contains(points[index], a, b, c)
+                for index in indices
+                if index not in (ia, ib, ic)
+            ):
+                continue
+            triangles.append((a, b, c))
+            indices.pop(position)
+            found = True
+            break
+        if not found:
+            raise SpatialRoofError(
+                "XY-контур самопересекается или содержит вырожденный угол."
+            )
+    if len(indices) == 3:
+        triangles.append(tuple(points[index] for index in indices))
+    return triangles
+
+
+def _clip_halfplane(poly, a, b, c, eps):
+    if not poly:
+        return []
+    result = []
+    for p, q in zip(poly, poly[1:] + poly[:1]):
+        fp = a * p[0] + b * p[1] + c
+        fq = a * q[0] + b * q[1] + c
+        p_inside = fp <= eps
+        q_inside = fq <= eps
+        if p_inside:
+            result.append(p)
+        if p_inside != q_inside:
+            denominator = fp - fq
+            if abs(denominator) > 1.0e-20:
+                t = fp / denominator
+                result.append((
+                    p[0] + (q[0] - p[0]) * t,
+                    p[1] + (q[1] - p[1]) * t,
+                ))
+    cleaned = []
+    for point in result:
+        if not cleaned or _distance2(point, cleaned[-1]) > eps:
+            cleaned.append(tuple(point))
+    if len(cleaned) > 1 and _distance2(cleaned[0], cleaned[-1]) <= eps:
+        cleaned.pop()
+    return cleaned
+
+
+def _derive_source_adjacency(vertices, faces, sources, tolerance):
+    """Return source-edge adjacency from the weighted skeleton mesh."""
+    edge_sources = defaultdict(set)
+
+    canonical = []
+    buckets = defaultdict(list)
+    point_ids = {}
+
+    def point_id(point):
+        key = tuple(int(round(float(v) / tolerance)) for v in point)
+        for index in buckets[key]:
+            if _distance2(canonical[index], point) <= tolerance * 2.0:
+                return index
+        index = len(canonical)
+        canonical.append((float(point[0]), float(point[1])))
+        buckets[key].append(index)
+        return index
+
+    for face_index, face in enumerate(faces):
+        source = int(sources[face_index])
+        ids = [point_id(vertices[index]) for index in face]
+        for a, b in zip(ids, ids[1:] + ids[:1]):
+            if a != b:
+                edge_sources[tuple(sorted((a, b)))].add(source)
+
+    adjacency = defaultdict(set)
+    for source_ids in edge_sources.values():
+        clean = sorted(source_ids)
+        if len(clean) == 2 and clean[0] != clean[1]:
+            adjacency[clean[0]].add(clean[1])
+            adjacency[clean[1]].add(clean[0])
+    return adjacency
+
+
+def _merge_planar_patches(vertices, faces, sources, tolerance):
+    """Merge triangle-clipped fragments source-by-source."""
+    result_vertices = list(vertices)
+    result_faces = []
+    result_sources = []
+
+    for source in sorted(set(sources)):
+        source_indices = [i for i, value in enumerate(sources) if value == source]
+        if not source_indices:
+            continue
+
+        points = []
+        point_map = {}
+        uses = defaultdict(int)
+
+        def local_id(point):
+            key = tuple(int(round(float(v) / tolerance)) for v in point)
+            candidates = point_map.get(key, ())
+            for candidate in candidates:
+                if _distance3(points[candidate], point) <= tolerance * 2.0:
+                    return candidate
+            index = len(points)
+            points.append(tuple(float(v) for v in point))
+            point_map[key] = tuple(list(candidates) + [index])
+            return index
+
+        for face_index in source_indices:
+            face = faces[face_index]
+            ids = [local_id(vertices[index]) for index in face]
+            for a, b in zip(ids, ids[1:] + ids[:1]):
+                if a != b:
+                    uses[(a, b)] += 1
+
+        boundary = []
+        for (a, b), count in uses.items():
+            net = count - uses.get((b, a), 0)
+            if net == 1:
+                boundary.append((a, b))
+            elif net > 1:
+                raise SpatialRoofError(
+                    "Скат {} получил неманифолдную границу при объединении областей.".format(source + 1)
+                )
+
+        outgoing = defaultdict(list)
+        for edge in boundary:
+            outgoing[edge[0]].append(edge)
+
+        unused = set(boundary)
+        while unused:
+            first = min(unused)
+            start = first[0]
+            current = first
+            loop = [start]
+            guard = 0
+            while True:
+                guard += 1
+                if guard > len(boundary) + 4:
+                    raise SpatialRoofError(
+                        "Скат {}: не удалось замкнуть границу после клиппинга.".format(source + 1)
+                    )
+                if current not in unused:
+                    raise SpatialRoofError(
+                        "Скат {}: повторное использование границы.".format(source + 1)
+                    )
+                unused.remove(current)
+                a, b = current
+                loop.append(b)
+                if b == start:
+                    break
+                candidates = [edge for edge in outgoing.get(b, ()) if edge in unused]
+                if not candidates:
+                    raise SpatialRoofError(
+                        "Скат {}: после клиппинга осталось незамкнутое ребро.".format(source + 1)
+                    )
+                current = min(candidates)
+
+            loop = loop[:-1]
+            if len(loop) < 3:
+                continue
+            face = []
+            for local_index in loop:
+                point = points[local_index]
+                existing = None
+                for global_index, global_point in enumerate(result_vertices):
+                    if _distance3(global_point, point) <= tolerance * 2.0:
+                        existing = global_index
+                        break
+                if existing is None:
+                    existing = len(result_vertices)
+                    result_vertices.append(point)
+                face.append(existing)
+
+            clean = []
+            for index in face:
+                if not clean or clean[-1] != index:
+                    clean.append(index)
+            if len(clean) > 1 and clean[0] == clean[-1]:
+                clean.pop()
+            if len(clean) >= 3:
+                if _area([(result_vertices[i][0], result_vertices[i][1]) for i in clean]) < 0.0:
+                    clean.reverse()
+                result_faces.append(tuple(clean))
+                result_sources.append(source)
+
+    return result_vertices, result_faces, result_sources
+
+
+def _build_boundary_aware_spatial_envelope(
+    points, pitch_angles, planes, adjacency, triangles, eps, eave_lift
+):
+    """Build exact 3D facet cells while restricting plane competition to
+    topology-neighbour sources.
+
+    The weighted skeleton determines which eave planes are allowed to meet.
+    Inside every convex triangulation piece we then clip a source region by
+    only those neighbouring plane inequalities. Thus non-adjacent planes
+    cannot steal an eave edge, while every actual ridge/valley boundary is the
+    exact intersection of its two support planes.
+    """
+    patches = []
+    for source_id, plane in enumerate(planes):
+        neighbour_ids = sorted(adjacency.get(source_id, ()))
+        for triangle in triangles:
+            cell = list(triangle)
+            for neighbour_id in neighbour_ids:
+                other = planes[neighbour_id]
+                cell = _clip_halfplane(
+                    cell,
+                    plane[0] - other[0],
+                    plane[1] - other[1],
+                    plane[2] - other[2],
+                    eps * 5.0,
+                )
+                if len(cell) < 3:
+                    break
+            if len(cell) < 3 or abs(_area(cell)) <= eps * eps:
+                continue
+            lifted = [
+                (float(x), float(y),
+                 float(plane[0]) * x + float(plane[1]) * y + float(plane[2])
+                 + float(eave_lift))
+                for x, y in cell
+            ]
+            if _area(cell) < 0.0:
+                lifted.reverse()
+            patches.append((source_id, lifted))
+
+    if not patches:
+        raise SpatialRoofError("Не удалось получить пространственные области скатов.")
+
+    patch_vertices = []
+    patch_faces = []
+    patch_sources = []
+    for source_id, patch in patches:
+        start = len(patch_vertices)
+        patch_vertices.extend(patch)
+        patch_faces.append(tuple(range(start, start + len(patch))))
+        patch_sources.append(source_id)
+
+    return _merge_planar_patches(
+        patch_vertices, patch_faces, patch_sources, max(eps * 10.0, 1.0e-8)
+    )
 
 
 def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=None):
