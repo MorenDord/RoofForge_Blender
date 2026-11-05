@@ -534,11 +534,13 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     if abs(signed_area) <= eps * eps:
         raise SpatialRoofError("XY-проекция контура имеет нулевую площадь.")
 
+    source_edge_map = list(range(count))
     if signed_area < 0.0:
         old_points = list(points)
         old_angles = list(pitch_angles)
         points = list(reversed(old_points))
         pitch_angles = [old_angles[(count - 2 - i) % count] for i in range(count)]
+        source_edge_map = [(count - 2 - i) % count for i in range(count)]
         xy = [(point[0], point[1]) for point in points]
 
     for i in range(count):
@@ -566,4 +568,4 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
         points, planes, eps, span
     )
     _validate_lifted_mesh(vertices, faces, sources, points, planes, eps, span)
-    return vertices, faces, sources
+    return vertices, faces, [source_edge_map[source_id] for source_id in sources]
