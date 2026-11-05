@@ -111,6 +111,20 @@ class WeightedWavefrontTests(unittest.TestCase):
         ]
         self.build(outline, [35, 32, 37, 38, 33, 39, 34, 36, 37, 31, 40, 35])
 
+    def test_reflex_endpoint_hits_complete_weighted_wavefront(self):
+        # A highly symmetric U has reflex vertices that hit the endpoints of
+        # opposite wavefront segments at the same time as edge collapses.
+        # Exercise each single-edge pitch edit to prevent queue exhaustion.
+        outline = [
+            (0, 0, 0), (8, 0, 0), (8, 6, 0), (6, 6, 0),
+            (6, 2, 0), (2, 2, 0), (2, 6, 0), (0, 6, 0),
+        ]
+        for changed_edge in range(len(outline)):
+            pitches = [35] * len(outline)
+            pitches[changed_edge] = 36
+            with self.subTest(changed_edge=changed_edge):
+                self.build(outline, pitches)
+
     def test_partial_same_direction_overlap_is_still_rejected(self):
         first = [
             (0.0, 0.0, 0.0), (2.0, 0.0, 0.0),

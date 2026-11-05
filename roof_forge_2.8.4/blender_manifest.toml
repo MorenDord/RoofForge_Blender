@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "roof_forge"
-version = "2.9.0"
+version = "2.9.2"
 name = "RoofForge"
 tagline = "Spatial roofs, pitch, overhangs and ridge/valley profiles"
 maintainer = "OpenAI"

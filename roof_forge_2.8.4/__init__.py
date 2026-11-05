@@ -1,7 +1,7 @@
 bl_info = {
     "name": "RoofForge - Parametric Roof Generator",
     "author": "OpenAI",
-    "version": (2, 9, 0),
+    "version": (2, 9, 2),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > RoofForge",
     "description": "Low-poly roofs and automatic lightweight standing-seam layout",
@@ -38,9 +38,25 @@ from .straight_skeleton_2_6_0 import (
 )
 from .standing_seams_2_6_0 import build_standing_seam_mesh
 from .spatial_roof_2_8_4 import extend_spatial_roof_eaves
-from .spatial_roof_2_9_0 import (
-    build_spatial_roof_mesh, SpatialRoofError, _representative_source_id,
-)
+from .spatial_roof_2_9_0 import build_spatial_roof_mesh, SpatialRoofError
+
+
+def _representative_source_id(source_id):
+    """Return a scalar face-source label, including for merged source IDs.
+
+    Kept locally so addon startup remains compatible with a cached older
+    spatial_roof_2_9_0 module that does not yet export this private helper.
+    """
+    if isinstance(source_id, (tuple, list, set)):
+        values = tuple(sorted(int(value) for value in source_id))
+    else:
+        values = (int(source_id),)
+    if -2 in values:
+        return -2
+    positive = [value for value in values if value >= 0]
+    return min(positive) if positive else (values[0] if values else -1)
+
+
 
 
 # -----------------------------------------------------------------------------

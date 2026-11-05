@@ -72,6 +72,29 @@ def _approximately_same(a, b, eps=1.0e-7):
     return abs(a - b) <= eps
 
 
+def _point_on_segment_inclusive(point, a, b, tolerance=1.0e-7):
+    """Return True when a point lies on a finite segment, endpoints included.
+
+    Reflex wavefront vertices can collide with an endpoint of an opposite
+    active segment at exactly the same time as an adjacent edge collapse.
+    Treating only strict interior hits as split events loses these vertex-to-
+    vertex events; the remaining wavefront can then contain parallel supports
+    that have already crossed and can no longer generate valid events.
+    """
+    ab = b - a
+    length_squared = ab.dot(ab)
+    if length_squared <= tolerance * tolerance:
+        return abs(point - a) <= tolerance
+    length = math.sqrt(length_squared)
+    parameter = (point - a).dot(ab) / length_squared
+    parameter_tolerance = tolerance / max(length, 1.0)
+    if parameter < -parameter_tolerance or parameter > 1.0 + parameter_tolerance:
+        return False
+    clamped_parameter = max(0.0, min(1.0, parameter))
+    nearest = a + ab * clamped_parameter
+    return abs(point - nearest) <= tolerance
+
+
 def _point_strictly_on_segment(point, a, b, tolerance=1.0e-7):
     """Return True only when point lies on the interior of finite segment a-b."""
     ab = b - a
@@ -286,7 +309,7 @@ class _WaveVertex:
                             continue
                         segment_length = abs(point_b - point_a)
                         tolerance = max(1.0e-7, segment_length * 1.0e-7)
-                        if _point_strictly_on_segment(hit, point_a, point_b, tolerance):
+                        if _point_on_segment_inclusive(hit, point_a, point_b, tolerance):
                             events.append(_SplitEvent(
                                 event_time, hit, self, edge, segment_start, segment_end
                             ))
@@ -1802,7 +1825,7 @@ def _build_roof_mesh_impl(polygon_ccw, pitch_tan, eave_lift=0.0,
             try:
                 for edge_id, _va, _vb, segment_a, segment_b in slav.active_segments(event.distance):
                     if (edge_id == event.opposite_edge.index
-                            and _point_strictly_on_segment(
+                            and _point_on_segment_inclusive(
                                 event.intersection_point, segment_a, segment_b,
                                 max(1.0e-7, abs(segment_b - segment_a) * 1.0e-7))):
                         # A simultaneous collapse may replace the active end
