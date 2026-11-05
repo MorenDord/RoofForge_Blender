@@ -8,7 +8,9 @@ import math
 import unittest
 from collections import Counter
 
-from spatial_roof_2_9_0 import build_spatial_roof_mesh, SpatialRoofError
+from spatial_roof_2_9_0 import (
+    build_spatial_roof_mesh, SpatialRoofError, _face_corner_direction
+)
 
 
 def edge_uses(faces):
@@ -143,6 +145,19 @@ class SpatialTopologyLiftTests(unittest.TestCase):
         self.assert_closed_footprint_mesh(
             outline, [math.radians(35)] * len(outline)
         )
+
+
+    def test_reflex_facet_corner_uses_large_interior_wedge(self):
+        vertices = [
+            (0.0, -1.0, 0.0),  # previous ray: 270 degrees
+            (0.0, 0.0, 0.0),   # reflex corner
+            (1.0, 0.0, 0.0),   # following ray: 0 degrees
+            (1.0, 1.0, 0.0),
+            (-1.0, 1.0, 0.0),
+            (-1.0, -1.0, 0.0),
+        ]
+        angle = _face_corner_direction(vertices, (0, 1, 2, 3, 4, 5), 1)
+        self.assertAlmostEqual(angle, math.radians(135.0), places=6)
 
     def test_reversed_winding_preserves_build(self):
         outline = [(0, 0, 0), (8, 0, .2), (8, 5, .4), (0, 5, .1)]
