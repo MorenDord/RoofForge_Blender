@@ -236,20 +236,14 @@ def _unit3(v, eps=1.0e-14):
 
 
 def extend_spatial_roof_eaves(vertices, faces, face_source_ids, overhang, tolerance=None):
-    """Extend a 3D-eave roof along each existing boundary facet plane.
+    """Extend the eave with one shared 3D miter vertex at each corner.
 
-    Each boundary edge gets a strip offset by ``overhang`` in its own roof
-    plane, perpendicular to that 3D eave edge. At a contour corner, the two
-    independently offset strips are joined by a small triangular corner patch.
-    This keeps the original roof facets planar and makes the extended top
-    surface a connected 2-manifold with a new outer boundary.
+    Each eave edge is offset in its own facet plane. The two offset endpoints
+    at a corner are replaced by one shared miter point on their 3D bisector.
+    Each edge strip is triangulated, so adjacent strips share the single
+    corner-to-miter edge instead of the old two-spoke corner triangle.
 
-    The offset is a surface distance (not a horizontal XY distance). The
-    caller should extract ridge/valley seams from the *unextended* surface so
-    corner transition patches are not mistaken for roof junctions.
-
-    Returns (vertices, faces, face_source_ids). Added strips and corner patches
-    use source id -1 because they are eave extensions, not new roof slopes.
+    Returns (vertices, faces, face_source_ids). Added eave faces use source -1.
     """
     distance = float(overhang)
     if distance <= 1.0e-10:
@@ -266,7 +260,6 @@ def extend_spatial_roof_eaves(vertices, faces, face_source_ids, overhang, tolera
     eps = float(tolerance) if tolerance is not None else span * 1.0e-8
     eps = max(eps, 1.0e-9)
 
-    # One boundary record per one-use directed edge of the upper surface.
     edge_uses = defaultdict(list)
     for face_index, face in enumerate(faces):
         for a, b in zip(face, face[1:] + face[:1]):
@@ -300,51 +293,70 @@ def extend_spatial_roof_eaves(vertices, faces, face_source_ids, overhang, tolera
         buckets[key].append(index)
         return index
 
-    # Every boundary vertex must have one incoming and one outgoing boundary
-    # edge. The solver's upward CCW face winding guarantees this for a simple
-    # closed eave loop.
     incoming = defaultdict(list)
     outgoing = defaultdict(list)
-    extended_endpoints = {}
+    edge_records = []
     for face_index, a, b in boundary:
         face = faces[face_index]
         normal = _face_unit_normal(vertices, face)
         edge = tuple(float(vertices[b][k]) - float(vertices[a][k]) for k in range(3))
         edge_unit = _unit3(edge)
-        # For an upward face and CCW boundary direction, edge x normal points
-        # outward and lies in the face plane, perpendicular to the eave edge.
         outward = _unit3(_cross3(edge_unit, normal))
         pa = tuple(float(vertices[a][k]) + distance * outward[k] for k in range(3))
         pb = tuple(float(vertices[b][k]) + distance * outward[k] for k in range(3))
-        extended_endpoints[(a, b)] = (pa, pb)
-        # Reverse the original boundary edge so it is shared with the source
-        # roof face using opposite winding.
-        ia = add_vertex(pa)
-        ib = add_vertex(pb)
-        incoming[b].append((a, ia, ib))
-        outgoing[a].append((b, ia, ib))
-        out_faces.append((b, a, ia, ib))
-        out_sources.append(-1)
+        incoming[b].append(pb)
+        outgoing[a].append(pa)
+        edge_records.append((a, b))
 
-    # Close the small gaps at non-coplanar eave corners. Collinear splits on
-    # one eave have coincident offset points and need no extra patch.
-    corner_count = 0
+    corner_miters = {}
     for vertex_id in set(incoming) | set(outgoing):
         inc = incoming.get(vertex_id, ())
         out = outgoing.get(vertex_id, ())
         if len(inc) != 1 or len(out) != 1:
             raise SpatialRoofError("Свес встретил разветвлённую или незамкнутую границу крыши.")
-        incoming_outer = inc[0][2]  # offset vertex at the end of incoming edge
-        outgoing_outer = out[0][1]  # offset vertex at the start of outgoing edge
-        if math.dist(out_vertices[incoming_outer], out_vertices[outgoing_outer]) <= eps:
-            continue
-        # Triangle winding is compatible with the adjacent outward strips.
-        out_faces.append((outgoing_outer, vertex_id, incoming_outer))
-        out_sources.append(-1)
-        corner_count += 1
+        p = out_vertices[vertex_id]
+        u = _unit3(tuple(inc[0][k] - p[k] for k in range(3)))
+        v = _unit3(tuple(out[0][k] - p[k] for k in range(3)))
+        raw = tuple(u[k] + v[k] for k in range(3))
+        raw_length = math.sqrt(sum(value * value for value in raw))
+        if raw_length <= 1.0e-8:
+            raise SpatialRoofError(
+                "Свес: смещения соседних скатов почти противоположны; невозможно построить единый митровый угол."
+            )
+        bisector = tuple(value / raw_length for value in raw)
+        projection = sum(bisector[k] * u[k] for k in range(3))
+        if projection <= 1.0e-5:
+            raise SpatialRoofError(
+                "Свес: слишком острый пространственный угол для устойчивого митрового сопряжения."
+            )
+        miter_distance = distance / projection
+        if miter_distance > distance * 12.0:
+            raise SpatialRoofError(
+                "Свес: митровый вылет угла чрезмерно велик; уменьшите свес или измените угол контура."
+            )
+        miter = tuple(p[k] + bisector[k] * miter_distance for k in range(3))
+        corner_miters[vertex_id] = add_vertex(miter)
 
-    # Verify every old interior edge remains two-use and every edge in the
-    # extended top is at most two-use. Boundary edges are the new eave loop.
+    # One quad per edge strip. Adjacent strips share the original-corner
+    # -> miter edge; keeping the strip as a quad avoids a diagonal spoke from
+    # the corner to the neighbouring miter point.
+    for a, b in edge_records:
+        ma = corner_miters[a]
+        mb = corner_miters[b]
+        quad = (b, a, ma, mb)
+        if len(set(quad)) < 4:
+            raise SpatialRoofError("Свес: митровая полоса схлопнулась в вырожденный четырёхугольник.")
+        normal = _face_unit_normal(out_vertices, quad)
+        if normal[2] < 0.0:
+            quad = tuple(reversed(quad))
+            normal = _face_unit_normal(out_vertices, quad)
+        if normal[2] <= eps:
+            raise SpatialRoofError(
+                "Свес: митровая полоса выродилась или перевернулась у угла карниза."
+            )
+        out_faces.append(quad)
+        out_sources.append(-1)
+
     verify = defaultdict(int)
     for face in out_faces:
         for a, b in zip(face, face[1:] + face[:1]):

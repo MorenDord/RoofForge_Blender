@@ -1,0 +1,115 @@
+name: RoofForge spatial geometry tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  pure-python-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile spatial modules
+        working-directory: roof_forge_2.8.4
+        run: python -m py_compile __init__.py spatial_roof_2_9_0.py straight_skeleton_2_6_0.py weighted_skeleton_2_9_0.py test_weighted_skeleton_2_9_0.py test_blender_runtime_2_9_0.py test_spatial_stress_2_9_0.py test_spatial_ui_preview_2_8_1.py
+      - name: Run spatial topology-lifting tests
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_spatial_roof_2_9_0.py test_spatial_stress_2_9_0.py test_spatial_ui_preview_2_8_1.py
+      - name: Probe experimental weighted wavefront (non-gating)
+        continue-on-error: true
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_weighted_skeleton_2_9_0.py
+      - name: Run existing geometry regressions
+        working-directory: roof_forge_2.8.4
+        run: >-
+          python -m unittest -v
+          test_geometry_2_6_0.py
+          test_user_world_loop_2_6_0.py
+          test_user_oblique_contour_2_6_0.py
+          test_spatial_roof_2_8_4.py
+          test_spatial_roof_details_2_8_4.py
+
+  eave-miter-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile eave geometry modules
+        working-directory: roof_forge_2.8.4
+        run: python -m py_compile spatial_roof_2_8_4.py straight_skeleton_2_6_0.py
+      - name: Run spatial eave and profile regressions
+        working-directory: roof_forge_2.8.4
+        run: python -m unittest -v test_spatial_roof_details_2_8_4.py
+
+  blender-5x-runtime-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Blender 5.2.3 LTS
+        run: |
+          mkdir -p "$RUNNER_TEMP/blender-dist"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            https://download.blender.org/release/Blender5.2/blender-5.2.3-linux-x64.tar.xz \
+            --output "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz"
+          tar -xJf "$RUNNER_TEMP/blender-5.2.3-linux-x64.tar.xz" \
+            -C "$RUNNER_TEMP/blender-dist" --strip-components=1
+      - name: Build and validate Blender extension ZIP
+        run: |
+          mkdir -p "$RUNNER_TEMP/roof_forge_dist"
+          "$RUNNER_TEMP/blender-dist/blender" --command extension build \
+            --source-dir roof_forge_2.8.4 \
+            --output-filepath "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+          "$RUNNER_TEMP/blender-dist/blender" --command extension validate \
+            "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+          unzip -t "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip"
+      - name: Stage the exact install ZIP for runtime tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/roof_forge_addons/roof_forge"
+          unzip -q "$RUNNER_TEMP/roof_forge_dist/roof_forge_2.9.0.zip" \
+            -d "$RUNNER_TEMP/roof_forge_addons/roof_forge"
+          test -f "$RUNNER_TEMP/roof_forge_addons/roof_forge/blender_manifest.toml"
+          test -f "$RUNNER_TEMP/roof_forge_addons/roof_forge/__init__.py"
+      - name: Register add-on and generate roofs in Blender
+        env:
+          ROOFFORGE_ADDON_PARENT: ${{ runner.temp }}/roof_forge_addons
+          ROOFFORGE_ROUNDTRIP_BLEND: ${{ runner.temp }}/roof_forge_roundtrip_2_9_0.blend
+        run: |
+          "$RUNNER_TEMP/blender-dist/blender" \
+            --background --factory-startup \
+            --python roof_forge_2.8.4/test_blender_runtime_2_9_0.py
+          test -s "$ROOFFORGE_ROUNDTRIP_BLEND"
+          "$RUNNER_TEMP/blender-dist/blender" \
+            --background "$ROOFFORGE_ROUNDTRIP_BLEND" \
+            --python roof_forge_2.8.4/test_blender_roundtrip_2_9_0.py
+      - name: Upload validated RoofForge 2.9.0 extension ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof_forge_2.9.0
+          path: ${{ runner.temp }}/roof_forge_dist/roof_forge_2.9.0.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  spatial-arrangement-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile diagnostic modules
+        working-directory: roof_forge_2.8.4
+        run: python -m py_compile spatial_roof_2_9_0.py test_spatial_debug_2_9_0.py
+      - name: Run diagnostic
+        continue-on-error: true
+        working-directory: roof_forge_2.8.4
+        run: |
+          python -m unittest -v test_spatial_debug_2_9_0.py || true
+          python -m unittest -v test_topology_debug_2_9_0.py || true

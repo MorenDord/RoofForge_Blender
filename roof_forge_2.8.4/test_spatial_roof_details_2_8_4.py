@@ -4,7 +4,9 @@ import unittest
 from collections import Counter, defaultdict
 
 from spatial_roof_2_8_4 import build_spatial_roof_mesh, extend_spatial_roof_eaves
+from spatial_roof_2_9_0 import build_spatial_roof_mesh as build_spatial_roof_mesh_2_9
 from straight_skeleton_2_6_0 import extract_roof_seams, build_inset_seam_profile_mesh
+from standing_seams_2_6_0 import build_standing_seam_mesh
 
 
 def edge_uses(faces):
@@ -63,12 +65,61 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertGreater(len(vertices), len(self.vertices))
         uses = edge_uses(faces)
         self.assertTrue(all(count in (1, 2) for count in uses.values()))
-        self.assertEqual(sum(count == 1 for count in uses.values()), 8)
-        self.assertEqual(sum(count == 2 for count in uses.values()), 18)
-        # Every newly added face is upward-oriented (the four strips and four
-        # corner transition triangles), rather than an inverted underside.
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
+        # Every original eave corner connects to exactly one shared miter
+        # vertex; the old two-spoke corner triangle is no longer present.
+        original_count = len(self.vertices)
+        added_faces = faces[len(self.faces):]
+        boundary_ids = {
+            vertex_id
+            for edge, count in edge_uses(self.faces).items() if count == 1
+            for vertex_id in edge
+        }
+        for vertex_id in boundary_ids:
+            new_neighbours = set()
+            for face in added_faces:
+                if vertex_id not in face:
+                    continue
+                position = face.index(vertex_id)
+                for neighbour in (face[position - 1], face[(position + 1) % len(face)]):
+                    if neighbour >= original_count:
+                        new_neighbours.add(neighbour)
+            self.assertEqual(len(new_neighbours), 1)
+        # Each new edge strip is one upward-oriented mitered quad.
         for face in faces[len(self.faces):]:
             self.assertGreater(face_normal(vertices, face)[2], 0.0)
+
+
+    def test_flat_individual_pitch_overhang_uses_single_miter_per_corner(self):
+        outline = [(0.0, 0.0), (8.0, 0.0), (8.0, 5.0), (0.0, 5.0)]
+        pitches = [math.radians(v) for v in (30.0, 36.0, 42.0, 34.0)]
+        vertices, faces, sources = build_spatial_roof_mesh(
+            [(x, y, 0.0) for x, y in outline], pitches
+        )
+        extended_vertices, extended_faces, extended_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.35
+        )
+        self.assertEqual(len(extended_faces), len(extended_sources))
+        uses = edge_uses(extended_faces)
+        self.assertTrue(all(count in (1, 2) for count in uses.values()))
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
+        original_count = len(vertices)
+        added_faces = extended_faces[len(faces):]
+        boundary_ids = {
+            vertex_id
+            for edge, count in edge_uses(faces).items() if count == 1
+            for vertex_id in edge
+        }
+        for vertex_id in boundary_ids:
+            new_neighbours = set()
+            for face in added_faces:
+                if vertex_id not in face:
+                    continue
+                position = face.index(vertex_id)
+                for neighbour in (face[position - 1], face[(position + 1) % len(face)]):
+                    if neighbour >= original_count:
+                        new_neighbours.add(neighbour)
+            self.assertEqual(len(new_neighbours), 1)
 
     def test_overhang_preserves_original_facet_geometry(self):
         vertices, faces, sources = extend_spatial_roof_eaves(
@@ -99,6 +150,203 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertTrue(any(abs(v[2]) > 0.0 for v in profile_vertices))
 
 
+
+
+    def test_transition_cap_faces_do_not_create_false_ridge_or_valley(self):
+        vertices = [
+            (0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.5), (0.0, 1.0, 0.0),
+        ]
+        faces = [(0, 1, 2), (0, 2, 3)]
+        ordinary = extract_roof_seams(vertices, faces, [0, 1], [])
+        with_transition_cap = extract_roof_seams(vertices, faces, [0, -2], [])
+        self.assertTrue(ordinary)
+        self.assertEqual(with_transition_cap, [])
+
+    def test_existing_roof_profiles_accept_millimetre_face_warp(self):
+        vertices = [
+            (-1.0, 0.0, 1.0), (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.2), (-1.0, 1.0, 1.2),
+            (1.0, 0.0, 1.0), (1.0, 1.0, 1.2005),
+        ]
+        faces = [(0, 1, 2, 3), (1, 4, 5, 2)]
+        seams = extract_roof_seams(vertices, faces, [-1, -1], [])
+        valleys = [edge for edge in seams if edge[4] == "VALLEY"]
+        self.assertEqual(len(valleys), 1)
+        profile_vertices, profile_faces = build_inset_seam_profile_mesh(
+            vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
+            end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
+        )
+        self.assertTrue(profile_vertices)
+        self.assertTrue(profile_faces)
+        self.assertTrue(all(count == 2 for count in edge_uses(profile_faces).values()))
+
+    def test_existing_roof_profiles_reject_large_face_warp(self):
+        vertices = [
+            (-1.0, 0.0, 1.0), (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.2), (-1.0, 1.0, 1.2),
+            (1.0, 0.0, 1.0), (1.0, 1.0, 1.25),
+        ]
+        faces = [(0, 1, 2, 3), (1, 4, 5, 2)]
+        seams = extract_roof_seams(vertices, faces, [-1, -1], [])
+        with self.assertRaisesRegex(RuntimeError, "слишком сильно отклоняется"):
+            build_inset_seam_profile_mesh(
+                vertices, faces, seams, "VALLEY", 0.12, (0.0, 0.0, 0.02),
+                end_offset=0.0, seat_sink_offset=(0.0, 0.0, -0.0002),
+            )
+
+
+    def _assert_spatial_concave_profiles_closed(self, outline, pitch_degrees):
+        pitches = [math.radians(value) for value in pitch_degrees]
+        vertices, faces, sources = build_spatial_roof_mesh_2_9(outline, pitches)
+        self.assertTrue(vertices)
+        self.assertTrue(faces)
+        self.assertEqual(len(faces), len(sources))
+        seams = extract_roof_seams(
+            vertices, faces, sources, [(p[0], p[1]) for p in outline]
+        )
+        self.assertTrue(seams, "Expected a non-empty ridge/valley seam graph.")
+
+        # The same roof must also accept its spatial mitered eave extension.
+        extended_vertices, extended_faces, extended_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.20
+        )
+        self.assertEqual(len(extended_faces), len(extended_sources))
+        extended_uses = edge_uses(extended_faces)
+        self.assertTrue(extended_uses)
+        self.assertTrue(all(count in (1, 2) for count in extended_uses.values()))
+        source_boundary_count = sum(count == 1 for count in edge_uses(faces).values())
+        extended_boundary_count = sum(count == 1 for count in extended_uses.values())
+        self.assertEqual(extended_boundary_count, source_boundary_count)
+        ridge_edges = [edge for edge in seams if str(edge[4]).upper() == "RIDGE"]
+        valley_edges = [edge for edge in seams if str(edge[4]).upper() == "VALLEY"]
+        self.assertTrue(ridge_edges, "No ridge edges were extracted from the spatial concave roof.")
+
+        for seam_type, expected_edges in (("RIDGE", ridge_edges), ("VALLEY", valley_edges)):
+            if not expected_edges:
+                continue
+            profile_vertices, profile_faces = build_inset_seam_profile_mesh(
+                vertices, faces, seams, seam_type, 0.18 if seam_type == "RIDGE" else 0.24,
+                (0.0, 0.0, 0.015), end_offset=0.0,
+                seat_sink_offset=(0.0, 0.0, -0.0002),
+                outline=[(p[0], p[1]) for p in outline],
+                boundary_edges=None,
+            )
+            self.assertTrue(profile_vertices, seam_type + " profile has no vertices.")
+            self.assertTrue(profile_faces, seam_type + " profile has no faces.")
+            uses = edge_uses(profile_faces)
+            self.assertTrue(uses)
+            self.assertTrue(
+                all(count == 2 for count in uses.values()),
+                seam_type + " profile is not a closed manifold shell."
+            )
+
+    def test_large_nonplanar_concave_l_ridge_valley_profiles_are_closed(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(outline, [35] * len(outline))
+
+    def test_large_nonplanar_concave_u_ridge_valley_profiles_are_closed(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(outline, [35] * len(outline))
+
+
+    def test_large_nonplanar_concave_l_individual_pitch_profiles_and_overhang(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(
+            outline, [33, 35, 37, 36, 38, 34]
+        )
+
+    def test_large_nonplanar_concave_u_individual_pitch_profiles_and_overhang(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_concave_profiles_closed(
+            outline, [33, 35, 37, 38, 34, 36, 32, 37]
+        )
+
+
+    def _assert_spatial_standing_seams(self, outline, pitch_degrees):
+        pitches = [math.radians(value) for value in pitch_degrees]
+        vertices, faces, sources = build_spatial_roof_mesh_2_9(outline, pitches)
+        roof_vertices, roof_faces, roof_sources = extend_spatial_roof_eaves(
+            vertices, faces, sources, 0.20
+        )
+        # Transition caps close the 3D node but are not roof panels; exclude
+        # them from seam generation while retaining slope and eave-strip faces.
+        valid = [
+            (face, source)
+            for face, source in zip(roof_faces, roof_sources)
+            if source != -2
+        ]
+        valid_faces = [face for face, _source in valid]
+        valid_sources = [source for _face, source in valid]
+        seams = extract_roof_seams(
+            roof_vertices, valid_faces, valid_sources,
+            [(p[0], p[1]) for p in outline]
+        )
+        self.assertTrue(seams, "Spatial roof produced no ridge/valley graph for standing seams.")
+        seam_vertices, seam_faces, stats = build_standing_seam_mesh(
+            roof_vertices,
+            valid_faces,
+            seams,
+            panel_width=0.65,
+            seam_height=0.025,
+            seam_base_width=0.014,
+            roof_thickness=0.01,
+            ridge_height=0.05,
+            end_offset=0.0,
+        )
+        self.assertTrue(seam_vertices)
+        self.assertTrue(seam_faces)
+        self.assertGreater(stats["segments"], 0)
+        self.assertLessEqual(stats["effective_height_max"], 0.045 + 1.0e-6)
+        self.assertEqual(len(stats["seam_edge_pairs"]), stats["segments"] * 2)
+        uses = edge_uses(seam_faces)
+        self.assertTrue(all(count <= 2 for count in uses.values()))
+        self.assertTrue(all(
+            0 <= index < len(seam_vertices)
+            for pair in stats["seam_edge_pairs"] for index in pair
+        ))
+
+    def test_spatial_concave_l_individual_pitch_standing_seams(self):
+        outline = [
+            (0, 0, 0.00), (8, 0, 0.08), (8, 4, 0.12),
+            (4, 4, 0.16), (4, 8, 0.20), (0, 8, 0.10),
+        ]
+        self._assert_spatial_standing_seams(outline, [33, 35, 37, 36, 38, 34])
+
+    def test_spatial_concave_u_individual_pitch_standing_seams(self):
+        outline = [
+            (0, 0, 0.00), (10, 0, 0.08), (10, 8, 0.14),
+            (7, 8, 0.20), (7, 3, 0.12), (3, 3, 0.18),
+            (3, 8, 0.24), (0, 8, 0.10),
+        ]
+        self._assert_spatial_standing_seams(outline, [33, 35, 37, 38, 34, 36, 32, 37])
+
+
+    def test_oblique_multi_reflex_spatial_roof_profiles_and_standing_seams(self):
+        outline = [
+            (0.0, 0.0, 0.00), (10.0, 0.0, 0.04),
+            (10.0, 8.0, 0.10), (7.0, 8.0, 0.14),
+            (6.6, 3.2, 0.09), (3.4, 3.2, 0.16),
+            (3.0, 8.0, 0.22), (0.0, 8.0, 0.12),
+        ]
+        pitches = [33, 35, 37, 36, 38, 34, 32, 37]
+        self._assert_spatial_concave_profiles_closed(outline, pitches)
+        self._assert_spatial_standing_seams(outline, pitches)
+
     def test_spatial_overhang_works_with_reversed_contour_winding(self):
         outline = list(reversed(self.outline))
         pitches = list(reversed(self.pitches))
@@ -109,7 +357,7 @@ class SpatialRoofDetailsTests(unittest.TestCase):
         self.assertEqual(len(extended_faces), len(extended_sources))
         uses = edge_uses(extended_faces)
         self.assertTrue(all(count in (1, 2) for count in uses.values()))
-        self.assertEqual(sum(count == 1 for count in uses.values()), 8)
+        self.assertEqual(sum(count == 1 for count in uses.values()), 4)
 
     def test_spatial_ridge_profile_seats_on_thickness_offset_surface(self):
         top = [(x, y, z + 0.012) for x, y, z in self.vertices]
@@ -172,17 +420,39 @@ class SpatialRoofIntegrationSourceTests(unittest.TestCase):
         self.assertIn("extend_spatial_roof_eaves(", source)
         self.assertIn("_store_spatial_profile_source_mesh(", source)
         self.assertIn("_spatial_profile_surface_from_source_mesh(roof_obj)", source)
+        self.assertIn('name="roofforge_face_source", type="INT", domain="FACE"', source)
+        self.assertIn('mesh.attributes.get("roofforge_face_source")', source)
+        self.assertIn("profile_faces, profile_sources", source)
+        self.assertIn("if is_spatial or has_edge_pitches:", source)
+        self.assertIn('roofforge_edge_pitch_count', source)
+        self.assertIn("if source < 0:", source)
         self.assertIn('row.operator("roofforge.create_ridges"', source)
         self.assertIn('row.operator("roofforge.create_valleys"', source)
 
-    def test_standing_seam_rebuild_defines_spatial_guard(self):
+
+    def test_spatial_standing_seam_callback_rebuilds_detail_only(self):
+        from pathlib import Path
+        source = Path(__file__).with_name("__init__.py").read_text(encoding="utf-8")
+        start = source.index("def _standing_seam_settings_update(")
+        end = source.index("class ROOFFORGE_PG_Settings", start)
+        callback = source[start:end]
+        self.assertIn("_rebuild_standing_seams_for_mesh(owner)", callback)
+        self.assertNotIn('owner.get("roofforge_spatial", False)', callback)
+        self.assertNotIn("_rebuild_generated_roof(owner)", callback)
+
+    def test_standing_seam_rebuild_supports_tagged_spatial_roof_faces(self):
         from pathlib import Path
         source = Path(__file__).with_name("__init__.py").read_text(encoding="utf-8")
         start = source.index("def _rebuild_standing_seams_for_mesh(")
         end = source.index("def _rebuild_generated_roof(", start)
         function_source = source[start:end]
-        self.assertIn('is_spatial = bool(roof_obj.get("roofforge_spatial", False))', function_source)
-        self.assertIn('if settings.show_standing_seams and not is_spatial:', function_source)
+        self.assertIn("if settings.show_standing_seams:", function_source)
+        self.assertNotIn("and not is_spatial", function_source)
+        self.assertIn('source_mesh.attributes.get("roofforge_face_source")', source)
+        self.assertIn("if source_id in (-2, -3, -4)", source)
+        self.assertIn("mesh_face_source_ids", source)
+        self.assertIn('seam_box.prop(settings, "show_standing_seams")', source)
+        self.assertNotIn("Фальцы для пространственного карниза пока не включены", source)
 
 
 if __name__ == "__main__":
