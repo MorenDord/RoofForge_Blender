@@ -1797,11 +1797,11 @@ def _build_planar_support_arrangement(points,planes,eps,allowed_pairs=None):
     for source_a,source_b in pair_list:
         pa=planes[source_a]; pb=planes[source_b]
         a=pa[0]-pb[0]; b=pa[1]-pb[1]; cc=pa[2]-pb[2]
-            for p0,p1 in _line_segment_intersections(a,b,cc,xy,eps*5.0):
-                raw_segments.append({
-                    "a":p0,"b":p1,"kind":"pair",
-                    "label":(source_a,source_b),"params":[0.0,1.0]
-                })
+        for p0,p1 in _line_segment_intersections(a,b,cc,xy,eps*5.0):
+            raw_segments.append({
+                "a":p0,"b":p1,"kind":"pair",
+                "label":(source_a,source_b),"params":[0.0,1.0]
+            })
 
     for i,first in enumerate(raw_segments):
         a,b=first["a"],first["b"]
