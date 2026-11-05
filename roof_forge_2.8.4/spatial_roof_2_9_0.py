@@ -666,9 +666,17 @@ def build_spatial_roof_mesh(outline_xyz, pitch_angles, eave_lift=0.0, tolerance=
     ]
 
     if z_span<=flat_tolerance:
-        # The weighted wavefront works in vertical-rise time. Each eave
-        # support plane contributes its exact inward normal speed, so reflex
-        # split events and edge collapses move according to individual pitch.
+        # With a uniform pitch the established unit-speed straight skeleton
+        # is the best-conditioned path, especially at symmetric L/U events.
+        uniform_pitch = max(angles)-min(angles) <= 1.0e-9
+        if uniform_pitch:
+            vertices,faces,sources=_build_spatial_roof_mesh_template(
+                points,angles,eave_lift=float(eave_lift),tolerance=tolerance
+            )
+            return vertices,faces,[source_edge_map[source] for source in sources]
+
+        # Individual pitches require actual weighted collapse/split times.
+        # Each support plane contributes its exact inward normal speed.
         speeds=[]
         for i in range(count):
             p=points[i]
