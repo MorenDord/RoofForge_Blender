@@ -1,0 +1,1922 @@
+bl_info = {
+    "name": "RoofForge - Parametric Roof Generator",
+    "author": "OpenAI",
+    "version": (2, 8, 4),
+    "blender": (5, 0, 0),
+    "location": "View3D > Sidebar > RoofForge",
+    "description": "Low-poly roofs and automatic lightweight standing-seam layout",
+    "category": "Add Mesh",
+}
+
+import bpy
+import bpy.utils.previews
+import bmesh
+import json
+import math
+import os
+import struct
+import tempfile
+import zlib
+from collections import defaultdict
+from mathutils import Vector
+from bpy.props import (
+    EnumProperty,
+    FloatProperty,
+    BoolProperty,
+    StringProperty,
+    PointerProperty,
+)
+
+from .straight_skeleton_2_6_0 import (
+    SkeletonError,
+    build_roof_mesh,
+    _orthogonalize_nearly_orthogonal_contour,
+    extend_roof_mesh_eaves,
+    extract_roof_seams,
+    build_inset_seam_profile_mesh,
+)
+from .standing_seams_2_6_0 import build_standing_seam_mesh
+from .spatial_roof_2_8_4 import (
+    build_spatial_roof_mesh,
+    extend_spatial_roof_eaves,
+    SpatialRoofError,
+)
+
+
+# -----------------------------------------------------------------------------
+# Geometry core (pure Python; no external packages required)
+# -----------------------------------------------------------------------------
+
+_EPS = 1.0e-9
+
+
+class RoofForgeError(Exception):
+    pass
+
+
+def _add(a, b):
+    return (a[0] + b[0], a[1] + b[1])
+
+
+def _sub(a, b):
+    return (a[0] - b[0], a[1] - b[1])
+
+
+def _mul(a, s):
+    return (a[0] * s, a[1] * s)
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1]
+
+
+def _cross(a, b):
+    return a[0] * b[1] - a[1] * b[0]
+
+
+def _length(a):
+    return math.hypot(a[0], a[1])
+
+
+def _normalize(a):
+    length = _length(a)
+    if length < _EPS:
+        raise RoofForgeError("В контуре есть ребро нулевой длины.")
+    return (a[0] / length, a[1] / length)
+
+
+def _signed_area(poly):
+    return 0.5 * sum(_cross(poly[i], poly[(i + 1) % len(poly)]) for i in range(len(poly)))
+
+
+def _orientation(a, b, c):
+    return _cross(_sub(b, a), _sub(c, a))
+
+
+def _on_segment(a, b, p, eps):
+    return (
+        min(a[0], b[0]) - eps <= p[0] <= max(a[0], b[0]) + eps
+        and min(a[1], b[1]) - eps <= p[1] <= max(a[1], b[1]) + eps
+    )
+
+
+def _segments_intersect(a, b, c, d, eps):
+    o1 = _orientation(a, b, c)
+    o2 = _orientation(a, b, d)
+    o3 = _orientation(c, d, a)
+    o4 = _orientation(c, d, b)
+    if ((o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps)) and \
+       ((o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps)):
+        return True
+    if abs(o1) <= eps and _on_segment(a, b, c, eps):
+        return True
+    if abs(o2) <= eps and _on_segment(a, b, d, eps):
+        return True
+    if abs(o3) <= eps and _on_segment(c, d, a, eps):
+        return True
+    if abs(o4) <= eps and _on_segment(c, d, b, eps):
+        return True
+    return False
+
+
+def _validate_simple_polygon(poly, eps):
+    count = len(poly)
+    for i in range(count):
+        a, b = poly[i], poly[(i + 1) % count]
+        for j in range(i + 1, count):
+            if j == i or j == (i + 1) % count or (j + 1) % count == i:
+                continue
+            c, d = poly[j], poly[(j + 1) % count]
+            if _segments_intersect(a, b, c, d, eps):
+                raise RoofForgeError("Контур самопересекается или касается сам себя. Исправьте порядок рёбер.")
+
+
+def _simplify_polygon(poly, scale):
+    eps = max(1.0e-8, scale * 1.0e-8)
+    cleaned = []
+    for point in poly:
+        if not cleaned or _length(_sub(point, cleaned[-1])) > eps:
+            cleaned.append((float(point[0]), float(point[1])))
+    if len(cleaned) > 2 and _length(_sub(cleaned[0], cleaned[-1])) <= eps:
+        cleaned.pop()
+
+    changed = True
+    while changed and len(cleaned) >= 3:
+        changed = False
+        result = []
+        n = len(cleaned)
+        for i in range(n):
+            prev = cleaned[(i - 1) % n]
+            curr = cleaned[i]
+            nxt = cleaned[(i + 1) % n]
+            a = _sub(curr, prev)
+            b = _sub(nxt, curr)
+            if abs(_cross(a, b)) <= eps * max(_length(a), _length(b), 1.0) and _dot(a, b) >= -eps:
+                changed = True
+                continue
+            result.append(curr)
+        cleaned = result
+
+    if len(cleaned) < 3:
+        raise RoofForgeError("В контуре должно быть не менее трёх разных углов.")
+    area = _signed_area(cleaned)
+    if abs(area) <= eps * eps:
+        raise RoofForgeError("Площадь контура слишком мала или контур вырожден.")
+    if area < 0.0:
+        cleaned.reverse()
+    _validate_simple_polygon(cleaned, eps)
+    return cleaned
+
+
+def _line_intersection(p, direction_a, q, direction_b):
+    den = _cross(direction_a, direction_b)
+    if abs(den) < 1.0e-10:
+        return None
+    t = _cross(_sub(q, p), direction_b) / den
+    return _add(p, _mul(direction_a, t))
+
+
+def _offset_polygon(poly, distance):
+    """Miter offset for simple concave or convex polygons; rejects collapsed/self-crossing offsets."""
+    if distance <= 1.0e-10:
+        return list(poly)
+    shifted = []
+    for i, p in enumerate(poly):
+        q = poly[(i + 1) % len(poly)]
+        edge = _normalize(_sub(q, p))
+        outward = (edge[1], -edge[0])  # polygon is CCW
+        shifted.append((_add(p, _mul(outward, distance)), edge))
+
+    result = []
+    for i in range(len(poly)):
+        prev_p, prev_dir = shifted[i - 1]
+        curr_p, curr_dir = shifted[i]
+        hit = _line_intersection(prev_p, prev_dir, curr_p, curr_dir)
+        if hit is None:
+            raise RoofForgeError("Не удалось построить свес: есть почти параллельные соседние рёбра.")
+        result.append(hit)
+
+    scale = max(max(_length(_sub(result[(i + 1) % len(result)], result[i])) for i in range(len(result))), 1.0)
+    result = _simplify_polygon(result, scale)
+    if _signed_area(result) <= 1.0e-8:
+        raise RoofForgeError("Свес слишком велик: контур крыши схлопнулся.")
+    return result
+
+
+def _is_parallelogram(poly, tolerance=1.0e-4):
+    if len(poly) != 4:
+        return False
+    e = [_sub(poly[(i + 1) % 4], poly[i]) for i in range(4)]
+    scale = max(max(_length(v) for v in e), 1.0)
+    return abs(_cross(e[0], e[2])) <= tolerance * scale * scale and \
+           abs(_cross(e[1], e[3])) <= tolerance * scale * scale
+
+
+def _create_surface_geometry(poly, settings, eave_lift_override=None):
+    """Build the only supported roof type: a free-angle hipped roof."""
+    lift = settings.eave_lift if eave_lift_override is None else float(eave_lift_override)
+    return build_roof_mesh(
+        poly, math.tan(settings.pitch_angle), lift, allow_oblique=True
+    )
+
+
+def _order_single_loop(vertex_coordinates, edge_pairs):
+    adjacency = defaultdict(list)
+    for a, b in edge_pairs:
+        if a == b:
+            continue
+        adjacency[a].append(b)
+        adjacency[b].append(a)
+    if len(adjacency) < 3:
+        raise RoofForgeError("Не найден замкнутый контур минимум из трёх вершин.")
+    bad = [vid for vid, neighbours in adjacency.items() if len(neighbours) != 2]
+    if bad:
+        raise RoofForgeError("Выбранные рёбра должны образовывать один замкнутый loop без ответвлений и разрывов.")
+    start = next(iter(adjacency))
+    ordered = [start]
+    previous = None
+    current = start
+    for _ in range(len(adjacency) + 1):
+        neighbours = adjacency[current]
+        nxt = neighbours[0] if neighbours[0] != previous else neighbours[1]
+        if nxt == start:
+            break
+        if nxt in ordered:
+            raise RoofForgeError("В выделении найдено больше одного контура или самопересечение.")
+        ordered.append(nxt)
+        previous, current = current, nxt
+    if len(ordered) != len(adjacency):
+        raise RoofForgeError("Выделение содержит несколько отдельных контуров. Оставьте один замкнутый loop.")
+    try:
+        return [vertex_coordinates[index] for index in ordered]
+    except KeyError as exc:
+        raise RoofForgeError("Не удалось прочитать координаты всех вершин контура.") from exc
+
+
+def _extract_loop_from_object(obj):
+    if obj is None or obj.type != 'MESH':
+        raise RoofForgeError("Активным объектом должен быть Mesh с контуром карниза.")
+    if obj.mode == 'EDIT':
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.verts.index_update()
+        selected_edges = [edge for edge in bm.edges if edge.select]
+        if not selected_edges:
+            raise RoofForgeError("В Edit Mode выделите одно замкнутое кольцо рёбер карниза.")
+        coordinates = {vert.index: (obj.matrix_world @ vert.co) for vert in bm.verts}
+        edge_pairs = [(edge.verts[0].index, edge.verts[1].index) for edge in selected_edges]
+        return _order_single_loop(coordinates, edge_pairs)
+
+    mesh = obj.data
+    if not mesh.edges:
+        raise RoofForgeError("У активного Mesh нет рёбер.")
+    if len(mesh.polygons) == 0:
+        edge_pairs = [tuple(edge.vertices) for edge in mesh.edges]
+    else:
+        edge_use_count = defaultdict(int)
+        for polygon in mesh.polygons:
+            for edge_key in polygon.edge_keys:
+                edge_use_count[tuple(sorted(edge_key))] += 1
+        edge_pairs = [tuple(edge.vertices) for edge in mesh.edges if edge_use_count.get(tuple(sorted(edge.vertices)), 0) == 1]
+    if not edge_pairs:
+        raise RoofForgeError("Не найдено граничное кольцо. Выделите loop в Edit Mode или используйте mesh-контур без граней.")
+    coordinates = {vert.index: (obj.matrix_world @ vert.co) for vert in mesh.vertices}
+    return _order_single_loop(coordinates, edge_pairs)
+
+
+def _prepare_local_polygon(world_points):
+    xs = [point.x for point in world_points]
+    ys = [point.y for point in world_points]
+    zs = [point.z for point in world_points]
+    center_x = sum(xs) / len(xs)
+    center_y = sum(ys) / len(ys)
+    base_z = sum(zs) / len(zs)
+    diagonal = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+    z_tolerance = max(1.0e-5, diagonal * 1.0e-5)
+    if max(zs) - min(zs) > z_tolerance:
+        raise RoofForgeError("Контур карниза должен лежать в горизонтальной плоскости XY. Выровняйте вершины по Z.")
+    local = [(point.x - center_x, point.y - center_y) for point in world_points]
+    local = _simplify_polygon(local, max(diagonal, 1.0))
+    return local, (center_x, center_y, base_z)
+
+
+def _prepare_local_spatial_polygon(world_points):
+    """Normalize a 3D eave loop without flattening individual vertex heights."""
+    xs = [float(p.x) for p in world_points]
+    ys = [float(p.y) for p in world_points]
+    zs = [float(p.z) for p in world_points]
+    cx, cy, cz = sum(xs)/len(xs), sum(ys)/len(ys), sum(zs)/len(zs)
+    local = [(float(p.x)-cx, float(p.y)-cy, float(p.z)-cz) for p in world_points]
+    # Keep XYZ; the spatial solver validates XY simplicity and edge grades.
+    return local, (cx, cy, cz)
+
+
+# -----------------------------------------------------------------------------
+# Mesh construction and live object rebuilding
+# -----------------------------------------------------------------------------
+
+
+def _extrude_mesh_global_z(vertices, faces, local_offset):
+    """Give a roof surface real mesh thickness by translating it along WORLD +Z.
+
+    ``local_offset`` is the world +Z vector transformed into the object's local
+    coordinates. The original surface becomes the underside, the translated
+    copy is the upper surface, and only boundary edges receive side walls.
+    No Solidify modifier is involved.
+    """
+    if not vertices or not faces:
+        return list(vertices), list(faces)
+    offset = (float(local_offset[0]), float(local_offset[1]), float(local_offset[2]))
+    count = len(vertices)
+    bottom = [tuple(map(float, v)) for v in vertices]
+    top = [(v[0] + offset[0], v[1] + offset[1], v[2] + offset[2]) for v in bottom]
+    out_vertices = bottom + top
+
+    # Reverse the original faces for the underside; translated faces retain
+    # their upward-facing winding.
+    out_faces = [tuple(reversed(face)) for face in faces]
+    out_faces.extend(tuple(index + count for index in face) for face in faces)
+
+    edge_uses = defaultdict(list)
+    for face in faces:
+        for i, a in enumerate(face):
+            b = face[(i + 1) % len(face)]
+            key = (a, b) if a < b else (b, a)
+            edge_uses[key].append((a, b))
+
+    for uses in edge_uses.values():
+        if len(uses) != 1:
+            continue
+        a, b = uses[0]
+        # Winding follows the top boundary so the wall normal points outward.
+        out_faces.append((a, b, b + count, a + count))
+
+    return out_vertices, out_faces
+
+
+def _replace_mesh_data(obj, name, vertices, faces, seam_edges=None):
+    """Replace mesh data without remeshing, dissolving, smoothing or subdividing.
+
+    The polygons passed by the roof solver are the intended mathematical faces.
+    Keeping them intact is essential: coplanar edges are still meaningful when
+    they belong to the actual roof topology (ridge/valley graph).
+    """
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.validate(verbose=False)
+    mesh.update()
+    if len(mesh.polygons):
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()
+    for polygon in mesh.polygons:
+        polygon.use_smooth = False
+    if seam_edges:
+        marked = {
+            (int(edge[0]), int(edge[1])) if int(edge[0]) < int(edge[1])
+            else (int(edge[1]), int(edge[0]))
+            for edge in seam_edges if len(edge) == 2
+        }
+        for edge in mesh.edges:
+            key = tuple(sorted((int(edge.vertices[0]), int(edge.vertices[1]))))
+            if key in marked:
+                edge.use_seam = True
+    old = obj.data
+    obj.data = mesh
+    if old and old.users == 0:
+        bpy.data.meshes.remove(old)
+
+
+def _remove_helper_object(roof_obj, custom_key):
+    helper_name = roof_obj.get(custom_key, "")
+    helper = bpy.data.objects.get(helper_name) if helper_name else None
+    if helper is not None and helper.get("roofforge_helper", False):
+        helper_mesh = helper.data if helper.type == 'MESH' else None
+        bpy.data.objects.remove(helper, do_unlink=True)
+        if helper_mesh is not None and helper_mesh.users == 0:
+            bpy.data.meshes.remove(helper_mesh)
+    roof_obj[custom_key] = ""
+
+
+def _ensure_helper_object(roof_obj, suffix, custom_key):
+    helper_name = roof_obj.get(custom_key, "")
+    helper = bpy.data.objects.get(helper_name) if helper_name else None
+    if helper is None or helper.type != 'MESH':
+        mesh = bpy.data.meshes.new(roof_obj.name + suffix + "_Mesh")
+        helper = bpy.data.objects.new(roof_obj.name + suffix, mesh)
+        collection = roof_obj.users_collection[0] if roof_obj.users_collection else bpy.context.scene.collection
+        collection.objects.link(helper)
+        helper.parent = roof_obj
+        helper.location = (0.0, 0.0, 0.0)
+        helper.rotation_euler = (0.0, 0.0, 0.0)
+        helper.scale = (1.0, 1.0, 1.0)
+        helper["roofforge_helper"] = True
+        roof_obj[custom_key] = helper.name
+    return helper
+
+
+def _settings_values(settings):
+    return {
+        "roof_type": settings.roof_type,
+        "pitch_angle": settings.pitch_angle,
+        "overhang": settings.overhang,
+        "eave_lift": settings.eave_lift,
+        "thickness": settings.thickness,
+        "make_solid": settings.make_solid,
+        "show_ridges": settings.show_ridges,
+        "ridge_width": settings.ridge_width,
+        "ridge_extrusion": settings.ridge_extrusion,
+        "ridge_end_offset": settings.ridge_end_offset,
+        "show_valleys": settings.show_valleys,
+        "valley_width": settings.valley_width,
+        "valley_extrusion": settings.valley_extrusion,
+        "valley_end_offset": settings.valley_end_offset,
+        "show_standing_seams": settings.show_standing_seams,
+        "standing_panel_width": settings.standing_panel_width,
+        "standing_seam_height": settings.standing_seam_height,
+        "standing_seam_width": settings.standing_seam_width,
+        "standing_end_offset": settings.standing_end_offset,
+        "end_offsets_migrated": True,
+        **{f"spatial_pitch_{i:02d}": getattr(settings, f"spatial_pitch_{i:02d}") for i in range(1, 33)},
+    }
+
+
+def _update_roof_modifiers(roof_obj, settings):
+    # RoofForge thickness is explicit mesh geometry; no Solidify or Bevel.
+    for modifier in tuple(roof_obj.modifiers):
+        if modifier.name in {"RoofForge Thickness", "RoofForge Bevel"}:
+            roof_obj.modifiers.remove(modifier)
+
+
+def _mesh_boundary_segments(vertices, faces):
+    """Return the geometric boundary edges of a polygon surface."""
+    uses = defaultdict(list)
+    for face in faces:
+        for a, b in zip(face, face[1:] + face[:1]):
+            key = (a, b) if a < b else (b, a)
+            uses[key].append((a, b))
+    result = []
+    for edge_uses in uses.values():
+        if len(edge_uses) == 1:
+            a, b = edge_uses[0]
+            result.append((tuple(vertices[a]), tuple(vertices[b])))
+    return result
+
+
+def _world_surface_from_mesh_object(roof_obj):
+    """Extract evaluated upward-facing roof facets without changing the source.
+
+    Modifiers are evaluated first, then a temporary BMesh dissolves tiny
+    coplanar partitions (including triangulation) so panel lines are not
+    restarted at invisible internal edges. Coordinates are transformed to
+    world space so all panel dimensions remain scene-unit values.
+    """
+    evaluated_obj = None
+    evaluated_mesh = None
+    bm = bmesh.new()
+    try:
+        source_mesh = roof_obj.data
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            evaluated_obj = roof_obj.evaluated_get(depsgraph)
+            evaluated_mesh = evaluated_obj.to_mesh()
+            if evaluated_mesh is not None:
+                source_mesh = evaluated_mesh
+        except (AttributeError, RuntimeError, TypeError):
+            evaluated_obj = None
+            evaluated_mesh = None
+
+        if source_mesh is None or not source_mesh.polygons:
+            raise RoofForgeError("У выбранного объекта нет граней крыши.")
+
+        bm.from_mesh(source_mesh)
+        bm.verts.ensure_lookup_table()
+        # Imported roof planes are sometimes stored as separate face islands
+        # with coincident but unwelded vertices. Weld only microscopic gaps in
+        # this temporary copy so their true shared dihedral edges can be found;
+        # the user's original mesh is never touched.
+        if bm.verts:
+            local_coords = [vert.co for vert in bm.verts]
+            spans = [
+                max(float(co[axis]) for co in local_coords)
+                - min(float(co[axis]) for co in local_coords)
+                for axis in range(3)
+            ]
+            local_scale = max(1.0, *spans)
+            try:
+                bmesh.ops.remove_doubles(
+                    bm, verts=list(bm.verts), dist=local_scale * 1.0e-8
+                )
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+        bm.normal_update()
+        try:
+            bmesh.ops.dissolve_limit(
+                bm,
+                angle_limit=math.radians(0.01),
+                use_dissolve_boundaries=False,
+                verts=list(bm.verts),
+                edges=list(bm.edges),
+            )
+            bm.normal_update()
+        except (TypeError, RuntimeError, AttributeError):
+            # Keep the evaluated input intact if a particular build cannot
+            # perform limited dissolve on the temporary BMesh.
+            pass
+
+        bm.verts.index_update()
+        transform = evaluated_obj.matrix_world if evaluated_obj is not None else roof_obj.matrix_world
+        world_points = [transform @ vert.co for vert in bm.verts]
+        source_faces = []
+        for face in bm.faces:
+            if len(face.verts) < 3:
+                continue
+            coords = [world_points[v.index] for v in face.verts]
+            nx = ny = nz = 0.0
+            for i, point in enumerate(coords):
+                nxt = coords[(i + 1) % len(coords)]
+                nx += (point.y - nxt.y) * (point.z + nxt.z)
+                ny += (point.z - nxt.z) * (point.x + nxt.x)
+                nz += (point.x - nxt.x) * (point.y + nxt.y)
+            length = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if length <= 1.0e-12:
+                continue
+            if nz / length > 0.05:
+                source_faces.append(tuple(v.index for v in face.verts))
+
+        if not source_faces:
+            raise RoofForgeError(
+                "Не найдены верхние грани крыши. Проверьте нормали и геометрию объекта."
+            )
+
+        used = sorted({index for face in source_faces for index in face})
+        remap = {old: new for new, old in enumerate(used)}
+        surface_vertices = [
+            (float(world_points[index].x), float(world_points[index].y), float(world_points[index].z))
+            for index in used
+        ]
+        surface_faces = [tuple(remap[index] for index in face) for face in source_faces]
+        face_sources = [-1] * len(surface_faces)
+        ridge_graph = extract_roof_seams(surface_vertices, surface_faces, face_sources, [])
+        boundary_edges = _mesh_boundary_segments(surface_vertices, surface_faces)
+        return surface_vertices, surface_faces, ridge_graph, boundary_edges
+    finally:
+        bm.free()
+        if evaluated_obj is not None and evaluated_mesh is not None:
+            try:
+                evaluated_obj.to_mesh_clear()
+            except (AttributeError, RuntimeError, ReferenceError):
+                pass
+
+
+
+def _store_spatial_profile_source_mesh(roof_obj, vertices, faces):
+    """Persist the pre-overhang upper surface without adding a scene object.
+
+    The mesh datablock has a fake user and is referenced by name from the roof.
+    This gives Create/Update profile tools a stable source mesh after saving and
+    reopening the .blend, while keeping the visible roof object independent.
+    """
+    key = "roofforge_spatial_profile_source_mesh"
+    old_name = str(roof_obj.get(key, ""))
+    mesh = bpy.data.meshes.new(roof_obj.name + "_RF_ProfileSource")
+    try:
+        mesh.from_pydata(vertices, [], faces)
+        mesh.update()
+        mesh.use_fake_user = True
+    except Exception:
+        bpy.data.meshes.remove(mesh)
+        raise
+    roof_obj[key] = mesh.name
+    old = bpy.data.meshes.get(old_name) if old_name else None
+    if old is not None and old != mesh:
+        old.use_fake_user = False
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+
+
+def _spatial_profile_surface_from_source_mesh(roof_obj):
+    """Read the saved source surface in world space for ridge/valley tools."""
+    mesh_name = str(roof_obj.get("roofforge_spatial_profile_source_mesh", ""))
+    mesh = bpy.data.meshes.get(mesh_name) if mesh_name else None
+    if mesh is None or not mesh.polygons:
+        return None
+    transform = roof_obj.matrix_world
+    vertices = []
+    for vertex in mesh.vertices:
+        point = transform @ vertex.co
+        vertices.append((float(point.x), float(point.y), float(point.z)))
+    faces = [tuple(int(i) for i in polygon.vertices) for polygon in mesh.polygons]
+    seams = extract_roof_seams(vertices, faces, [-1] * len(faces), [])
+    boundary = _mesh_boundary_segments(vertices, faces)
+    return vertices, faces, seams, boundary
+
+def _rebuild_existing_roof_profiles(roof_obj, kinds=None):
+    """Build ridge/valley profiles from an existing mesh surface, never from a skeleton.
+
+    The source mesh is evaluated (including modifiers), copied into a temporary
+    BMesh, and reduced only across coplanar partitions. Shared top-surface edges
+    are classified by their actual dihedral angle. The source object is never
+    edited; the resulting profiles are separate child meshes.
+    """
+    if (not roof_obj or roof_obj.type != 'MESH'
+            or roof_obj.get('roofforge_profiles_updating', False)):
+        return
+
+    settings = roof_obj.roofforge_settings
+    if kinds is None:
+        kinds = tuple(
+            kind for kind in ('RIDGE', 'VALLEY')
+            if roof_obj.get('roofforge_external_' + kind.lower(), False)
+        )
+    else:
+        kinds = tuple(str(kind).upper() for kind in kinds)
+
+    if not kinds:
+        return
+
+    roof_obj['roofforge_profiles_updating'] = True
+    try:
+        source_surface = None
+        if roof_obj.get("roofforge_generated", False) and roof_obj.get("roofforge_spatial", False):
+            source_surface = _spatial_profile_surface_from_source_mesh(roof_obj)
+        surface_vertices, surface_faces, seam_graph, boundary_edges = (
+            source_surface if source_surface is not None
+            else _world_surface_from_mesh_object(roof_obj)
+        )
+        inverse = roof_obj.matrix_world.inverted_safe()
+        for kind in kinds:
+            if kind == 'RIDGE':
+                enabled = bool(settings.show_ridges)
+                width = float(settings.ridge_width)
+                extrusion = float(settings.ridge_extrusion)
+                end_offset = float(settings.ridge_end_offset)
+                custom_key = 'roofforge_ridges_object'
+                suffix = '_Ridges'
+                error_key = 'roofforge_ridge_error'
+            elif kind == 'VALLEY':
+                enabled = bool(settings.show_valleys)
+                width = float(settings.valley_width)
+                extrusion = float(settings.valley_extrusion)
+                end_offset = float(settings.valley_end_offset)
+                custom_key = 'roofforge_valleys_object'
+                suffix = '_Valleys'
+                error_key = 'roofforge_valley_error'
+            else:
+                continue
+
+            if not roof_obj.get('roofforge_external_' + kind.lower(), False):
+                continue
+            if not enabled:
+                _remove_helper_object(roof_obj, custom_key)
+                roof_obj[error_key] = ''
+                roof_obj['roofforge_' + kind.lower() + '_edge_count'] = 0
+                continue
+
+            world_vertices, world_faces = build_inset_seam_profile_mesh(
+                surface_vertices, surface_faces, seam_graph, kind, width,
+                (0.0, 0.0, extrusion),
+                end_offset=end_offset,
+                seat_sink_offset=(0.0, 0.0, -0.0002),
+                boundary_edges=boundary_edges,
+            )
+            local_vertices = []
+            for vertex in world_vertices:
+                local_point = inverse @ Vector(vertex)
+                local_vertices.append((
+                    float(local_point.x), float(local_point.y), float(local_point.z)
+                ))
+            helper = _ensure_helper_object(roof_obj, suffix, custom_key)
+            _replace_mesh_data(helper, helper.name + '_Mesh', local_vertices, world_faces)
+            roof_obj[error_key] = ''
+            roof_obj['roofforge_' + kind.lower() + '_edge_count'] = sum(
+                1 for edge in seam_graph if str(edge[4]).upper() == kind
+            )
+            roof_obj['roofforge_' + kind.lower() + '_face_count'] = len(world_faces)
+
+        roof_obj['roofforge_profile_error'] = ''
+    except Exception as exc:
+        message = str(exc)
+        roof_obj['roofforge_profile_error'] = message
+        for kind in kinds:
+            error_key = 'roofforge_' + str(kind).lower() + '_error'
+            roof_obj[error_key] = message
+    finally:
+        roof_obj['roofforge_profiles_updating'] = False
+
+
+def _rebuild_standing_seams_for_mesh(roof_obj):
+    """Live-rebuild standing seams on a selected/generated roof mesh object."""
+    if not roof_obj or roof_obj.type != 'MESH' or roof_obj.get('roofforge_standing_updating', False):
+        return
+    is_spatial = bool(roof_obj.get("roofforge_spatial", False))
+    roof_obj['roofforge_standing_updating'] = True
+    try:
+        settings = roof_obj.roofforge_settings
+        if settings.show_standing_seams and not is_spatial:
+            standing_obj = _ensure_helper_object(
+                roof_obj, "_StandingSeams", "roofforge_standing_seams_object"
+            )
+            surface_vertices, surface_faces, ridge_graph, boundary_edges = _world_surface_from_mesh_object(roof_obj)
+            if roof_obj.get("roofforge_generated", False):
+                roof_thickness = float(settings.thickness) if settings.make_solid else 0.0
+            else:
+                # For an imported solid roof, this is the thickness used to
+                # sink invisible rib feet inside the existing shell.
+                roof_thickness = float(settings.thickness)
+            sv, sf, stats = build_standing_seam_mesh(
+                surface_vertices,
+                surface_faces,
+                ridge_graph,
+                panel_width=settings.standing_panel_width,
+                seam_height=settings.standing_seam_height,
+                seam_base_width=settings.standing_seam_width,
+                roof_thickness=roof_thickness,
+                ridge_height=settings.ridge_extrusion,
+                end_offset=settings.standing_end_offset,
+                boundary_edges=boundary_edges,
+            )
+            inverse = roof_obj.matrix_world.inverted_safe()
+            local_vertices = []
+            for vertex in sv:
+                point = inverse @ Vector(vertex)
+                local_vertices.append((float(point.x), float(point.y), float(point.z)))
+            _replace_mesh_data(
+                standing_obj, standing_obj.name + "_Mesh", local_vertices, sf,
+                seam_edges=stats.get("seam_edge_pairs", ()),
+            )
+            roof_obj["roofforge_standing_effective_height"] = stats.get("effective_height_max", 0.0)
+            roof_obj["roofforge_standing_segment_count"] = stats.get("segments", 0)
+            roof_obj["roofforge_standing_stats"] = json.dumps(stats, separators=(",", ":"))
+        else:
+            _remove_helper_object(roof_obj, "roofforge_standing_seams_object")
+            roof_obj["roofforge_standing_effective_height"] = 0.0
+            roof_obj["roofforge_standing_segment_count"] = 0
+        roof_obj["roofforge_standing_error"] = ""
+    except Exception as exc:
+        roof_obj["roofforge_standing_error"] = str(exc)
+    finally:
+        roof_obj["roofforge_standing_updating"] = False
+
+
+def _rebuild_generated_roof(roof_obj):
+    if not roof_obj or roof_obj.type != 'MESH' or not roof_obj.get('roofforge_generated', False):
+        return
+    if roof_obj.get('roofforge_updating', False):
+        return
+    roof_obj['roofforge_updating'] = True
+    try:
+        settings = roof_obj.roofforge_settings
+        source_poly = json.loads(roof_obj.get('roofforge_outline', '[]'))
+        if len(source_poly) < 3:
+            raise RoofForgeError(
+                "В объекте крыши отсутствует сохранённый исходный контур. Создайте крышу заново."
+            )
+        is_spatial = bool(roof_obj.get("roofforge_spatial", False))
+        profile_outline = None
+        profile_vertices = None
+        profile_faces = None
+        profile_sources = None
+
+        if is_spatial:
+            source_xyz = [tuple(float(c) for c in p[:3]) for p in source_poly]
+            profile_outline = [(p[0], p[1]) for p in source_xyz]
+            pitches = json.loads(roof_obj.get("roofforge_spatial_pitches", "[]"))
+            if len(pitches) != len(source_xyz):
+                raise RoofForgeError("Не совпадает число индивидуальных уклонов и рёбер 3D-контура.")
+            try:
+                # Keep the source surface intact for seam detection. The eave
+                # extension is added as planar strips afterwards and must not
+                # be interpreted as extra ridge/valley junctions.
+                profile_vertices, profile_faces, profile_sources = build_spatial_roof_mesh(
+                    source_xyz, pitches, eave_lift=settings.eave_lift
+                )
+                surface_vertices, surface_faces, face_source_ids = (
+                    extend_spatial_roof_eaves(
+                        profile_vertices, profile_faces, profile_sources, settings.overhang
+                    )
+                )
+            except SpatialRoofError as exc:
+                raise RoofForgeError("Пространственная крыша: " + str(exc)) from exc
+            poly = list(profile_outline)
+        else:
+            source_poly = [(float(p[0]), float(p[1])) for p in source_poly]
+            # Keep the eave extension and seam clipping on the exact same
+            # normalized footprint as the free-angle skeleton.
+            source_poly, _was_orthogonalized = _orthogonalize_nearly_orthogonal_contour(source_poly)
+            poly = _offset_polygon(source_poly, settings.overhang)
+            surface_vertices, surface_faces, face_source_ids = _create_surface_geometry(source_poly, settings)
+            if settings.overhang > 1.0e-10:
+                surface_vertices, surface_faces, face_source_ids = extend_roof_mesh_eaves(
+                    surface_vertices, surface_faces, face_source_ids,
+                    source_poly, poly, settings.overhang, math.tan(settings.pitch_angle)
+                )
+            profile_vertices = surface_vertices
+            profile_faces = surface_faces
+            profile_sources = face_source_ids
+            profile_outline = poly
+
+        # The roof thickness is real mesh geometry translated along world +Z.
+        world_thickness = Vector((0.0, 0.0, settings.thickness if settings.make_solid else 0.0))
+        local_thickness = roof_obj.matrix_world.inverted_safe().to_3x3() @ world_thickness
+        thickness_offset = (float(local_thickness.x), float(local_thickness.y), float(local_thickness.z))
+        if settings.make_solid and settings.thickness > 0.0:
+            mesh_vertices, mesh_faces = _extrude_mesh_global_z(
+                surface_vertices, surface_faces, thickness_offset
+            )
+            cap_surface_vertices = [
+                (v[0] + thickness_offset[0], v[1] + thickness_offset[1], v[2] + thickness_offset[2])
+                for v in surface_vertices
+            ]
+            profile_cap_surface_vertices = [
+                (v[0] + thickness_offset[0], v[1] + thickness_offset[1], v[2] + thickness_offset[2])
+                for v in profile_vertices
+            ]
+        else:
+            mesh_vertices, mesh_faces = list(surface_vertices), list(surface_faces)
+            cap_surface_vertices = list(surface_vertices)
+            profile_cap_surface_vertices = list(profile_vertices)
+
+        _replace_mesh_data(roof_obj, roof_obj.name + "_Mesh", mesh_vertices, mesh_faces)
+        _update_roof_modifiers(roof_obj, settings)
+        if is_spatial:
+            _store_spatial_profile_source_mesh(
+                roof_obj, profile_cap_surface_vertices, profile_faces
+            )
+
+        if is_spatial:
+            seams = extract_roof_seams(
+                profile_cap_surface_vertices, profile_faces, profile_sources, profile_outline
+            )
+        else:
+            seams = extract_roof_seams(
+                cap_surface_vertices, surface_faces, face_source_ids, source_poly
+            )
+
+        if is_spatial and roof_obj.get("roofforge_profile_source", False):
+            # Once standalone profile tools are enabled, rebuilding their
+            # settings must analyse the existing mesh only, not rerun the roof
+            # solver. This also keeps the create/update commands independent.
+            _rebuild_existing_roof_profiles(roof_obj, ("RIDGE", "VALLEY"))
+        elif not roof_obj.get("roofforge_profile_source", False):
+            ridge_obj = _ensure_helper_object(roof_obj, "_Ridges", "roofforge_ridges_object")
+            valley_obj = _ensure_helper_object(roof_obj, "_Valleys", "roofforge_valleys_object")
+
+            # For spatial roofs, profile geometry is inset on the original
+            # planar facets. For horizontal roofs it follows the eave-extended
+            # surface, preserving the legacy behavior.
+            profile_input_vertices = profile_cap_surface_vertices
+            profile_input_faces = profile_faces
+            profile_input_outline = profile_outline
+            if settings.show_ridges:
+                ridge_world_vector = Vector((0.0, 0.0, settings.ridge_extrusion))
+                ridge_local_vector = roof_obj.matrix_world.inverted_safe().to_3x3() @ ridge_world_vector
+                sink_world_vector = Vector((0.0, 0.0, -0.0002))
+                sink_local_vector = roof_obj.matrix_world.inverted_safe().to_3x3() @ sink_world_vector
+                rv, rf = build_inset_seam_profile_mesh(
+                    profile_input_vertices, profile_input_faces, seams, "RIDGE",
+                    settings.ridge_width,
+                    (ridge_local_vector.x, ridge_local_vector.y, ridge_local_vector.z),
+                    end_offset=settings.ridge_end_offset,
+                    seat_sink_offset=(sink_local_vector.x, sink_local_vector.y, sink_local_vector.z),
+                    outline=profile_input_outline,
+                    boundary_edges=_mesh_boundary_segments(profile_input_vertices, profile_input_faces) if is_spatial else None,
+                )
+            else:
+                rv, rf = [], []
+
+            if settings.show_valleys:
+                valley_world_vector = Vector((0.0, 0.0, settings.valley_extrusion))
+                valley_local_vector = roof_obj.matrix_world.inverted_safe().to_3x3() @ valley_world_vector
+                sink_world_vector = Vector((0.0, 0.0, -0.0002))
+                sink_local_vector = roof_obj.matrix_world.inverted_safe().to_3x3() @ sink_world_vector
+                vv, vf = build_inset_seam_profile_mesh(
+                    profile_input_vertices, profile_input_faces, seams, "VALLEY",
+                    settings.valley_width,
+                    (valley_local_vector.x, valley_local_vector.y, valley_local_vector.z),
+                    end_offset=settings.valley_end_offset,
+                    seat_sink_offset=(sink_local_vector.x, sink_local_vector.y, sink_local_vector.z),
+                    outline=profile_input_outline,
+                    boundary_edges=_mesh_boundary_segments(profile_input_vertices, profile_input_faces) if is_spatial else None,
+                )
+            else:
+                vv, vf = [], []
+
+            _replace_mesh_data(ridge_obj, ridge_obj.name + "_Mesh", rv, rf)
+            _replace_mesh_data(valley_obj, valley_obj.name + "_Mesh", vv, vf)
+        else:
+            # Non-spatial generated roofs that have been converted to the
+            # standalone profile workflow are refreshed from their current mesh.
+            _rebuild_existing_roof_profiles(roof_obj, ("RIDGE", "VALLEY"))
+
+        if settings.show_standing_seams and not is_spatial:
+            standing_obj = _ensure_helper_object(
+                roof_obj, "_StandingSeams", "roofforge_standing_seams_object"
+            )
+            # Build the detail in world space so panel width, sink depth and
+            # fold height remain real scene-unit values even after roof scale.
+            world_surface = []
+            for vertex in cap_surface_vertices:
+                world_point = roof_obj.matrix_world @ Vector(vertex)
+                world_surface.append((float(world_point.x), float(world_point.y), float(world_point.z)))
+            world_ridge_graph = extract_roof_seams(
+                world_surface, surface_faces, face_source_ids, source_poly
+            )
+            seam_world_vertices, seam_faces, seam_stats = build_standing_seam_mesh(
+                world_surface,
+                surface_faces,
+                world_ridge_graph,
+                panel_width=settings.standing_panel_width,
+                seam_height=settings.standing_seam_height,
+                seam_base_width=settings.standing_seam_width,
+                roof_thickness=(settings.thickness if settings.make_solid else 0.0),
+                ridge_height=settings.ridge_extrusion,
+                end_offset=settings.standing_end_offset,
+                boundary_edges=_mesh_boundary_segments(world_surface, surface_faces),
+            )
+            inverse_world = roof_obj.matrix_world.inverted_safe()
+            seam_vertices = []
+            for vertex in seam_world_vertices:
+                local_point = inverse_world @ Vector(vertex)
+                seam_vertices.append((float(local_point.x), float(local_point.y), float(local_point.z)))
+            _replace_mesh_data(
+                standing_obj, standing_obj.name + "_Mesh", seam_vertices, seam_faces,
+                seam_edges=seam_stats.get("seam_edge_pairs", ()),
+            )
+        else:
+            _remove_helper_object(roof_obj, "roofforge_standing_seams_object")
+            seam_stats = {"segments": 0, "effective_height_max": 0.0}
+        roof_obj["roofforge_standing_effective_height"] = seam_stats.get("effective_height_max", 0.0)
+        roof_obj["roofforge_standing_segment_count"] = seam_stats.get("segments", 0)
+        roof_obj["roofforge_standing_stats"] = json.dumps(seam_stats, separators=(",", ":"))
+        roof_obj["roofforge_standing_error"] = ""
+        roof_obj["roofforge_spatial_detail_notice"] = ""
+
+        roof_obj["roofforge_error"] = ""
+        roof_obj["roofforge_last_type"] = settings.roof_type
+        roof_obj["roofforge_top_vertices"] = len(surface_vertices)
+        roof_obj["roofforge_top_faces"] = len(surface_faces)
+        roof_obj["roofforge_seam_edges"] = len(seams)
+        roof_obj["roofforge_ridge_edge_count"] = sum(1 for edge in seams if str(edge[4]).upper() == "RIDGE")
+        roof_obj["roofforge_valley_edge_count"] = sum(1 for edge in seams if str(edge[4]).upper() == "VALLEY")
+    except Exception as exc:
+        roof_obj["roofforge_error"] = str(exc)
+    finally:
+        roof_obj["roofforge_updating"] = False
+
+
+def _settings_update(self, context):
+    owner = getattr(self, "id_data", None)
+    if not isinstance(owner, bpy.types.Object):
+        return
+    if owner.get("roofforge_generated", False):
+        _rebuild_generated_roof(owner)
+    elif owner.get("roofforge_profile_source", False):
+        _rebuild_existing_roof_profiles(owner)
+    if owner.get("roofforge_standing_source", False):
+        _rebuild_standing_seams_for_mesh(owner)
+    elif owner.get("roofforge_generated", False) and owner.get("roofforge_spatial", False):
+        # 3D panel layout is intentionally withheld until its spatial seam graph exists.
+        return
+
+
+def _profile_settings_update(self, context):
+    """Profile-only callback; manual profiles never invoke the roof skeleton."""
+    owner = getattr(self, "id_data", None)
+    if not isinstance(owner, bpy.types.Object) or owner.get("roofforge_profiles_updating", False):
+        return
+    if owner.get("roofforge_profile_source", False):
+        _rebuild_existing_roof_profiles(owner)
+    elif owner.get("roofforge_generated", False):
+        _rebuild_generated_roof(owner)
+    if owner.get("roofforge_standing_source", False):
+        _rebuild_standing_seams_for_mesh(owner)
+    elif owner.get("roofforge_profile_source", False) and owner.get("roofforge_generated", False):
+        settings = owner.roofforge_settings
+        if settings.show_standing_seams:
+            _rebuild_standing_seams_for_mesh(owner)
+
+
+
+# -----------------------------------------------------------------------------
+# Spatial eave plan preview: numbered edge map
+# -----------------------------------------------------------------------------
+_SPATIAL_PREVIEW_COLLECTION = None
+_SPATIAL_PREVIEW_PATH = None
+_SPATIAL_PREVIEW_SIGNATURE = None
+
+
+def _spatial_preview_png(points, size=256, text_scale=1.0):
+    """Build a small RGBA top-view diagram with edge numbers (1-based)."""
+    pts = [(float(p[0]), float(p[1])) for p in points]
+    if len(pts) < 3:
+        raise ValueError("Для схемы нужно не менее трёх точек.")
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    span = max(max_x-min_x, max_y-min_y, 1.0e-9)
+    margin = 38
+    scale = (size-2*margin)/span
+    extra_x = (size-2*margin-(max_x-min_x)*scale)*0.5
+    extra_y = (size-2*margin-(max_y-min_y)*scale)*0.5
+    screen = [(int(round(margin+(x-min_x)*scale+extra_x)),
+               int(round(size-margin-(y-min_y)*scale-extra_y))) for x,y in pts]
+    # Monochrome technical drawing: white paper, black contour and labels.
+    pixels = bytearray([255,255,255,255]*(size*size))
+    def px(x,y,c):
+        if 0 <= x < size and 0 <= y < size:
+            i=(y*size+x)*4; pixels[i:i+4]=bytes((*c,255))
+    def disk(x,y,r,c):
+        for yy in range(y-r,y+r+1):
+            for xx in range(x-r,x+r+1):
+                if (xx-x)**2+(yy-y)**2 <= r*r: px(xx,yy,c)
+    def line(x0,y0,x1,y1,c,w=4):
+        dx,dy=abs(x1-x0),abs(y1-y0); sx=1 if x0<x1 else -1; sy=1 if y0<y1 else -1; err=dx-dy
+        while True:
+            disk(x0,y0,w//2,c)
+            if x0==x1 and y0==y1: break
+            e=2*err
+            if e > -dy: err-=dy; x0+=sx
+            if e < dx: err+=dx; y0+=sy
+    # Polygon fill using even/odd scanline rule.
+    for y in range(size):
+        hits=[]
+        for i,(x1,y1) in enumerate(screen):
+            x2,y2=screen[(i+1)%len(screen)]
+            if (y1<=y<y2) or (y2<=y<y1): hits.append(int(x1+(y-y1)*(x2-x1)/(y2-y1)))
+        hits.sort()
+        for j in range(0,len(hits)-1,2):
+            for x in range(max(0,hits[j]),min(size,hits[j+1]+1)):
+                px(x,y,(255,255,255))
+    glyphs={
+      '0':('111','101','101','101','111'),'1':('010','110','010','010','111'),
+      '2':('111','001','111','100','111'),'3':('111','001','111','001','111'),
+      '4':('101','101','111','001','001'),'5':('111','100','111','001','111'),
+      '6':('111','100','111','101','111'),'7':('111','001','010','010','010'),
+      '8':('111','101','111','101','111'),'9':('111','101','111','001','111')}
+    area=sum(pts[k][0]*pts[(k+1)%len(pts)][1]-pts[(k+1)%len(pts)][0]*pts[k][1] for k in range(len(pts)))
+    orient=1.0 if area>0 else -1.0
+    for i,(a,b) in enumerate(zip(screen,screen[1:]+screen[:1]),1):
+        line(a[0],a[1],b[0],b[1],(0,0,0),max(2,int(round(size/128))))
+        dx,dy=b[0]-a[0],b[1]-a[1]; ln=max((dx*dx+dy*dy)**0.5,1.0)
+        # Plain drafting numerals, positioned just outside each edge.
+        offset=max(12.0, 15.0*float(text_scale))
+        lx=int(round((a[0]+b[0])*0.5+orient*dy/ln*offset))
+        ly=int(round((a[1]+b[1])*0.5+orient*dx/ln*offset))
+        text=str(i); cell=max(1,int(round(4.0*float(text_scale))))
+        glyph_w=3*cell; glyph_h=5*cell
+        width=len(text)*(glyph_w+cell)-cell; sx=lx-width//2; sy=ly-glyph_h//2
+        for gi,ch in enumerate(text):
+            for gy,row in enumerate(glyphs.get(ch,())):
+                for gx,bit in enumerate(row):
+                    if bit=='1':
+                        for yy in range(cell):
+                            for xx in range(cell):
+                                px(sx+gi*(glyph_w+cell)+gx*cell+xx,sy+gy*cell+yy,(0,0,0))
+    raw=b''.join(b'\x00'+bytes(pixels[y*size*4:(y+1)*size*4]) for y in range(size))
+    import struct,zlib
+    def chunk(tag,data): return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>2I5B',size,size,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,6))+chunk(b'IEND',b'')
+
+
+def _get_spatial_preview_icon(points, text_scale=1.0):
+    global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
+    if not points or len(points)<3: return 0
+    signature=(tuple(tuple(round(float(c),6) for c in p[:2]) for p in points), round(float(text_scale),2))
+    try:
+        if _SPATIAL_PREVIEW_COLLECTION is None: _SPATIAL_PREVIEW_COLLECTION=bpy.utils.previews.new()
+        if signature != _SPATIAL_PREVIEW_SIGNATURE:
+            if _SPATIAL_PREVIEW_PATH is None:
+                fd,_SPATIAL_PREVIEW_PATH=tempfile.mkstemp(prefix='roofforge_spatial_',suffix='.png'); os.close(fd)
+            with open(_SPATIAL_PREVIEW_PATH,'wb') as f: f.write(_spatial_preview_png(points, text_scale=text_scale))
+            if 'spatial_plan' in _SPATIAL_PREVIEW_COLLECTION: del _SPATIAL_PREVIEW_COLLECTION['spatial_plan']
+            _SPATIAL_PREVIEW_COLLECTION.load('spatial_plan',_SPATIAL_PREVIEW_PATH,'IMAGE')
+            _SPATIAL_PREVIEW_SIGNATURE=signature
+        return _SPATIAL_PREVIEW_COLLECTION['spatial_plan'].icon_id
+    except Exception: return 0
+
+
+def _clear_spatial_preview():
+    global _SPATIAL_PREVIEW_COLLECTION,_SPATIAL_PREVIEW_PATH,_SPATIAL_PREVIEW_SIGNATURE
+    if _SPATIAL_PREVIEW_COLLECTION is not None:
+        try: bpy.utils.previews.remove(_SPATIAL_PREVIEW_COLLECTION)
+        except Exception: pass
+        _SPATIAL_PREVIEW_COLLECTION=None
+    if _SPATIAL_PREVIEW_PATH:
+        try: os.remove(_SPATIAL_PREVIEW_PATH)
+        except OSError: pass
+        _SPATIAL_PREVIEW_PATH=None
+    _SPATIAL_PREVIEW_SIGNATURE=None
+
+
+def _spatial_outline_for_panel(active,roof_obj,is_generated):
+    if is_generated and roof_obj.get('roofforge_spatial',False):
+        try: return json.loads(roof_obj.get('roofforge_outline','[]'))
+        except Exception: return None
+    try:
+        points=_extract_loop_from_object(active)
+        if len(points)>=3 and max(float(p.z) for p in points)-min(float(p.z) for p in points)>1.0e-5:
+            return [(float(p.x),float(p.y),float(p.z)) for p in points]
+    except Exception: pass
+    return None
+
+
+def _spatial_pitch_settings_update(self, context):
+    owner = getattr(self, "id_data", None)
+    if not isinstance(owner, bpy.types.Object) or not owner.get("roofforge_generated", False):
+        return
+    if not owner.get("roofforge_spatial", False) or owner.get("roofforge_updating", False):
+        return
+    count = int(owner.get("roofforge_spatial_edge_count", 0))
+    values = [float(getattr(self, f"spatial_pitch_{i:02d}")) for i in range(1, count+1)]
+    owner["roofforge_spatial_pitches"] = json.dumps(values, separators=(",", ":"))
+    _rebuild_generated_roof(owner)
+
+
+def _standing_seam_settings_update(self, context):
+    """Rebuild only the seam detail; do not recalculate the roof skeleton."""
+    owner = getattr(self, "id_data", None)
+    if isinstance(owner, bpy.types.Object) and not owner.get("roofforge_updating", False) and (
+        owner.get("roofforge_generated", False)
+        or owner.get("roofforge_standing_source", False)
+    ):
+        if owner.get("roofforge_spatial", False):
+            return
+        _rebuild_standing_seams_for_mesh(owner)
+
+
+# -----------------------------------------------------------------------------
+# Properties
+# -----------------------------------------------------------------------------
+
+
+class ROOFFORGE_PG_Settings(bpy.types.PropertyGroup):
+    roof_type: EnumProperty(
+        name="Внутренний режим построения",
+        description="Скрытый параметр совместимости; используется только режим свободных углов",
+        items=[
+            ('HIP_FREE', "Вальмовая / свободные углы",
+             "Единый straight-skeleton режим для ортогональных и произвольных контуров"),
+        ],
+        default='HIP_FREE', options={'HIDDEN'}, update=_settings_update,
+    )
+    pitch_angle: FloatProperty(
+        name="Уклон ската", description="Угол кровельной поверхности к горизонтали",
+        default=math.radians(30.0), min=math.radians(0.0), max=math.radians(75.0),
+        subtype='ANGLE', unit='ROTATION', update=_settings_update,
+    )
+    pitch_default_migrated: BoolProperty(
+        name="Миграция уклона выполнена", default=False, options={'HIDDEN'},
+    )
+    spatial_preview_text_scale: FloatProperty(
+        name="Размер цифр на схеме", description="Увеличить или уменьшить номера скатов на плане",
+        default=1.0, min=0.65, max=2.2, step=1, precision=2,
+    )
+    overhang: FloatProperty(
+        name="Свес карниза", description="Для плоского контура — горизонтальный вынос; для пространственного — расстояние по плоскости каждого ската. Исходный контур остаётся линией опирания нижней поверхности.",
+        default=0.0, min=0.0, max=5.0, unit='LENGTH', update=_settings_update,
+    )
+    eave_lift: FloatProperty(
+        name="Подъём от контура", description="Вертикальное смещение всей крыши вверх от уровня карниза",
+        default=0.0, min=-10.0, max=10.0, unit='LENGTH', update=_settings_update,
+    )
+    thickness: FloatProperty(
+        name="Толщина кровли", description="Реальная экструзия меша вверх по глобальной оси Z", default=0.01, min=0.001, max=2.0,
+        unit='LENGTH', update=_settings_update,
+    )
+    make_solid: BoolProperty(
+        name="Экструдировать вверх по Z", description="Создать нижнюю и верхнюю поверхности и боковые стенки геометрией меша", default=True, update=_settings_update,
+    )
+    shed_rise_angle: FloatProperty(
+        name="Направление подъёма", description="Азимут подъёма односкатной крыши относительно мировой оси X",
+        default=math.radians(90.0), min=math.radians(-360.0), max=math.radians(360.0),
+        subtype='ANGLE', unit='ROTATION', options={'HIDDEN'}, update=_settings_update,
+    )
+    show_ridges: BoolProperty(
+        name="Создать отдельный объект коньков", default=True, update=_profile_settings_update,
+    )
+    ridge_width: FloatProperty(
+        name="Ширина конька", default=0.18, min=0.01, max=2.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    ridge_extrusion: FloatProperty(
+        name="Экструзия конька вверх", description="Высота профиля над поверхностью крыши",
+        default=0.01, min=0.001, max=1.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    ridge_end_offset: FloatProperty(
+        name="Смещение концов конька",
+        description="Положительное значение — вылет за карниз, отрицательное — отступ внутрь",
+        default=0.0, min=-3.0, max=3.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    # Hidden legacy values remain available for migration from 2.5.3 and older.
+    ridge_end_extension: FloatProperty(
+        name="Legacy: вылет конца конька", description="Совместимость со старыми .blend-файлами",
+        default=0.10, min=0.0, max=3.0, unit='LENGTH', options={'HIDDEN'},
+    )
+    ridge_end_setback: FloatProperty(
+        name="Legacy: отступ конца конька", default=0.0, min=0.0, max=3.0,
+        unit='LENGTH', options={'HIDDEN'},
+    )
+    ridge_end_overhang: FloatProperty(
+        name="Legacy: вылет конца конька", default=0.0, min=0.0, max=3.0,
+        unit='LENGTH', options={'HIDDEN'},
+    )
+    show_valleys: BoolProperty(
+        name="Создать отдельный объект ендов", default=True, update=_profile_settings_update,
+    )
+    valley_width: FloatProperty(
+        name="Ширина ендовы", default=0.24, min=0.01, max=2.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    valley_extrusion: FloatProperty(
+        name="Экструзия ендовы вверх", description="Высота отдельного профиля ендовы над линией пересечения скатов",
+        default=0.01, min=0.001, max=1.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    valley_end_offset: FloatProperty(
+        name="Смещение концов ендовы",
+        description="Положительное значение — вылет за карниз, отрицательное — отступ внутрь",
+        default=0.0, min=-3.0, max=3.0, unit='LENGTH', update=_profile_settings_update,
+    )
+    # Hidden legacy values remain available for migration from 2.5.3 and older.
+    valley_end_extension: FloatProperty(
+        name="Legacy: вылет конца ендовы", description="Совместимость со старыми .blend-файлами",
+        default=0.10, min=0.0, max=3.0, unit='LENGTH', options={'HIDDEN'},
+    )
+    valley_end_setback: FloatProperty(
+        name="Legacy: отступ конца ендовы", default=0.0, min=0.0, max=3.0,
+        unit='LENGTH', options={'HIDDEN'},
+    )
+    valley_end_overhang: FloatProperty(
+        name="Legacy: вылет конца ендовы", default=0.0, min=0.0, max=3.0,
+        unit='LENGTH', options={'HIDDEN'},
+    )
+    show_standing_seams: BoolProperty(
+        name="Создать фальцевую раскладку",
+        description="Построить лёгкие продольные рёбра фальцев по верхним граням скатов",
+        default=False, update=_standing_seam_settings_update,
+    )
+    standing_panel_width: FloatProperty(
+        name="Ширина панели",
+        description="Модуль фальцев, измеряемый по плоскости каждого ската; крайние панели автоматически балансируются",
+        default=0.60, min=0.20, max=2.0, unit='LENGTH', update=_standing_seam_settings_update,
+    )
+    standing_seam_height: FloatProperty(
+        name="Высота фальца",
+        description="Высота над скатом; автоматически ограничивается 90% вертикальной экструзии конька",
+        default=0.03, min=0.001, max=0.5, unit='LENGTH', update=_standing_seam_settings_update,
+    )
+    standing_seam_width: FloatProperty(
+        name="Ширина основания фальца",
+        description="Ширина узкой folded-полосы на поверхности ската",
+        default=0.014, min=0.004, max=0.08, unit='LENGTH', update=_standing_seam_settings_update,
+    )
+    standing_end_offset: FloatProperty(
+        name="Смещение концов",
+        description="Положительное значение — вылет за внешний контур крыши, отрицательное — отступ внутрь",
+        default=0.0, min=-3.0, max=3.0, unit='LENGTH', update=_standing_seam_settings_update,
+    )
+    end_offsets_migrated: BoolProperty(
+        name="Legacy endpoint settings migrated", default=False, options={'HIDDEN'},
+    )
+
+
+# Per-eave-edge pitch controls. Dynamically declared to keep the PropertyGroup
+# compact while still exposing stable RNA properties in Blender's UI.
+for _edge_index in range(1, 33):
+    ROOFFORGE_PG_Settings.__annotations__[f"spatial_pitch_{_edge_index:02d}"] = FloatProperty(
+        name=f"Уклон ребра карниза {_edge_index}",
+        description="Индивидуальный угол ската, связанного с этим ребром карниза",
+        default=math.radians(35.0), min=math.radians(1.0), max=math.radians(85.0),
+        subtype='ANGLE', unit='ROTATION', update=_spatial_pitch_settings_update,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Operators and UI
+# -----------------------------------------------------------------------------
+
+
+class ROOFFORGE_OT_Create(bpy.types.Operator):
+    bl_idname = "roofforge.create_roof"
+    bl_label = "Создать крышу"
+    bl_description = "Создать параметрическую крышу; её ползунки будут пересобирать геометрию в реальном времени"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None and context.object.type == 'MESH'
+
+    def execute(self, context):
+        source_obj = context.object
+        scene_settings = context.scene.roofforge_settings
+        was_edit_mode = bool(source_obj and source_obj.mode == 'EDIT')
+        roof_obj = None
+        try:
+            world_points = _extract_loop_from_object(source_obj)
+            z_values = [float(point.z) for point in world_points]
+            z_span = max(z_values) - min(z_values)
+            xy_span = max(
+                max(float(point.x) for point in world_points) - min(float(point.x) for point in world_points),
+                max(float(point.y) for point in world_points) - min(float(point.y) for point in world_points),
+                1.0,
+            )
+            is_spatial = z_span > max(1.0e-5, xy_span * 1.0e-6)
+            if is_spatial:
+                polygon, origin = _prepare_local_spatial_polygon(world_points)
+            else:
+                polygon, origin = _prepare_local_polygon(world_points)
+            # Validate the selected outline before creating a scene object.
+            if was_edit_mode:
+                bpy.ops.object.mode_set(mode='OBJECT')
+
+            mesh = bpy.data.meshes.new(source_obj.name + "_Roof_Mesh")
+            roof_obj = bpy.data.objects.new(source_obj.name + "_Roof", mesh)
+            collection = context.collection or context.scene.collection
+            collection.objects.link(roof_obj)
+            roof_obj.location = origin
+            roof_obj["roofforge_source"] = source_obj.name
+            roof_obj["roofforge_outline"] = json.dumps(polygon, separators=(",", ":"))
+            roof_obj["roofforge_spatial"] = bool(is_spatial)
+            roof_obj["roofforge_spatial_edge_count"] = len(polygon) if is_spatial else 0
+            roof_obj["roofforge_ridges_object"] = ""
+            roof_obj["roofforge_valleys_object"] = ""
+            roof_obj["roofforge_standing_seams_object"] = ""
+
+            target_settings = roof_obj.roofforge_settings
+            for prop_name in _settings_values(scene_settings):
+                setattr(target_settings, prop_name, getattr(scene_settings, prop_name))
+            if is_spatial:
+                spatial_pitches = [float(getattr(target_settings, f"spatial_pitch_{i:02d}")) for i in range(1, len(polygon)+1)]
+                roof_obj["roofforge_spatial_pitches"] = json.dumps(spatial_pitches, separators=(",", ":"))
+            # Enable callbacks only after all starting values have been copied.
+            roof_obj["roofforge_generated"] = True
+
+            _rebuild_generated_roof(roof_obj)
+            error = roof_obj.get("roofforge_error", "")
+            if error:
+                raise RoofForgeError(error)
+
+            bpy.ops.object.select_all(action='DESELECT')
+            roof_obj.select_set(True)
+            context.view_layer.objects.active = roof_obj
+            self.report({'INFO'}, "Параметрическая крыша создана. Настройки доступны в RoofForge.")
+            return {'FINISHED'}
+        except RoofForgeError as exc:
+            if roof_obj is not None:
+                for child in list(roof_obj.children):
+                    bpy.data.objects.remove(child, do_unlink=True)
+                bpy.data.objects.remove(roof_obj, do_unlink=True)
+            if was_edit_mode and source_obj and source_obj.mode != 'EDIT':
+                try:
+                    bpy.ops.object.select_all(action='DESELECT')
+                    source_obj.select_set(True)
+                    context.view_layer.objects.active = source_obj
+                    bpy.ops.object.mode_set(mode='EDIT')
+                except Exception:
+                    pass
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        except Exception as exc:
+            if roof_obj is not None:
+                for child in list(roof_obj.children):
+                    bpy.data.objects.remove(child, do_unlink=True)
+                bpy.data.objects.remove(roof_obj, do_unlink=True)
+            if was_edit_mode and source_obj and source_obj.mode != 'EDIT':
+                try:
+                    bpy.ops.object.select_all(action='DESELECT')
+                    source_obj.select_set(True)
+                    context.view_layer.objects.active = source_obj
+                    bpy.ops.object.mode_set(mode='EDIT')
+                except Exception:
+                    pass
+            self.report({'ERROR'}, "RoofForge: ошибка: " + str(exc))
+            return {'CANCELLED'}
+
+
+
+class ROOFFORGE_OT_GenerateStandingSeams(bpy.types.Operator):
+    bl_idname = "roofforge.generate_standing_seams"
+    bl_label = "Создать фальцы на выбранной крыше"
+    bl_description = "Анализировать верхние грани выбранного меша и создать фальцы отдельным лёгким объектом"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return (
+            obj is not None and obj.type == 'MESH'
+            and obj.mode == 'OBJECT'
+            and not obj.get("roofforge_helper", False)
+        )
+
+    def execute(self, context):
+        obj = context.object
+        try:
+            scene_settings = context.scene.roofforge_settings
+            target = obj.roofforge_settings
+            obj["roofforge_standing_updating"] = True
+            try:
+                for name in ("show_standing_seams", "standing_panel_width", "standing_seam_height", "standing_seam_width", "standing_end_offset", "thickness", "make_solid", "ridge_extrusion"):
+                    setattr(target, name, getattr(scene_settings, name))
+                target.show_standing_seams = True
+                obj["roofforge_standing_source"] = True
+            finally:
+                obj["roofforge_standing_updating"] = False
+            _rebuild_standing_seams_for_mesh(obj)
+            error = obj.get("roofforge_standing_error", "")
+            if error:
+                self.report({'ERROR'}, error)
+                return {'CANCELLED'}
+            count = int(obj.get("roofforge_standing_segment_count", 0))
+            self.report({'INFO'}, f"Создано фальцевых рёбер: {count}.")
+            return {'FINISHED'}
+        except Exception as exc:
+            self.report({'ERROR'}, "RoofForge: " + str(exc))
+            return {'CANCELLED'}
+
+
+class ROOFFORGE_OT_RebuildStandingSeams(bpy.types.Operator):
+    bl_idname = "roofforge.rebuild_standing_seams"
+    bl_label = "Обновить фальцы"
+    bl_description = "Повторно проанализировать верхние грани исходного меша"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if obj is not None and obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        return obj is not None and obj.type == 'MESH' and obj.get("roofforge_standing_source", False)
+
+    def execute(self, context):
+        obj = context.object
+        if obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        _rebuild_standing_seams_for_mesh(obj)
+        error = obj.get("roofforge_standing_error", "")
+        if error:
+            self.report({'ERROR'}, error)
+            return {'CANCELLED'}
+        self.report({'INFO'}, "Фальцы обновлены.")
+        return {'FINISHED'}
+
+
+class _RoofForgeProfileOperator:
+    """Shared implementation for external-mesh ridge and valley commands."""
+    profile_kind = "RIDGE"
+    profile_action = "CREATE"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if obj is not None and obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        return (obj is not None and obj.type == 'MESH' and obj.mode == 'OBJECT'
+                and not obj.get("roofforge_helper", False))
+
+    def execute(self, context):
+        obj = context.object
+        if obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        kind = self.profile_kind
+        lower = kind.lower()
+        scene_settings = context.scene.roofforge_settings
+        settings = obj.roofforge_settings
+        try:
+            if self.profile_action == "CREATE":
+                obj["roofforge_profiles_updating"] = True
+                try:
+                    if not obj.get("roofforge_external_" + lower, False):
+                        names = (
+                            ("show_ridges", "ridge_width", "ridge_extrusion", "ridge_end_offset")
+                            if kind == "RIDGE" else
+                            ("show_valleys", "valley_width", "valley_extrusion", "valley_end_offset")
+                        )
+                        if not obj.get("roofforge_generated", False):
+                            for name in names:
+                                setattr(settings, name, getattr(scene_settings, name))
+                    setattr(settings, "show_ridges" if kind == "RIDGE" else "show_valleys", True)
+                    obj["roofforge_profile_source"] = True
+                    obj["roofforge_external_" + lower] = True
+                finally:
+                    obj["roofforge_profiles_updating"] = False
+            elif not obj.get("roofforge_external_" + lower, False):
+                if obj.get("roofforge_generated", False):
+                    obj["roofforge_profiles_updating"] = True
+                    try:
+                        obj["roofforge_profile_source"] = True
+                        obj["roofforge_external_" + lower] = True
+                    finally:
+                        obj["roofforge_profiles_updating"] = False
+                else:
+                    self.report({'ERROR'}, "Сначала создайте этот профиль на выбранной крыше.")
+                    return {'CANCELLED'}
+
+            _rebuild_existing_roof_profiles(obj, (kind,))
+            error = obj.get("roofforge_" + lower + "_error", "")
+            if error:
+                self.report({'ERROR'}, str(error))
+                return {'CANCELLED'}
+            count = int(obj.get("roofforge_" + lower + "_edge_count", 0))
+            verb = "создан" if self.profile_action == "CREATE" else "обновлён"
+            self.report({'INFO'}, f"Профиль {lower} {verb}; найдено стыков: {count}.")
+            return {'FINISHED'}
+        except Exception as exc:
+            self.report({'ERROR'}, "RoofForge: " + str(exc))
+            return {'CANCELLED'}
+
+
+class ROOFFORGE_OT_CreateRidges(_RoofForgeProfileOperator, bpy.types.Operator):
+    bl_idname = "roofforge.create_ridges"
+    bl_label = "Создать на выбранной крыше"
+    bl_description = "Найти реальные стыки скатов в выбранном меше и создать отдельный объект коньков"
+    bl_options = {'REGISTER', 'UNDO'}
+    profile_kind = "RIDGE"
+    profile_action = "CREATE"
+
+
+class ROOFFORGE_OT_UpdateRidges(_RoofForgeProfileOperator, bpy.types.Operator):
+    bl_idname = "roofforge.update_ridges"
+    bl_label = "Обновить"
+    bl_description = "Повторно проанализировать выбранный меш и обновить только объект коньков"
+    bl_options = {'REGISTER', 'UNDO'}
+    profile_kind = "RIDGE"
+    profile_action = "UPDATE"
+
+
+class ROOFFORGE_OT_CreateValleys(_RoofForgeProfileOperator, bpy.types.Operator):
+    bl_idname = "roofforge.create_valleys"
+    bl_label = "Создать на выбранной крыше"
+    bl_description = "Найти реальные вогнутые стыки скатов в выбранном меше и создать отдельный объект ендов"
+    bl_options = {'REGISTER', 'UNDO'}
+    profile_kind = "VALLEY"
+    profile_action = "CREATE"
+
+
+class ROOFFORGE_OT_UpdateValleys(_RoofForgeProfileOperator, bpy.types.Operator):
+    bl_idname = "roofforge.update_valleys"
+    bl_label = "Обновить"
+    bl_description = "Повторно проанализировать выбранный меш и обновить только объект ендов"
+    bl_options = {'REGISTER', 'UNDO'}
+    profile_kind = "VALLEY"
+    profile_action = "UPDATE"
+
+
+class ROOFFORGE_OT_Rebuild(bpy.types.Operator):
+    bl_idname = "roofforge.rebuild_roof"
+    bl_label = "Пересобрать крышу"
+    bl_description = "Перестроить активную параметрическую крышу"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if obj is not None and obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        return obj is not None and obj.type == 'MESH' and obj.get("roofforge_generated", False)
+
+    def execute(self, context):
+        obj = context.object
+        if obj.get("roofforge_helper", False) and obj.parent is not None:
+            obj = obj.parent
+        _rebuild_generated_roof(obj)
+        error = obj.get("roofforge_error", "")
+        if error:
+            self.report({'ERROR'}, error)
+            return {'CANCELLED'}
+        self.report({'INFO'}, "Крыша обновлена.")
+        return {'FINISHED'}
+
+
+class ROOFFORGE_PT_Panel(bpy.types.Panel):
+    bl_label = "RoofForge"
+    bl_idname = "ROOFFORGE_PT_panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "RoofForge"
+
+    def draw(self, context):
+        layout = self.layout
+        active = context.object
+        roof_obj = active
+        if active and active.get("roofforge_helper", False) and active.parent is not None:
+            roof_obj = active.parent
+
+        is_generated = bool(roof_obj and roof_obj.type == 'MESH' and roof_obj.get("roofforge_generated", False))
+        is_spatial_generated = bool(is_generated and roof_obj.get("roofforge_spatial", False))
+        is_standing_source = bool(roof_obj and roof_obj.type == 'MESH' and roof_obj.get("roofforge_standing_source", False))
+        is_profile_source = bool(roof_obj and roof_obj.type == 'MESH' and roof_obj.get("roofforge_profile_source", False))
+        settings = roof_obj.roofforge_settings if (is_generated or is_standing_source or is_profile_source) else context.scene.roofforge_settings
+
+        if is_generated:
+            layout.label(text="Параметрическая крыша", icon='HOME')
+            layout.label(text=roof_obj.name, icon='MESH_DATA')
+            err = roof_obj.get("roofforge_error", "")
+            if err:
+                box = layout.box()
+                box.alert = True
+                box.label(text="Ошибка пересборки", icon='ERROR')
+                box.label(text=err[:120])
+            layout.label(text=("Пространственные плоские скаты." if is_spatial_generated else "Плоские скаты, без сеточного подразделения."), icon='TIME')
+            if roof_obj.get("roofforge_top_vertices", 0):
+                layout.label(text=f"Скаты: {roof_obj.get('roofforge_top_vertices', 0)} вершин / {roof_obj.get('roofforge_top_faces', 0)} граней")
+        elif is_profile_source or is_standing_source:
+            layout.label(text="Инструменты для готовой крыши", icon='MESH_DATA')
+            layout.label(text=roof_obj.name)
+            error = roof_obj.get("roofforge_profile_error", "")
+            if error:
+                box = layout.box()
+                box.alert = True
+                box.label(text=error[:140], icon='ERROR')
+            standing_error = roof_obj.get("roofforge_standing_error", "")
+            if standing_error:
+                box = layout.box()
+                box.alert = True
+                box.label(text=standing_error[:140], icon='ERROR')
+        else:
+            layout.label(text="Источник: замкнутый контур карниза", icon='MESH_CIRCLE')
+            layout.label(text="Edit Mode: выделите рёбра одного edge loop.")
+            layout.label(text="Object Mode: используйте отдельный граничный loop.")
+            spatial_outline = _spatial_outline_for_panel(active, roof_obj, is_generated)
+            if spatial_outline:
+                edge_box = layout.box()
+                edge_box.label(text="План карниза — номера соответствуют скатам", icon='MESH_CIRCLE')
+                preview_icon = _get_spatial_preview_icon(spatial_outline, settings.spatial_preview_text_scale)
+                if preview_icon:
+                    region_width = max(240, getattr(context.region, "width", 320))
+                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    edge_box.template_icon(preview_icon, scale=preview_scale)
+                edge_box.prop(settings, "spatial_preview_text_scale", text="Размер цифр", slider=True)
+                edge_box.label(text="Нумерация — по порядку обхода контура.")
+                edge_box.label(text=f"Рёбер карниза: {len(spatial_outline)}")
+                for edge_index in range(1, min(len(spatial_outline), 32)+1):
+                    edge_box.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
+
+        # Roof shape controls are available only for a source loop or a
+        # parametric RoofForge roof. Imported roof meshes are never rebuilt.
+        if is_generated or (not is_profile_source and not is_standing_source):
+            layout.separator()
+            layout.label(text="Геометрия крыши", icon='MOD_BUILD')
+            if is_generated and roof_obj.get("roofforge_spatial", False):
+                layout.label(text="Пространственный карниз: отдельный угол каждого ската", icon='ORIENTATION_GLOBAL')
+                edge_count = int(roof_obj.get("roofforge_spatial_edge_count", 0))
+                spatial_outline = _spatial_outline_for_panel(active, roof_obj, True)
+                preview_icon = _get_spatial_preview_icon(spatial_outline, settings.spatial_preview_text_scale) if spatial_outline else 0
+                if preview_icon:
+                    region_width = max(240, getattr(context.region, "width", 320))
+                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    layout.template_icon(preview_icon, scale=preview_scale)
+                layout.prop(settings, "spatial_preview_text_scale", text="Размер цифр", slider=True)
+                layout.label(text="Номер на схеме = номер настройки ската.")
+                for edge_index in range(1, min(edge_count, 32)+1):
+                    layout.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
+                layout.prop(settings, "overhang", text="Свес карниза")
+                layout.prop(settings, "eave_lift")
+                layout.label(text="Свес измеряется по плоскости каждого ската.", icon='INFO')
+            else:
+                layout.prop(settings, "pitch_angle")
+                layout.prop(settings, "overhang")
+                layout.prop(settings, "eave_lift")
+
+            layout.separator()
+            layout.label(text="Толщина кровли", icon='OUTLINER_OB_MESH')
+            layout.prop(settings, "make_solid")
+            if settings.make_solid:
+                layout.prop(settings, "thickness")
+                layout.label(text="Реальная геометрия: экструзия +Z", icon='INFO')
+
+        # Ridge and valley tools analyse the actual finished roof mesh. For
+        # generated spatial roofs the same mesh-derived path is used after the
+        # first explicit Create command; it never calls the roof solver.
+        ridge_box = layout.box()
+        ridge_box.label(text="Коньки — анализ стыков готовой крыши", icon='MESH_CUBE')
+        ridge_box.prop(settings, "show_ridges")
+        if settings.show_ridges:
+            ridge_box.prop(settings, "ridge_width")
+            ridge_box.prop(settings, "ridge_extrusion")
+            ridge_box.prop(settings, "ridge_end_offset")
+        row = ridge_box.row(align=True)
+        row.operator("roofforge.create_ridges", text="Создать на выбранной крыше", icon='ADD')
+        row.operator("roofforge.update_ridges", text="Обновить", icon='FILE_REFRESH')
+        ridge_error = roof_obj.get("roofforge_ridge_error", "") if roof_obj else ""
+        if ridge_error:
+            ridge_box.alert = True
+            ridge_box.label(text=ridge_error[:120], icon='ERROR')
+        elif is_spatial_generated:
+            ridge_box.label(text=f"3D-стыков конька: {int(roof_obj.get('roofforge_ridge_edge_count', 0))}", icon='INFO')
+
+        valley_box = layout.box()
+        valley_box.label(text="Ендовы — анализ стыков готовой крыши", icon='MOD_BOOLEAN')
+        valley_box.prop(settings, "show_valleys")
+        if settings.show_valleys:
+            valley_box.prop(settings, "valley_width")
+            valley_box.prop(settings, "valley_extrusion")
+            valley_box.prop(settings, "valley_end_offset")
+        row = valley_box.row(align=True)
+        row.operator("roofforge.create_valleys", text="Создать на выбранной крыше", icon='ADD')
+        row.operator("roofforge.update_valleys", text="Обновить", icon='FILE_REFRESH')
+        valley_error = roof_obj.get("roofforge_valley_error", "") if roof_obj else ""
+        if valley_error:
+            valley_box.alert = True
+            valley_box.label(text=valley_error[:120], icon='ERROR')
+        elif is_spatial_generated:
+            valley_box.label(text=f"3D-стыков ендовы: {int(roof_obj.get('roofforge_valley_edge_count', 0))}", icon='INFO')
+
+        seam_box = layout.box()
+        seam_box.label(text="Фальцевая кровля", icon='MOD_ARRAY')
+        if is_generated or is_standing_source:
+            if is_spatial_generated:
+                seam_box.label(text="Фальцы для пространственного карниза пока не включены.", icon='INFO')
+            else:
+                seam_box.prop(settings, "show_standing_seams")
+                if settings.show_standing_seams:
+                    seam_box.prop(settings, "standing_panel_width")
+                    seam_box.prop(settings, "standing_seam_height")
+                    seam_box.prop(settings, "standing_seam_width")
+                    seam_box.prop(settings, "standing_end_offset")
+                    if is_standing_source:
+                        seam_box.prop(settings, "thickness", text="Толщина для заглубления")
+                        seam_box.prop(settings, "ridge_extrusion", text="Высота ограничивающего конька")
+                    effective = float(roof_obj.get("roofforge_standing_effective_height", 0.0))
+                    seam_box.label(text=f"Фактическая высота: {effective:.4f} м")
+                    seam_box.label(text="Высота по нормали; лимит 90% от конька.", icon='INFO')
+                    seam_box.label(text="Две продольные кромки плеча фальца помечены Seam.", icon='INFO')
+                    seam_error = roof_obj.get("roofforge_standing_error", "")
+                    if seam_error:
+                        seam_box.alert = True
+                        seam_box.label(text=seam_error[:100], icon='ERROR')
+        else:
+            scene_settings = context.scene.roofforge_settings
+            seam_box.prop(scene_settings, "show_standing_seams")
+            if scene_settings.show_standing_seams:
+                seam_box.prop(scene_settings, "standing_panel_width")
+                seam_box.prop(scene_settings, "standing_seam_height")
+                seam_box.prop(scene_settings, "standing_seam_width")
+                seam_box.prop(scene_settings, "standing_end_offset")
+            seam_box.prop(scene_settings, "ridge_extrusion", text="Высота ограничивающего конька")
+            seam_box.operator("roofforge.generate_standing_seams", icon='MOD_ARRAY')
+            seam_box.label(text="Работает по верхним граням выбранного меша.", icon='INFO')
+
+        layout.separator()
+        if is_generated:
+            layout.operator("roofforge.rebuild_roof", icon='FILE_REFRESH')
+            layout.label(text="Исходный контур сохранён внутри объекта крыши.", icon='INFO')
+        elif is_standing_source:
+            layout.operator("roofforge.rebuild_standing_seams", icon='FILE_REFRESH')
+        elif is_profile_source:
+            layout.label(text="Исходная геометрия не изменяется.", icon='INFO')
+        else:
+            layout.operator("roofforge.create_roof", icon='HOME')
+        layout.label(text="Размеры задаются в единицах Blender.", icon='INFO')
+
+
+CLASSES = (
+    ROOFFORGE_PG_Settings,
+    ROOFFORGE_OT_Create,
+    ROOFFORGE_OT_GenerateStandingSeams,
+    ROOFFORGE_OT_RebuildStandingSeams,
+    ROOFFORGE_OT_CreateRidges,
+    ROOFFORGE_OT_UpdateRidges,
+    ROOFFORGE_OT_CreateValleys,
+    ROOFFORGE_OT_UpdateValleys,
+    ROOFFORGE_OT_Rebuild,
+    ROOFFORGE_PT_Panel,
+)
+
+
+def _migrate_legacy_thickness():
+    """Migrate the old 0.18 m default after Blender has finished registration.
+
+    Blender may expose bpy.data as _RestrictData while an extension's register()
+    function is running. This callback is deliberately deferred through the
+    application timer, where normal data access is available.
+    """
+    try:
+        scenes = tuple(bpy.data.scenes)
+        objects = tuple(bpy.data.objects)
+    except (AttributeError, ReferenceError, RuntimeError):
+        # Keep retrying if Blender is still in its restricted startup phase.
+        return 0.5
+
+    for scene in scenes:
+        settings = getattr(scene, "roofforge_settings", None)
+        if settings is None:
+            continue
+        _migrate_to_free_angle(settings)
+        if abs(settings.thickness - 0.18) < 1.0e-7:
+            settings.thickness = 0.01
+        _migrate_endpoint_offsets(settings)
+        _migrate_pitch_default(settings)
+
+    for obj in objects:
+        settings = getattr(obj, "roofforge_settings", None)
+        if settings is None:
+            continue
+        _migrate_to_free_angle(settings)
+        if (obj.get("roofforge_generated", False)
+                or obj.get("roofforge_standing_source", False)
+                or obj.get("roofforge_profile_source", False)):
+            if abs(settings.thickness - 0.18) < 1.0e-7:
+                settings.thickness = 0.01
+            _migrate_endpoint_offsets(settings)
+            _migrate_pitch_default(settings)
+
+    return None
+
+
+def _migrate_to_free_angle(settings):
+    """Map every saved legacy roof type to the single supported free-angle mode."""
+    try:
+        if settings.roof_type != 'HIP_FREE':
+            settings.roof_type = 'HIP_FREE'
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        pass
+
+
+def _migrate_endpoint_offsets(settings):
+    """Convert old overhang/setback pairs into one signed endpoint offset."""
+    if getattr(settings, "end_offsets_migrated", False):
+        return
+    settings.ridge_end_offset = (
+        float(settings.ridge_end_overhang) - float(settings.ridge_end_setback)
+    )
+    settings.valley_end_offset = (
+        float(settings.valley_end_overhang) - float(settings.valley_end_setback)
+    )
+    settings.end_offsets_migrated = True
+
+
+def _migrate_pitch_default(settings):
+    """Convert the accidental saved 0-degree default to the intended 30 degrees once.
+
+    Explicit non-zero user values are retained. The hidden marker prevents a
+    user from being forced back to 30 degrees after intentionally editing the
+    slope later in the project.
+    """
+    if getattr(settings, "pitch_default_migrated", False):
+        return
+    try:
+        current_pitch = float(settings.pitch_angle)
+    except (AttributeError, TypeError, ValueError):
+        current_pitch = math.radians(30.0)
+    if abs(current_pitch) <= 1.0e-8:
+        settings.pitch_angle = math.radians(30.0)
+    settings.pitch_default_migrated = True
+
+
+def _schedule_legacy_migration():
+    """Schedule migration without touching bpy.data during register()."""
+    try:
+        if not bpy.app.timers.is_registered(_migrate_legacy_thickness):
+            bpy.app.timers.register(_migrate_legacy_thickness, first_interval=0.5)
+    except (AttributeError, ReferenceError, RuntimeError):
+        # Registration itself must remain successful even in restricted context.
+        pass
+
+
+def _roofforge_load_post(_unused):
+    # Re-run after a .blend is opened: the add-on can be enabled before the
+    # user's project data is loaded, so an initial registration timer is not
+    # sufficient for every startup order.
+    _schedule_legacy_migration()
+
+
+# Mark the handler persistent so opening another .blend keeps migration support.
+_roofforge_load_post = bpy.app.handlers.persistent(_roofforge_load_post)
+
+
+def register():
+    # Do not enumerate bpy.data here. Blender can pass _RestrictData while
+    # importing/registering extensions, which has no .scenes/.objects access.
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.roofforge_settings = PointerProperty(type=ROOFFORGE_PG_Settings)
+    bpy.types.Object.roofforge_settings = PointerProperty(type=ROOFFORGE_PG_Settings)
+
+    if _roofforge_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_roofforge_load_post)
+    _schedule_legacy_migration()
+
+
+def unregister():
+    _clear_spatial_preview()
+    if _roofforge_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_roofforge_load_post)
+
+    try:
+        if bpy.app.timers.is_registered(_migrate_legacy_thickness):
+            bpy.app.timers.unregister(_migrate_legacy_thickness)
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
+
+    if hasattr(bpy.types.Scene, "roofforge_settings"):
+        del bpy.types.Scene.roofforge_settings
+    if hasattr(bpy.types.Object, "roofforge_settings"):
+        del bpy.types.Object.roofforge_settings
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
+
+
+if __name__ == "__main__":
+    register()
