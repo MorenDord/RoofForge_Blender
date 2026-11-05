@@ -1161,25 +1161,35 @@ def _build_boundary_aware_spatial_envelope(
         return next(iter(owners)) if len(owners)==1 else None
 
     def split_winner_cell(poly,winner,challenger):
-        pa=planes[winner]
+        forced_parent=boundary_owner(poly)
+        effective_winner=(
+            forced_parent if forced_parent is not None else winner
+        )
+        pa=planes[effective_winner]
         pb=planes[challenger]
         a=pa[0]-pb[0]
         b=pa[1]-pb[1]
         cc=pa[2]-pb[2]
         if math.hypot(a,b)<=eps:
-            if _plane_value(pa,*_polygon_centroid_xy(poly)) <= _plane_value(pb,*_polygon_centroid_xy(poly)):
-                return [(poly,winner)]
-            return [(poly,challenger)]
+            return [(poly,effective_winner)]
         pieces=[]
         low=_clip_halfplane(poly,a,b,cc,eps*5.0)
         high=_clip_halfplane(poly,-a,-b,-cc,eps*5.0)
         if len(low)>=3 and abs(_area(low))>eps*eps:
             forced=boundary_owner(low)
-            source=forced if forced is not None else winner
+            source=(
+                forced
+                if forced is not None
+                else effective_winner
+            )
             pieces.append((low,source))
         if len(high)>=3 and abs(_area(high))>eps*eps:
             forced=boundary_owner(high)
-            source=forced if forced is not None else challenger
+            source=(
+                forced
+                if forced is not None
+                else challenger
+            )
             pieces.append((high,source))
         return pieces
 
