@@ -513,7 +513,9 @@ def _embed_topology(template_vertices, template_faces, template_sources,
             clean.pop()
         if len(set(clean)) >= 3:
             output_faces.append(tuple(clean))
-            output_sources.append(int(template_sources[face_index]))
+            # A coplanar template face can retain several original eave-edge IDs.
+            # Keep the full set for overhang extension and support-plane validation.
+            output_sources.append(template_sources[face_index])
 
     output_faces.extend(junction_fill_faces)
     output_sources.extend([-2] * len(junction_fill_faces))
