@@ -784,7 +784,7 @@ def _rebuild_existing_roof_profiles(roof_obj, kinds=None):
     The source mesh is evaluated (including modifiers), copied into a temporary
     BMesh, and reduced only across coplanar partitions. Shared top-surface edges
     are classified by their actual dihedral angle. The source object is never
-    edited; the resulting profiles are separate child meshes.
+    edited; the resulting profiles are separate sibling meshes.
     """
     if (not roof_obj or roof_obj.type != 'MESH'
             or roof_obj.get('roofforge_profiles_updating', False)):
@@ -2409,6 +2409,17 @@ def _migrate_legacy_thickness():
                 settings.thickness = 0.01
             _migrate_endpoint_offsets(settings)
             _migrate_pitch_default(settings)
+
+        if (obj.get("roofforge_generated", False)
+                or obj.get("roofforge_standing_source", False)
+                or obj.get("roofforge_profile_source", False)):
+            for custom_key, suffix in (
+                ("roofforge_ridges_object", "_Ridges"),
+                ("roofforge_valleys_object", "_Valleys"),
+                ("roofforge_standing_seams_object", "_StandingSeams"),
+            ):
+                if obj.get(custom_key, ""):
+                    _ensure_helper_object(obj, suffix, custom_key)
 
     return None
 
