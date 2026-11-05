@@ -252,11 +252,16 @@ def _embed_topology(template_vertices, template_faces, template_sources,
 
     boundary_tolerance = max(eps * 50.0, scale * 1.0e-7)
     node_tolerance = max(eps * 100.0, scale * 1.0e-6)
-    # Small non-planarity at a high-valence eave node cannot satisfy every
-    # incident support plane exactly. Permit a bounded least-squares Z fit
-    # at that shared node; larger incompatibility still uses the transition
-    # patch path and remains subject to strict intersection validation.
-    node_height_tolerance = max(eps * 100.0, scale * 2.5e-4)
+    # Non-concurrent support planes at a non-planar reflex node cannot all
+    # pass through one point. Bound the local shared-height compromise by
+    # 25% of the actual eave height range, capped at 1% of plan scale. This
+    # scales with the input geometry but does not grow without limit.
+    eave_height_range = max(float(p[2]) for p in outline) - min(float(p[2]) for p in outline)
+    node_height_tolerance = max(
+        eps * 100.0,
+        min(scale * 1.0e-2, eave_height_range * 0.25)
+        if eave_height_range > eps * 100.0 else scale * 2.5e-4
+    )
     determinant_tolerance = 1.0e-11
     vertices = []
     vertex_map = {}
@@ -477,7 +482,12 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
 
     edge_uses = defaultdict(list)
     cross_eps = eps * max(scale, 1.0)
-    plane_eps = max(eps * 100.0, scale * 2.5e-4)
+    eave_height_range = max(float(p[2]) for p in outline) - min(float(p[2]) for p in outline)
+    plane_eps = max(
+        eps * 100.0,
+        min(scale * 1.0e-2, eave_height_range * 0.25)
+        if eave_height_range > eps * 100.0 else scale * 2.5e-4
+    )
     for face_index, face in enumerate(faces):
         if len(face) < 3:
             raise SpatialRoofError("В пространственной сетке обнаружена грань менее чем из трёх вершин.")
