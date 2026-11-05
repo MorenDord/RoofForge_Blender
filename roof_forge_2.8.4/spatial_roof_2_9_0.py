@@ -252,6 +252,11 @@ def _embed_topology(template_vertices, template_faces, template_sources,
 
     boundary_tolerance = max(eps * 50.0, scale * 1.0e-7)
     node_tolerance = max(eps * 100.0, scale * 1.0e-6)
+    # Small non-planarity at a high-valence eave node cannot satisfy every
+    # incident support plane exactly. Permit a bounded least-squares Z fit
+    # at that shared node; larger incompatibility still uses the transition
+    # patch path and remains subject to strict intersection validation.
+    node_height_tolerance = max(eps * 100.0, scale * 2.5e-4)
     determinant_tolerance = 1.0e-11
     vertices = []
     vertex_map = {}
@@ -303,10 +308,17 @@ def _embed_topology(template_vertices, template_faces, template_sources,
             continue
 
         if len(incident_sources) == 2:
-            point = _two_plane_projection(
-                planes[incident_sources[0]], planes[incident_sources[1]],
-                target, determinant_tolerance
-            )
+            z_values = [
+                _plane_value(planes[source_id], target[0], target[1])
+                for source_id in incident_sources
+            ]
+            if max(z_values) - min(z_values) <= node_height_tolerance:
+                point = (target[0], target[1], sum(z_values) / len(z_values))
+            else:
+                point = _two_plane_projection(
+                    planes[incident_sources[0]], planes[incident_sources[1]],
+                    target, determinant_tolerance
+                )
             vertex_map[vertex_id] = append_vertex(point)
             continue
 
@@ -315,6 +327,19 @@ def _embed_topology(template_vertices, template_faces, template_sources,
         )
         if common is not None:
             vertex_map[vertex_id] = append_vertex(common)
+            continue
+
+        target_heights = [
+            _plane_value(planes[source_id], target[0], target[1])
+            for source_id in incident_sources
+        ]
+        if max(target_heights) - min(target_heights) <= node_height_tolerance:
+            # Keep the 2D skeleton's XY event location, but make one shared
+            # Z value that minimizes the residual to all incident 3D planes.
+            # This is a local compromise only at the incompatible junction;
+            # each adjacent n-gon remains a single source facet.
+            point = (target[0], target[1], sum(target_heights) / len(target_heights))
+            vertex_map[vertex_id] = append_vertex(point)
             continue
 
         # If the incident support planes do not share one point, replace
@@ -452,7 +477,7 @@ def _validate_lifted_mesh(vertices, faces, sources, outline, planes, eps, scale)
 
     edge_uses = defaultdict(list)
     cross_eps = eps * max(scale, 1.0)
-    plane_eps = max(eps * 100.0, scale * 1.0e-6)
+    plane_eps = max(eps * 100.0, scale * 2.5e-4)
     for face_index, face in enumerate(faces):
         if len(face) < 3:
             raise SpatialRoofError("В пространственной сетке обнаружена грань менее чем из трёх вершин.")
