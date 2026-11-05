@@ -791,6 +791,7 @@ def _merge_face_patches(patches, scale):
     # Signed incidence of every split, undirected edge. Adjacent consistently
     # oriented patches contribute opposite signs and cancel exactly.
     signed_uses = defaultdict(int)
+    seen_patch_loops = set()
     for patch in patches:
         clean = []
         for point in patch:
@@ -802,6 +803,19 @@ def _merge_face_patches(patches, scale):
             continue
         if _newell_normal(clean)[2] < 0.0:
             clean.reverse()
+
+        # Coincident split/collapse times can emit an identical swept cell
+        # twice. Deduplicate only the exact same cyclic boundary; partially
+        # overlapping cells still trigger the manifold boundary validator.
+        patch_ids = [point_keys[tuple(float(v) for v in point)] for point in clean]
+        start_index = min(
+            range(len(patch_ids)),
+            key=lambda index: tuple(patch_ids[index:] + patch_ids[:index]),
+        )
+        patch_key = tuple(patch_ids[start_index:] + patch_ids[:start_index])
+        if patch_key in seen_patch_loops:
+            continue
+        seen_patch_loops.add(patch_key)
 
         for i, a in enumerate(clean):
             b = clean[(i + 1) % len(clean)]
