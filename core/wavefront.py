@@ -119,7 +119,7 @@ class WavefrontTrace:
 
     @property
     def is_complete(self) -> bool:
-        return self.terminal_kind in {"POINT", "NEEDLE"}
+        return self.terminal_kind in {"POINT", "NEEDLE", "MULTI_TERMINAL"}
 
 
 class WavefrontEventQueue:
@@ -996,6 +996,69 @@ def _dedupe_polygon(points: Sequence[Point3], tolerance: float) -> tuple[Point3,
 
 def _projected_area(points: Sequence[Point3]) -> float:
     return abs(signed_area([(point[0], point[1]) for point in points]))
+
+
+
+def run_weighted_wavefront(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    *,
+    eps: float = 1e-9,
+    max_event_batches: int = 10000,
+    require_area_coverage: bool = True,
+) -> WavefrontTrace:
+    """Run the global multi-loop event state machine to terminal completion.
+
+    This is still an alpha trace builder: it returns source-edge facet
+    fragments and skeleton arcs, not a final welded roof mesh. Ambiguous
+    simultaneous events, unsupported vertex hits and unresolved needle
+    topologies raise GeometryInputError rather than producing partial output.
+    """
+    if max_event_batches < 1:
+        raise GeometryInputError("INVALID_EVENT_LIMIT", "Лимит событий должен быть положительным.")
+    state = create_wavefront_state(points, pitches_degrees, eps)
+    batches = 0
+    while not state.is_complete:
+        if batches >= max_event_batches:
+            raise GeometryInputError(
+                "MAX_WAVEFRONT_EVENTS",
+                f"Достигнут лимит пакетов событий волнового фронта: {max_event_batches}."
+            )
+        advance_wavefront_state(state)
+        batches += 1
+
+    if not state.facets:
+        raise GeometryInputError("EMPTY_WAVEFRONT_ROOF", "Волновой фронт не сформировал фасеты крыши.")
+
+    projected_area = sum(_projected_area(facet.vertices) for facet in state.facets)
+    area_tolerance = max(
+        eps * max(1.0, state.source_area) * 1000.0,
+        state.source_area * 1e-7,
+    )
+    if require_area_coverage and abs(projected_area - state.source_area) > area_tolerance:
+        raise GeometryInputError(
+            "WAVEFRONT_COVERAGE_MISMATCH",
+            f"Фасеты волнового фронта покрывают {projected_area:.9g} из {state.source_area:.9g} единиц площади."
+        )
+
+    terminal_values = set(state.terminal_loops.values())
+    if terminal_values == {"POINT"}:
+        terminal_kind = "POINT"
+    elif terminal_values == {"NEEDLE"}:
+        terminal_kind = "NEEDLE"
+    else:
+        terminal_kind = "MULTI_TERMINAL"
+
+    return WavefrontTrace(
+        facets=tuple(state.facets),
+        events=tuple(state.processed_events),
+        skeleton_arcs=tuple(state.skeleton_arcs),
+        terminal_time=state.current_time,
+        terminal_kind=terminal_kind,
+        source_area=state.source_area,
+        projected_facet_area=projected_area,
+        input_winding=state.input_winding,
+    )
 
 
 def simulate_convex_wavefront(points: Sequence[Point3], pitches_degrees: Sequence[float],
