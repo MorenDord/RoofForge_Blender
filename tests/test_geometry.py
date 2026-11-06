@@ -633,6 +633,11 @@ class PolygonTests(unittest.TestCase):
             (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
             (0.0, 4.0, 0.0),
         ]
+        trace = run_weighted_wavefront(points, [45.0] * len(points))
+        print("WAVEFRONT EVENTS", [(e.kind.value, round(e.time, 6), e.loop_id, e.edge_id, e.vertex_id, e.target_edge_id, e.position) for e in trace.events])
+        print("WAVEFRONT TERMINAL", trace.terminal_time, trace.terminal_kind, trace.projected_facet_area)
+        for i, fragment in enumerate(trace.facets):
+            print("WAVEFRONT FACET", i, fragment.source_edge_id, fragment.start_time, fragment.end_time, fragment.vertices)
         surface = build_wavefront_roof_surface(points, [45.0] * len(points))
         self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
         shell = build_roof_shell(surface, 0.12)
