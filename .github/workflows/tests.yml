@@ -3,8 +3,14 @@ name: RoofForge tests
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
 
 jobs:
   pure-python-tests:

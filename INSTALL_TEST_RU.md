@@ -4,13 +4,14 @@
 
 ## Установка
 
-1. Скачай файл roof_forge-0.1.0.zip из раздела **Artifacts** последнего успешного workflow **RoofForge tests** в GitHub:  
+1. Скачай внешний artifact-архив `roof_forge-0.1.0-blender-5.0.1.zip` из раздела **Artifacts** последнего успешного workflow **RoofForge tests**:  
    https://github.com/MorenDord/RoofForge_Blender/actions
-2. Не распаковывай ZIP.
-3. В Blender открой **Edit → Preferences → Get Extensions**.
-4. Открой меню установки в правом верхнем углу окна Extensions и выбери **Install from Disk…**.
-5. Укажи roof_forge-0.1.0.zip, установи и включи RoofForge.
-6. В 3D View открой боковую панель клавишей **N**, вкладка **RoofForge**.
+2. Распакуй внешний архив один раз. Внутри находятся два файла: `roof_forge-0.1.0.zip` и `roof_forge-0.1.0.zip.sha256`.
+3. Сам `roof_forge-0.1.0.zip` **не распаковывай** — именно его нужно установить в Blender.
+4. В Blender открой **Edit → Preferences → Get Extensions**.
+5. Открой меню установки в правом верхнем углу окна Extensions и выбери **Install from Disk…**.
+6. Укажи `roof_forge-0.1.0.zip`, установи и включи RoofForge.
+7. В 3D View открой боковую панель клавишей **N**, вкладка **RoofForge**.
 
 ## Первый тест — простой скатный объём
 
