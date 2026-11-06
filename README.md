@@ -15,7 +15,7 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - 3D slope plane construction from pitch angle, eave edge grade and polygon winding.
 - Deterministic ear clipping and concave-domain arrangement partition.
 - Lower-envelope roof surface assembly, 3D vertex welding and projected domain-coverage validation.
-- Closed roof shell with thickness extruded along roof-local global -Z.
+- Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
 - Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
 - Unit tests for rectangle, L/U contours, plane constraints, winding and closed-shell topology.
 
@@ -46,7 +46,7 @@ From the repository root:
 ## Known geometry limitations
 - Input must be one simple closed loop in XY.
 - Collinear contour vertices and projected-vertical edges are rejected.
-- The dependency-free arrangement algorithm needs further adversarial precision/performance testing.
+- Convex contour shells are covered by the current acceptance fixtures. Some concave L/U roof layouts currently create internal discontinuities in the edge-plane arrangement and are rejected instead of emitting a broken mesh; resolving this is a critical open geometry task.
 - The geometry kernel has unit coverage, but Blender runtime behavior, mesh attributes and Edit Mode workflow have not yet been verified in Blender 5.0.
 - Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
 
