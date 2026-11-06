@@ -11,6 +11,7 @@ from core.envelope import lower_envelope_restricted_cells
 from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
+from core.distance_field import build_distance_field_roof_surface
 
 
 class PolygonTests(unittest.TestCase):
@@ -214,6 +215,52 @@ class PolygonTests(unittest.TestCase):
         ]
         codes = {item.code for item in validate_closed_mesh(vertices, faces)}
         self.assertIn("NON_MANIFOLD_VERTEX", codes)
+
+
+
+    def test_segment_distance_field_builds_closed_l_and_u_shells(self):
+        shapes = [
+            [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
+             (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0),
+             (3.0, 3.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+             (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+        ]
+        for points in shapes:
+            surface = build_distance_field_roof_surface(
+                points, [35.0] * len(points), max_depth=3
+            )
+            shell = build_roof_shell(surface, 0.12)
+            self.assertAlmostEqual(surface.surface_area_xy, surface.source_area_xy, places=7)
+            self.assertGreater(len(surface.faces), len(points) - 2)
+            self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+            self.assertGreaterEqual(surface.refinement_depth, 0)
+            self.assertGreaterEqual(surface.approximation_error, 0.0)
+
+    def test_segment_distance_field_accepts_individual_pitches(self):
+        points = [
+            (0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0),
+        ]
+        pitches = [28.0, 32.0, 38.0, 42.0, 34.0, 30.0]
+        surface = build_distance_field_roof_surface(points, pitches, max_depth=3)
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(len(surface.planes), len(pitches))
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_segment_distance_field_preserves_all_boundary_heights(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+            (4.0, 3.0, 0.0), (0.0, 3.0, 0.0),
+        ]
+        surface = build_distance_field_roof_surface(points, [30.0, 35.0, 40.0, 32.0], max_depth=2)
+        for x, y, z in points:
+            matches = [
+                vertex for vertex in surface.vertices
+                if abs(vertex[0] - x) < 1e-8 and abs(vertex[1] - y) < 1e-8
+            ]
+            self.assertTrue(matches)
+            self.assertTrue(all(abs(vertex[2] - z) < 1e-8 for vertex in matches))
 
 
 
