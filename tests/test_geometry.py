@@ -13,7 +13,8 @@ from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
 from core.wavefront import (
-    EventKind, WavefrontLoop, build_moving_lines, find_split_candidates,
+    EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
+    build_moving_lines, collect_loop_events, find_split_candidates,
     simulate_convex_wavefront, _line_intersection,
 )
 
@@ -338,6 +339,80 @@ class PolygonTests(unittest.TestCase):
         expected_time = 0.5
         self.assertTrue(any(abs(event.time - expected_time) < 1e-6 for event in split_events))
         self.assertTrue(any(event.target_edge_id == 0 for event in split_events))
+
+
+
+    def test_event_queue_groups_simultaneous_events_deterministically(self):
+        queue = WavefrontEventQueue()
+        events = [
+            WavefrontEvent(
+                EventKind.SPLIT_CANDIDATE, 1.0 + 5e-10, 0,
+                edge_id=3, vertex_id=2, target_edge_id=1,
+                participant_generations=((1, 0), (2, 0), (3, 0)),
+            ),
+            WavefrontEvent(
+                EventKind.EDGE_COLLAPSE, 1.0, 0,
+                edge_id=2, vertex_id=1,
+                participant_generations=((1, 0), (2, 0), (3, 0)),
+            ),
+            WavefrontEvent(EventKind.NEEDLE, 2.0, 0),
+        ]
+        queue.push_many(events)
+        batch = queue.pop_next_batch(
+            current_time=0.0,
+            time_tolerance=1e-9,
+            current_edge_generations={1: 0, 2: 0, 3: 0},
+            current_loop_generations={0: 0},
+        )
+        self.assertIsNotNone(batch)
+        self.assertAlmostEqual(batch.time, 1.0)
+        self.assertEqual(
+            [event.kind for event in batch.events],
+            [EventKind.EDGE_COLLAPSE, EventKind.SPLIT_CANDIDATE],
+        )
+        self.assertEqual(len(queue), 1)
+
+    def test_event_queue_discards_stale_edge_and_loop_generations(self):
+        queue = WavefrontEventQueue()
+        queue.push(WavefrontEvent(
+            EventKind.EDGE_COLLAPSE, 1.0, 5,
+            edge_id=2,
+            participant_generations=((1, 4), (2, 8)),
+            loop_generation=3,
+        ))
+        queue.push(WavefrontEvent(
+            EventKind.EDGE_COLLAPSE, 2.0, 5,
+            edge_id=2,
+            participant_generations=((1, 5), (2, 8)),
+            loop_generation=4,
+        ))
+        batch = queue.pop_next_batch(
+            current_edge_generations={1: 5, 2: 8},
+            current_loop_generations={5: 4},
+        )
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.time, 2.0)
+        self.assertEqual(queue.discarded_stale, 1)
+        self.assertEqual(len(queue), 0)
+
+    def test_event_queue_discards_events_before_current_time(self):
+        queue = WavefrontEventQueue()
+        queue.push(WavefrontEvent(EventKind.EDGE_COLLAPSE, 0.5, 0))
+        queue.push(WavefrontEvent(EventKind.EDGE_COLLAPSE, 1.5, 0))
+        batch = queue.pop_next_batch(current_time=1.0, time_tolerance=1e-9)
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.time, 1.5)
+        self.assertEqual(queue.discarded_stale, 1)
+
+    def test_collect_loop_events_adds_loop_generation_to_events(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        moving = build_moving_lines(points, [45.0] * 4)
+        edges = {edge.edge_id: edge for edge in moving}
+        loop = WavefrontLoop(7, tuple(range(4)), generation=12)
+        events = collect_loop_events(loop, edges)
+        self.assertTrue(events)
+        self.assertTrue(all(event.loop_generation == 12 for event in events))
 
 
 
