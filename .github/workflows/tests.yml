@@ -92,3 +92,20 @@ jobs:
           path: rust-skeleton-bench.csv
           if-no-files-found: error
           retention-days: 30
+  legacy-spatial-benchmarks:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Benchmark the historical spatial solver
+        run: python tests/legacy_spatial_solver_bench.py | tee legacy-spatial-bench.csv
+      - name: Upload legacy solver benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-legacy-spatial-bench
+          path: legacy-spatial-bench.csv
+          if-no-files-found: error
+          retention-days: 30
