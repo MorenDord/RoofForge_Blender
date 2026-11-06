@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from core.geometry import validate_simple_polygon
 from core.mesh import build_roof_surface
 from core.distance_field import build_distance_field_roof_surface
-from core.wavefront import run_weighted_wavefront
+from core.wavefront import run_weighted_wavefront, build_wavefront_roof_surface
 
 
 def radial_polygon(count: int, *, concave: bool) -> list[tuple[float, float, float]]:
@@ -66,6 +66,7 @@ def measure(label: str, points, builder, repeats: int) -> dict:
             "p95_ms": round(percentile_95(durations), 3),
             "vertices_out": len(getattr(output, "vertices", ())),
             "faces_out": len(getattr(output, "faces", ())),
+            "facets_out": len(getattr(output, "facets", ())),
         }
     except Exception as exc:  # Keep unsupported geometry visible in the report.
         return {
@@ -104,6 +105,18 @@ def main() -> int:
 
     for count in (8, 16, 32, 64):
         concave = radial_polygon(count, concave=True)
+        results.append(measure(
+            f"weighted_wavefront_trace_concave_n{count}",
+            concave,
+            run_weighted_wavefront,
+            args.repeats,
+        ))
+        results.append(measure(
+            f"weighted_wavefront_surface_concave_n{count}",
+            concave,
+            build_wavefront_roof_surface,
+            args.repeats,
+        ))
         results.append(measure(
             f"distance_field_uniform_refine_depth2_concave_n{count}",
             concave,
