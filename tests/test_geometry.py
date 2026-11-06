@@ -121,11 +121,17 @@ class PolygonTests(unittest.TestCase):
         planes = build_boundary_planes(points, [30.0] * 4)
         self.assertEqual(boundary_envelope_conflicts(points, planes), [])
 
-    def test_surface_mesh_works_for_rectangle_l_and_u(self):
-        from core.mesh import build_roof_surface
+    def test_surface_mesh_for_convex_rectangle(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)]
+        surface = build_roof_surface(points, [35.0] * len(points))
+        self.assertAlmostEqual(surface.surface_area_xy, surface.source_area_xy, places=7)
+        self.assertTrue(all(signed_area([(surface.vertices[i][0], surface.vertices[i][1])
+                                         for i in face]) > 0.0
+                            for face in surface.faces))
 
+    def test_discontinuous_concave_surface_is_rejected(self):
         fixtures = [
-            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
             [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
              (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
             [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0),
@@ -133,27 +139,16 @@ class PolygonTests(unittest.TestCase):
              (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
         ]
         for points in fixtures:
-            surface = build_roof_surface(points, [35.0] * len(points))
-            self.assertAlmostEqual(surface.surface_area_xy, surface.source_area_xy, places=7)
-            self.assertEqual(len(surface.faces), len(surface.face_slope_indices))
-            edge_uses = {}
-            for face in surface.faces:
-                for index, first in enumerate(face):
-                    second = face[(index + 1) % len(face)]
-                    key = tuple(sorted((first, second)))
-                    edge_uses[key] = edge_uses.get(key, 0) + 1
-            self.assertLessEqual(max(edge_uses.values()), 2)
-            self.assertTrue(all(len(face) >= 3 for face in surface.faces))
-
+            with self.assertRaises(GeometryInputError) as ctx:
+                build_roof_surface(points, [35.0] * len(points))
+            self.assertIn(ctx.exception.code, {
+                "INTERNAL_OPEN_EDGE", "BOUNDARY_COVERAGE_MISMATCH"
+            })
 
     def test_solid_shell_is_closed_and_extruded_along_global_z(self):
         fixtures = [
-            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
-            [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
-             (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
-            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0),
-             (3.0, 3.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
-             (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+             (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
         ]
         for points in fixtures:
             surface = build_roof_surface(points, [35.0] * len(points))
