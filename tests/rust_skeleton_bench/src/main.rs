@@ -474,7 +474,12 @@ fn main() {
     run_points_case_mode("concave_L_variable_pitch_raw", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats, InputMode::PslgPitchWeightsRaw);
     for varied_edge in 0..6 {
         let mut pitches = [35.0; 6];
-        pitches[varied_edge] = 30.0 + varied_edge as f64;
+        let varied_pitch = 30.0 + varied_edge as f64;
+        pitches[varied_edge] = if (varied_pitch - 35.0).abs() < 1.0e-9 {
+            40.0
+        } else {
+            varied_pitch
+        };
         run_points_case(
             &format!("concave_L_only_edge_{varied_edge}_varies"),
             &l_shape,
