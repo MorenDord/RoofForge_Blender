@@ -686,5 +686,19 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_surface_assembles_u_shape(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 4.0, 0.0),
+            (3.0, 4.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+            (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        surface = build_wavefront_roof_surface(points, [45.0] * len(points))
+        self.assertAlmostEqual(surface.source_area_xy, 10.0, places=7)
+        self.assertAlmostEqual(surface.surface_area_xy, 10.0, places=6)
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
