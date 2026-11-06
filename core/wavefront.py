@@ -40,9 +40,10 @@ class MovingLine:
     speed: float
     tangent: Point2
     generation: int = 0
+    base_height: float = 0.0
 
     def offset_at(self, time: float) -> float:
-        return self.offset + self.speed * time
+        return self.offset + self.speed * (time - self.base_height)
 
 
 @dataclass(frozen=True)
@@ -252,6 +253,10 @@ class WavefrontSimulationState:
     epsilon: float
     terminal_loops: dict[int, str] = field(default_factory=dict)
     processed_events: list[WavefrontEvent] = field(default_factory=list)
+    facets: list[FacetFragment] = field(default_factory=list)
+    skeleton_arcs: list[SkeletonArc] = field(default_factory=list)
+    source_area: float = 0.0
+    input_winding: int = 1
 
     @property
     def is_complete(self) -> bool:
@@ -356,6 +361,7 @@ def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float
     if issues:
         raise GeometryInputError(issues[0].code, issues[0].message)
     winding = 1 if signed_area(polygon) > 0.0 else -1
+    base_height = sum(z_values) / len(z_values)
 
     # Reuse the exact 3D plane builder for compatibility validation and pitch
     # semantics. With flat eaves, its edge gradient is purely inward.
@@ -382,7 +388,10 @@ def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float
                 "PITCH_PLANE_MISMATCH",
                 f"Плоскость ребра {index + 1} не соответствует заданному уклону."
             )
-        result.append(MovingLine(index, index, normal, offset, speed, tangent))
+        result.append(MovingLine(
+            index, index, normal, offset, speed, tangent,
+            generation=0, base_height=base_height,
+        ))
     return tuple(result)
 
 
@@ -429,13 +438,15 @@ def _edge_collapse_events(loop: WavefrontLoop, edges: dict[int, MovingLine],
 
 
 def find_split_candidates(loop: WavefrontLoop, edges: dict[int, MovingLine],
-                          time: float = 0.0, eps: float = 1e-9) -> tuple[WavefrontEvent, ...]:
+                          time: float | None = None, eps: float = 1e-9) -> tuple[WavefrontEvent, ...]:
     """Find future reflex-vertex hits on live finite edge segments.
 
     These are candidate events only. The caller must pop the earliest event,
     recompute the wavefront, and revalidate the target segment before topology
     mutation. Hits at a target endpoint are reported separately as VERTEX_HIT.
     """
+    if time is None:
+        time = min((edge.base_height for edge in edges.values()), default=0.0)
     vertices = _loop_vertices(loop, edges, time, eps)
     winding = 1 if _signed_area_at(vertices) > 0.0 else -1
     points = [vertex.point for vertex in vertices]
@@ -515,10 +526,12 @@ def find_split_candidates(loop: WavefrontLoop, edges: dict[int, MovingLine],
 def collect_loop_events(
     loop: WavefrontLoop,
     edges: dict[int, MovingLine],
-    time: float = 0.0,
+    time: float | None = None,
     eps: float = 1e-9,
 ) -> tuple[WavefrontEvent, ...]:
     """Collect collapse and split candidates for one current loop state."""
+    if time is None:
+        time = min((edge.base_height for edge in edges.values()), default=0.0)
     vertices = _loop_vertices(loop, edges, time, eps)
     scale = max(
         1.0,
@@ -639,7 +652,7 @@ def apply_split_event(
         raise GeometryInputError("EDGE_ID_COLLISION", "Новые edge-instance ID уже используются.")
     left_copy = MovingLine(
         first_new_edge, target.source_edge_id, target.normal, target.offset,
-        target.speed, target.tangent, 0,
+        target.speed, target.tangent, 0, target.base_height,
     )
     right_copy = MovingLine(
         second_new_edge, target.source_edge_id, target.normal, target.offset,
@@ -720,9 +733,11 @@ def create_wavefront_state(
         max(point[1] for point in points) - min(point[1] for point in points),
     )
     queue = WavefrontEventQueue()
-    queue.push_many(collect_loop_events(loop, edges, 0.0, eps))
+    base_height = sum(point[2] for point in points) / len(points)
+    source_area = abs(signed_area([(point[0], point[1]) for point in points]))
+    queue.push_many(collect_loop_events(loop, edges, base_height, eps))
     return WavefrontSimulationState(
-        current_time=0.0,
+        current_time=base_height,
         loops={loop.loop_id: loop},
         edges=edges,
         event_queue=queue,
@@ -730,6 +745,8 @@ def create_wavefront_state(
         next_loop_id=loop.loop_id + 1,
         time_tolerance=eps * max(1.0, scale) * 100.0,
         epsilon=eps,
+        source_area=source_area,
+        input_winding=1 if signed_area([(point[0], point[1]) for point in points]) > 0.0 else -1,
     )
 
 
@@ -772,6 +789,24 @@ def _resolve_edge_collapse_group(
                 "После схлопывания остались два фронта, но они не образуют подтверждённую needle-пару."
             )
         state.terminal_loops[loop.loop_id] = "NEEDLE"
+        collapse_positions = []
+        for event in events:
+            if event.position is not None and not any(
+                hypot(event.position[0] - point[0], event.position[1] - point[1])
+                <= tolerance * 10.0 for point in collapse_positions
+            ):
+                collapse_positions.append(event.position)
+        if len(collapse_positions) == 2:
+            state.skeleton_arcs.append(SkeletonArc(
+                (collapse_positions[0][0], collapse_positions[0][1], state.current_time),
+                (collapse_positions[1][0], collapse_positions[1][1], state.current_time),
+                state.current_time,
+            ))
+        elif len(collapse_positions) > 2:
+            raise GeometryInputError(
+                "AMBIGUOUS_NEEDLE_ARC",
+                "Финальные события схлопывания образовали более двух различных концов needle."
+            )
         state.edges.pop(remaining[0], None)
         state.edges.pop(remaining[1], None)
         return None
@@ -780,6 +815,78 @@ def _resolve_edge_collapse_group(
     for edge_id in remaining:
         state.edges.pop(edge_id, None)
     return None
+
+
+def _record_wavefront_interval(
+    state: WavefrontSimulationState,
+    start_time: float,
+    end_time: float,
+) -> None:
+    """Collect exact swept edge fragments and vertex trajectories for one interval."""
+    dt = end_time - start_time
+    if dt < -state.time_tolerance:
+        raise GeometryInputError("TIME_ORDER", "Нельзя записать интервал волнового фронта с отрицательной длительностью.")
+    if dt <= state.time_tolerance:
+        return
+
+    for loop_id in sorted(state.loops):
+        loop = state.loops[loop_id]
+        vertices_start = _loop_vertices(loop, state.edges, start_time, state.epsilon)
+        vertices_end = _loop_vertices(loop, state.edges, end_time, state.epsilon)
+
+        # Each moving wavefront vertex traces a straight skeleton arc between
+        # two consecutive event heights.
+        for first, second in zip(vertices_start, vertices_end):
+            distance = hypot(
+                second.point[0] - first.point[0],
+                second.point[1] - first.point[1],
+            )
+            if distance > state.epsilon:
+                state.skeleton_arcs.append(SkeletonArc(
+                    (first.point[0], first.point[1], start_time),
+                    (second.point[0], second.point[1], end_time),
+                    end_time,
+                ))
+
+        for index, edge_id in enumerate(loop.edge_ids):
+            start0, end0, _, _ = _edge_segment(
+                loop, index, vertices_start, state.edges, start_time
+            )
+            start1, end1, _, end_length = _edge_segment(
+                loop, index, vertices_end, state.edges, end_time
+            )
+            if end_length < -state.time_tolerance:
+                raise GeometryInputError(
+                    "NEGATIVE_EDGE_AT_EVENT",
+                    f"Ребро wavefront {edge_id} получило отрицательную длину перед событием."
+                )
+            line = state.edges[edge_id]
+            fragment = _dedupe_polygon((
+                (start0[0], start0[1], start_time),
+                (end0[0], end0[1], start_time),
+                (end1[0], end1[1], end_time),
+                (start1[0], start1[1], end_time),
+            ), state.time_tolerance)
+            if len(fragment) < 3 or _projected_area(fragment) <= state.time_tolerance ** 2:
+                continue
+            for x, y, z in fragment:
+                expected_z = line.base_height + (
+                    _dot(line.normal, (x, y)) - line.offset
+                ) / line.speed
+                if abs(expected_z - z) > max(
+                    state.time_tolerance * 10.0,
+                    state.epsilon * max(1.0, abs(z)) * 1000.0,
+                ):
+                    raise GeometryInputError(
+                        "FACET_NOT_PLANAR",
+                        f"Фрагмент исходного ската {line.source_edge_id + 1} не лежит на его точной плоскости."
+                    )
+            state.facets.append(FacetFragment(
+                source_edge_id=line.source_edge_id,
+                start_time=start_time,
+                end_time=end_time,
+                vertices=fragment,
+            ))
 
 
 def advance_wavefront_state(
@@ -807,6 +914,8 @@ def advance_wavefront_state(
             "Для активных контуров не осталось актуальных событий волнового фронта."
         )
 
+    previous_time = state.current_time
+    _record_wavefront_interval(state, previous_time, batch.time)
     state.current_time = batch.time
     state.processed_events.extend(batch.events)
     events_by_loop: dict[int, list[WavefrontEvent]] = {}
@@ -921,7 +1030,7 @@ def simulate_convex_wavefront(points: Sequence[Point3], pitches_degrees: Sequenc
     )
     length_eps = eps * scale * 100.0
     time_eps = eps * max(1.0, scale) * 100.0
-    current_time = 0.0
+    current_time = sum(point[2] for point in points) / len(points)
     facets: list[FacetFragment] = []
     events: list[WavefrontEvent] = []
     skeleton_arcs: list[SkeletonArc] = []
@@ -982,7 +1091,7 @@ def simulate_convex_wavefront(points: Sequence[Point3], pitches_degrees: Sequenc
             face = _dedupe_polygon((start3, end3, end13, start13), length_eps)
             if len(face) >= 3 and _projected_area(face) > length_eps * length_eps:
                 for x, y, z in face:
-                    expected_z = (line.normal[0] * x + line.normal[1] * y - line.offset) / line.speed
+                    expected_z = line.base_height + (line.normal[0] * x + line.normal[1] * y - line.offset) / line.speed
                     if abs(expected_z - z) > max(length_eps, eps * scale * 1000.0):
                         raise GeometryInputError(
                             "FACET_NOT_PLANAR",
