@@ -24,6 +24,8 @@ class RoofSurface:
     source_area_xy: float
     surface_area_xy: float
     boundary_xy: tuple[Point2, ...]
+    approximation_error: float = 0.0
+    refinement_depth: int = 0
 
     @property
     def is_empty(self) -> bool:
