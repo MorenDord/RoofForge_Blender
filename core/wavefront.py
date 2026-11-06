@@ -1157,9 +1157,31 @@ def build_wavefront_roof_surface(
             f"Собранная сетка покрывает {surface_area:.9g} из {source_area:.9g} единиц площади."
         )
 
-    validate_surface_boundary_edges(
-        registry.vertices, faces, boundary_xy, weld_tolerance * 5.0
-    )
+    try:
+        validate_surface_boundary_edges(
+            registry.vertices, faces, boundary_xy, weld_tolerance * 5.0
+        )
+    except GeometryInputError as exc:
+        if exc.code == "INTERNAL_OPEN_EDGE":
+            from .mesh import _mesh_edge_usage
+            usage = _mesh_edge_usage(faces)
+            for (first, second), count in usage.items():
+                if count != 1:
+                    continue
+                p, q = registry.vertices[first], registry.vertices[second]
+                incident_faces = [
+                    (face_index, slope_ids[face_index])
+                    for face_index, face in enumerate(faces)
+                    if first in face and second in face
+                ]
+                if "не является частью исходного контура" in exc.message:
+                    detail = (
+                        f" Открытое ребро ({p[0]:.6g}, {p[1]:.6g}, {p[2]:.6g}) → "
+                        f"({q[0]:.6g}, {q[1]:.6g}, {q[2]:.6g}); "
+                        f"инцидентные фасеты (face, source_slope): {incident_faces}."
+                    )
+                    raise GeometryInputError(exc.code, exc.message + detail) from exc
+        raise
     return RoofSurface(
         vertices=tuple(registry.vertices),
         faces=tuple(faces),
