@@ -857,24 +857,55 @@ class PolygonTests(unittest.TestCase):
         ]
         scenarios = (
             # The right-side cross-needle is first: split 3 -> edge 5,
-            # simultaneous with collapse of edge 4. The finite residual
-            # segment is intentionally large enough to be mesh-resolvable.
-            [0.8, 1.0, 1.2, 1.32, 1.0, 0.7],
+            # simultaneous with collapse of edge 4. The bottom event follows.
+            ([0.8, 1.0, 1.2, 1.32, 1.0, 0.7], 5, 4),
             # The bottom cross-needle is first: split 3 -> edge 0,
-            # simultaneous with collapse of edge 1.
-            [0.8, 1.0, 1.2, 1.28, 1.0, 0.7],
+            # simultaneous with collapse of edge 1. The right event follows.
+            ([0.8, 1.0, 1.2, 1.28, 1.0, 0.7], 0, 1),
         )
-        for speeds in scenarios:
+        for speeds, expected_target, expected_collapse in scenarios:
             pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
             state = create_wavefront_state(points, pitches)
-            batch = advance_wavefront_state(state)
-            self.assertIsNotNone(batch)
+            first_batch = advance_wavefront_state(state)
+            self.assertIsNotNone(first_batch)
             self.assertEqual(
-                {event.kind for event in batch.events},
+                {event.kind for event in first_batch.events},
                 {EventKind.SPLIT_CANDIDATE, EventKind.EDGE_COLLAPSE},
             )
+            split = next(
+                event for event in first_batch.events
+                if event.kind == EventKind.SPLIT_CANDIDATE
+            )
+            collapse = next(
+                event for event in first_batch.events
+                if event.kind == EventKind.EDGE_COLLAPSE
+            )
+            self.assertEqual((split.vertex_id, split.target_edge_id), (3, expected_target))
+            self.assertEqual(collapse.edge_id, expected_collapse)
             self.assertEqual(len(state.loops), 1)
             self.assertTrue(state.terminal_loops)
+
+            # A distinct later event must be generated from the surviving
+            # child loop, not consumed from the original loop's event batch.
+            time_after_compound = state.current_time
+            live_loops_before = dict(state.loops)
+            live_edges_before = dict(state.edges)
+            second_batch = advance_wavefront_state(state)
+            self.assertIsNotNone(second_batch)
+            self.assertGreater(
+                second_batch.time,
+                time_after_compound + state.time_tolerance,
+            )
+            self.assertTrue(all(
+                event.loop_id in live_loops_before
+                and event.loop_generation == live_loops_before[event.loop_id].generation
+                for event in second_batch.events
+            ))
+            self.assertTrue(all(
+                edge_id in live_edges_before
+                for event in second_batch.events
+                for edge_id, _ in event.participant_generations
+            ))
 
             while not state.is_complete:
                 advance_wavefront_state(state)
