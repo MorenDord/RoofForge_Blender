@@ -895,52 +895,71 @@ def _resolve_cross_needle_vertex_hit(
     loop: WavefrontLoop,
     events: Sequence[WavefrontEvent],
 ) -> bool:
-    """Resolve one reflex vertex hitting the shared endpoint of two edges.
+    """Resolve simultaneous reflex endpoint hits forming multiple needle nodes.
 
-    This specific multi-event is accepted only when:
-    - exactly two endpoint-hit events share one reflex vertex and position;
-    - their target edges are adjacent around the contour;
-    - after simultaneous edge collapses, all remaining fronts form pairs of
-      opposite, coincident, equally weighted finite segments.
+    Endpoint hits are grouped by reflex vertex. Each group must contain exactly
+    two hits on adjacent target edges, proving the reflex vertex reached their
+    common wavefront endpoint. After the simultaneous edge collapses, every
+    remaining finite front must pair with one opposite, coincident front of
+    equal speed. The paired segments become terminal skeleton arcs.
 
-    The coincident pairs become terminal skeleton arcs. Other mixed batches are
-    left to the caller as unsupported; this is not a generic multi-event solver.
+    This covers the L-shaped one-node cross-needle and the U-shaped
+    multi-node event. It is deliberately not a generic simultaneous-event
+    resolver.
     """
     endpoint_hits = [event for event in events if event.kind == EventKind.VERTEX_HIT]
     collapse_events = [event for event in events if event.kind == EventKind.EDGE_COLLAPSE]
-    if len(endpoint_hits) != 2 or len(endpoint_hits) + len(collapse_events) != len(events):
+    if len(endpoint_hits) < 2 or len(endpoint_hits) % 2:
+        return False
+    if len(endpoint_hits) + len(collapse_events) != len(events):
         return False
 
-    first_hit, second_hit = endpoint_hits
-    if (
-        first_hit.vertex_id is None
-        or first_hit.vertex_id != second_hit.vertex_id
-        or first_hit.edge_id != second_hit.edge_id
-        or first_hit.target_edge_id is None
-        or second_hit.target_edge_id is None
-        or first_hit.position is None
-        or second_hit.position is None
-    ):
-        return False
+    hits_by_vertex: dict[int, list[WavefrontEvent]] = {}
+    for event in endpoint_hits:
+        if event.vertex_id is None:
+            return False
+        hits_by_vertex.setdefault(event.vertex_id, []).append(event)
 
-    tolerance = state.time_tolerance * 10.0
-    if hypot(
-        first_hit.position[0] - second_hit.position[0],
-        first_hit.position[1] - second_hit.position[1],
-    ) > tolerance:
+    if not hits_by_vertex:
         return False
+    positions: list[Point2] = []
+    for vertex_id, hits in sorted(hits_by_vertex.items()):
+        if len(hits) != 2:
+            return False
+        first_hit, second_hit = hits
+        if (
+            first_hit.edge_id is None
+            or first_hit.edge_id != second_hit.edge_id
+            or first_hit.target_edge_id is None
+            or second_hit.target_edge_id is None
+            or first_hit.position is None
+            or second_hit.position is None
+        ):
+            return False
+        if hypot(
+            first_hit.position[0] - second_hit.position[0],
+            first_hit.position[1] - second_hit.position[1],
+        ) > state.time_tolerance * 10.0:
+            return False
+        target_a = loop.edge_ids.index(first_hit.target_edge_id)
+        target_b = loop.edge_ids.index(second_hit.target_edge_id)
+        count = len(loop.edge_ids)
+        if (target_a - target_b) % count not in {1, count - 1}:
+            return False
+        positions.append(first_hit.position)
 
-    target_a = loop.edge_ids.index(first_hit.target_edge_id)
-    target_b = loop.edge_ids.index(second_hit.target_edge_id)
-    count = len(loop.edge_ids)
-    if (target_a - target_b) % count not in {1, count - 1}:
-        return False
+    # Distinct reflex vertices must hit distinct nodes. If two groups collapse
+    # to the same point, they belong to a higher-order event not handled here.
+    for index, first in enumerate(positions):
+        for second in positions[index + 1:]:
+            if hypot(first[0] - second[0], first[1] - second[1]) <= state.time_tolerance * 10.0:
+                return False
 
     collapsed = {event.edge_id for event in collapse_events}
     if None in collapsed:
         return False
     remaining = [edge_id for edge_id in loop.edge_ids if edge_id not in collapsed]
-    if len(remaining) < 4 or len(remaining) % 2:
+    if len(remaining) < 2 or len(remaining) % 2:
         return False
 
     vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
@@ -996,9 +1015,6 @@ def _resolve_cross_needle_vertex_hit(
         matched_pairs.append((first_id, partner, first_segment[0], first_segment[1]))
         unused.remove(first_id)
         unused.remove(partner)
-
-    if len(matched_pairs) != len(remaining) // 2:
-        return False
 
     for first_id, second_id, start, end in matched_pairs:
         state.skeleton_arcs.append(SkeletonArc(
