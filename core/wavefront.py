@@ -1458,6 +1458,164 @@ def _resolve_split_collapse_batch(
     return tuple(state.loops[key] for key in sorted(trial_state.loops))
 
 
+
+def _resolve_multiple_split_batch(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> tuple[WavefrontLoop, ...]:
+    """Resolve several same-time split candidates by repeated revalidation.
+
+    A split replaces its target edge with two instances, so later events from
+    the original queue can become stale by edge ID even though the geometric
+    event is still valid. Recompute candidates after each accepted split and
+    match by authored source-edge IDs plus event position. This allows
+    independent multi-notch splits without accepting stale or ambiguous
+    topology.
+    """
+    if len(events) < 2 or any(event.kind != EventKind.SPLIT_CANDIDATE for event in events):
+        raise GeometryInputError(
+            "MULTI_SPLIT_INVALID_BATCH",
+            "Для multi-split resolver требуется минимум два строгих split-события."
+        )
+
+    original_edges = dict(state.edges)
+    working_edges = dict(state.edges)
+    working_loops: list[WavefrontLoop] = [loop]
+    next_edge_id = state.next_edge_id
+    next_loop_id = state.next_loop_id
+    position_tolerance = state.time_tolerance * 10.0
+
+    ordered_events = sorted(events, key=WavefrontEventQueue._event_key)
+    for original_event in ordered_events:
+        if original_event.edge_id is None or original_event.target_edge_id is None:
+            raise GeometryInputError(
+                "INCOMPLETE_SPLIT_EVENT",
+                "Одновременный split не содержит ID исходной вершины или целевого ребра."
+            )
+        if original_event.position is None:
+            raise GeometryInputError(
+                "INCOMPLETE_SPLIT_EVENT",
+                "Одновременный split не содержит подтверждённую позицию события."
+            )
+        try:
+            original_edge = original_edges[original_event.edge_id]
+            original_target = original_edges[original_event.target_edge_id]
+        except KeyError as exc:
+            raise GeometryInputError(
+                "STALE_SPLIT_EVENT",
+                "Одно из одновременных split-событий уже не имеет исходного ребра."
+            ) from exc
+
+        candidates: list[tuple[WavefrontLoop, WavefrontEvent]] = []
+        for candidate_loop in working_loops:
+            fresh_events = find_split_candidates(
+                candidate_loop,
+                working_edges,
+                state.current_time,
+                state.epsilon,
+            )
+            for fresh_event in fresh_events:
+                if fresh_event.kind != EventKind.SPLIT_CANDIDATE:
+                    continue
+                if fresh_event.position is None:
+                    continue
+                if abs(fresh_event.time - original_event.time) > state.time_tolerance:
+                    continue
+                if (
+                    working_edges[fresh_event.edge_id].source_edge_id
+                    != original_edge.source_edge_id
+                    or working_edges[fresh_event.target_edge_id].source_edge_id
+                    != original_target.source_edge_id
+                ):
+                    continue
+                if hypot(
+                    fresh_event.position[0] - original_event.position[0],
+                    fresh_event.position[1] - original_event.position[1],
+                ) > position_tolerance:
+                    continue
+                candidates.append((candidate_loop, fresh_event))
+
+        if len(candidates) != 1:
+            details = [
+                (
+                    candidate_loop.loop_id,
+                    candidate_event.edge_id,
+                    candidate_event.target_edge_id,
+                    candidate_event.position,
+                    candidate_event.time,
+                )
+                for candidate_loop, candidate_event in candidates
+            ]
+            raise GeometryInputError(
+                "SIMULTANEOUS_SPLIT_AMBIGUOUS",
+                "Одновременный split нельзя однозначно переподтвердить после предыдущих split-событий. "
+                f"Исходное событие: {original_event}; кандидаты: {details}."
+            )
+
+        candidate_loop, fresh_event = candidates[0]
+        result = apply_split_event(
+            candidate_loop,
+            working_edges,
+            fresh_event,
+            next_edge_id=next_edge_id,
+            next_loop_id=next_loop_id,
+            eps=state.epsilon,
+            validate_children=False,
+        )
+        working_loops = [
+            child
+            for candidate in working_loops
+            if candidate.loop_id != candidate_loop.loop_id
+            for child in result.loops
+        ] + [
+            candidate
+            for candidate in working_loops
+            if candidate.loop_id != candidate_loop.loop_id
+        ]
+        working_edges = result.edges
+        next_edge_id = result.next_edge_id
+        next_loop_id = result.next_loop_id
+
+    for child in working_loops:
+        vertices = _loop_vertices(
+            child, working_edges, state.current_time, state.epsilon
+        )
+        polygon = [vertex.point for vertex in vertices]
+        scale = max(
+            1.0,
+            max(point[0] for point in polygon) - min(point[0] for point in polygon),
+            max(point[1] for point in polygon) - min(point[1] for point in polygon),
+        )
+        area = signed_area(polygon)
+        if abs(area) <= state.epsilon * scale * scale * 100.0:
+            raise GeometryInputError(
+                "DEGENERATE_MULTI_SPLIT_CHILD",
+                "Одновременные split-события создали контур нулевой площади."
+            )
+        if (1 if area > 0.0 else -1) != state.input_winding:
+            raise GeometryInputError(
+                "MULTI_SPLIT_WINDING_CHANGED",
+                "После одновременных split-событий изменилась ориентация дочернего контура."
+            )
+        if validate_simple_polygon(polygon, state.epsilon):
+            raise GeometryInputError(
+                "MULTI_SPLIT_CHILD_NOT_SIMPLE",
+                "После одновременных split-событий остался самопересекающийся контур."
+            )
+
+    state.loops.pop(loop.loop_id, None)
+    state.loops.update({child.loop_id: child for child in working_loops})
+    state.edges = working_edges
+    state.next_edge_id = next_edge_id
+    state.next_loop_id = next_loop_id
+    return tuple(
+        state.loops[loop_id]
+        for loop_id in sorted(state.loops)
+        if loop_id in {child.loop_id for child in working_loops}
+    )
+
+
 def advance_wavefront_state(
     state: WavefrontSimulationState,
 ) -> EventBatch | None:
@@ -1505,26 +1663,26 @@ def advance_wavefront_state(
             changed_loops.extend(_resolve_split_collapse_batch(state, loop, loop_events))
 
         elif kinds == {EventKind.SPLIT_CANDIDATE}:
-            if len(loop_events) != 1:
-                raise GeometryInputError(
-                    "SIMULTANEOUS_SPLIT_EVENTS_UNRESOLVED",
-                    "Несколько split-событий одного контура произошли одновременно; требуется общий resolver."
+            if len(loop_events) == 1:
+                result = apply_split_event(
+                    loop,
+                    state.edges,
+                    loop_events[0],
+                    next_edge_id=state.next_edge_id,
+                    next_loop_id=state.next_loop_id,
+                    eps=state.epsilon,
                 )
-            result = apply_split_event(
-                loop,
-                state.edges,
-                loop_events[0],
-                next_edge_id=state.next_edge_id,
-                next_loop_id=state.next_loop_id,
-                eps=state.epsilon,
-            )
-            del state.loops[loop_id]
-            state.edges = result.edges
-            for child in result.loops:
-                state.loops[child.loop_id] = child
-                changed_loops.append(child)
-            state.next_edge_id = result.next_edge_id
-            state.next_loop_id = result.next_loop_id
+                del state.loops[loop_id]
+                state.edges = result.edges
+                for child in result.loops:
+                    state.loops[child.loop_id] = child
+                    changed_loops.append(child)
+                state.next_edge_id = result.next_edge_id
+                state.next_loop_id = result.next_loop_id
+            else:
+                changed_loops.extend(
+                    _resolve_multiple_split_batch(state, loop, loop_events)
+                )
 
         elif kinds == {EventKind.EDGE_COLLAPSE}:
             child = _resolve_edge_collapse_group(state, loop, loop_events)
