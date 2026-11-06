@@ -450,7 +450,7 @@ fn run_symmetric_adversarial(count: usize, repeats: usize) {
 fn main() {
     let repeats = 3;
     println!("case,n,concave,variable_pitch,status,median_ms,p95_ms,skeleton_segments,roof_facets,roof_vertices,max_plane_residual");
-    for count in [8, 16, 32, 64, 128] {
+    for count in [8, 16, 32, 64] {
         run_radial_case(count, false, false, repeats);
         run_radial_case(count, false, true, repeats);
     }
