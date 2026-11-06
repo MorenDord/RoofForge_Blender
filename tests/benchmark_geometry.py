@@ -14,6 +14,10 @@ import math
 import statistics
 import time
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from core.geometry import validate_simple_polygon
 from core.mesh import build_roof_surface
