@@ -46,11 +46,11 @@ All stored dimensions use Blender scene units. UI labels must display the active
 ### FR-02 — Roof surface generation
 - Generate a piecewise-planar upper surface from per-edge planes.
 - For convex polygons, compute the lower envelope over the polygon domain.
-- For concave polygons, restrict each edge plane to the inward halfspace of its source edge. Subdivide the domain by edge supporting lines, determine the active plane set per convex cell, then compute the lower envelope within that cell.
+- For concave polygons, use a weighted straight-skeleton/wavefront construction with edge-collapse, split, parallel-edge and simultaneous-event handling. Each active boundary edge sweeps a planar roof face whose pitch is controlled by its per-edge wavefront speed. See `docs/CONCAVE_GEOMETRY.md`.
 - Produce deterministic vertex/face output and weld numerically coincident 3D vertices using scale-aware tolerance.
 - Verify XY coverage against the source polygon area.
 - Verify that all internal surface edges are shared; single-use edges must lie on the source perimeter and fully cover each perimeter segment.
-- Reject unsupported or ambiguous cases instead of silently generating corrupt geometry. The current concave arrangement is experimental; L/U inputs that create discontinuities must be rejected until the finite-region solver is complete.
+- Reject unsupported or ambiguous cases instead of silently generating corrupt geometry. The current supporting-line arrangement and finite-segment distance field are experimental only; neither qualifies as the production concave solver. Concave + mixed-height eaves must be rejected until a separate generalized formulation is validated.
 
 ### FR-03 — Per-slope pitch UI
 - Display a top-view roof diagram with a thin white outline and a number at each slope region.
@@ -134,7 +134,7 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - No external Python dependencies in the installed extension for core functionality.
 
 ## 5. Architecture and algorithms
-See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-domain partitioning, face assembly and Blender datablock creation are separate stages.
+See `ARCHITECTURE.md` and `CONCAVE_GEOMETRY.md`. The core is independent of bpy. Plane generation, wavefront/skeleton construction, face assembly and Blender datablock creation are separate stages.
 
 ## 6. Acceptance criteria for 1.0
 1. Rectangle, convex polygon, L and U fixtures build without holes or unintended overlaps.
@@ -162,7 +162,7 @@ See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-d
 
 ## 8. Risk register
 - **R1 — Lower-envelope degeneracies:** coincident/near-parallel planes and multi-plane junctions. Mitigation: robust predicates, scale-aware tolerances, deterministic tie-breaking, adversarial fixtures.
-- **R2 — Concave roof continuity:** local active-plane sets can switch across artificial lines and produce discontinuities even when projected area coverage is correct. Mitigation: reject internal open edges; develop finite face domains and multi-plane junction solving before enabling L/U solid generation. Arrangement cell count and tiny slivers also require benchmarks.
+- **R2 — Concave roof continuity:** halfspace-restricted plane sets can switch across artificial lines; global plane envelopes can undercut concave eaves. Mitigation: keep both experimental paths out of production; implement weighted straight-skeleton events and validate every resulting facet. Weighted events and simultaneous/parallel degeneracies need explicit handling.
 - **R3 — Shared topology:** tolerance welding can still merge or miss points near degeneracies. Mitigation: plane-membership checks, multi-plane node solving, adversarial tests.
 - **R4 — Profile junction topology:** independently swept segments create internal caps and non-manifold junctions. Mitigation: shared junction graph and separate node-patch solver.
 - **R5 — Live update lifecycle:** stale callbacks/timers can mutate detached objects. Mitigation: per-roof UUID, generation token, explicit unregister, validity checks before every callback.
@@ -170,7 +170,7 @@ See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-d
 - **R7 — UV/LOD scope:** secondary features can delay core stability. Mitigation: gate behind core geometry release criteria.
 
 ## 9. Delivery gates
-- **Alpha:** modular extension loads; boundary validation; deterministic convex roof surface; validated vertical-Z shell; pure geometry tests. Concave roofs that fail continuity are explicitly rejected.
+- **Alpha:** modular extension loads; boundary validation; deterministic convex roof surface; validated vertical-Z shell; pure geometry tests. Concave production geometry remains gated on the weighted wavefront solver; experimental comparison output is not a release feature.
 - **Beta:** interactive pitch map; safe live rebuild/detach; solid shell; validation overlays.
 - **RC:** ridge/valley/hip profiles; seams; manual roof analysis; Blender integration QA.
 - **1.0:** UV, material assignment, optimization/export baseline; documentation; clean install/upgrade; all release gates pass.
