@@ -967,9 +967,21 @@ def advance_wavefront_state(
                 "Рефлексная вершина попала в конец ребра; требуется обработка vertex-hit/needle вырождения."
             )
         else:
+            details = [
+                (
+                    event.kind.value,
+                    event.edge_id,
+                    event.vertex_id,
+                    event.target_edge_id,
+                    event.position,
+                    event.time,
+                )
+                for event in sorted(loop_events, key=WavefrontEventQueue._event_key)
+            ]
             raise GeometryInputError(
                 "SIMULTANEOUS_EVENT_BATCH_UNRESOLVED",
-                "Одновременные события разных типов для одного контура пока не разрешаются автоматически."
+                "Одновременные события разных типов для одного контура пока не разрешаются автоматически. "
+                f"Контур {loop_id}, поколение {loop.generation}, события: {details}."
             )
 
     # Events for changed loop generations are invalidated lazily by the queue.
