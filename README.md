@@ -8,6 +8,7 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Technical specification: docs/SPECIFICATION.md
 - Architecture: docs/ARCHITECTURE.md
 - Development roadmap: docs/ROADMAP.md
+- Session handoff / restart instructions: docs/SESSION_HANDOFF.md
 
 ## Current implementation
 - Blender Extension manifest, registration scaffold and 3D View sidebar panel.
