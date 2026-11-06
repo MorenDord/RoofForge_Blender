@@ -19,7 +19,7 @@
 - core/planes.py — boundary-edge plane generation and active-halfspace checks
 - core/envelope.py — convex lower-envelope partition and experimental concave arrangement
 - core/distance_field.py — experimental finite-segment distance field with approximated endpoint transitions
-- core/wavefront.py (planned) — weighted straight-skeleton event simulation and lifted roof-face graph
+- core/wavefront.py — weighted moving-line kinematics, convex collapse simulation, split candidates, deterministic event queue with stale-generation filtering, and validated single-loop split mutation (full multi-loop solver still planned)
 - core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
 - core/shell.py — closed shell construction by global roof-local -Z extrusion
 - core/validation.py — edge incidence, face winding, connected-component and vertex-link validation
@@ -32,7 +32,7 @@
 2. Validate: polygon simplicity, edge lengths, winding, projected vertical edges and pitch compatibility.
 3. Build planes: one plane per boundary edge, identified by a stable slope index/UUID at the model layer.
 4. Convex partition: clip the domain by pairwise plane equality halfplanes.
-5. Concave production partition (planned): simulate a weighted inward wavefront; process edge-collapse, split, parallel-edge and simultaneous events; lift each source-edge wavefront fragment into its planar roof face. The current inward-halfspace arrangement remains a rejecting experimental path only.
+5. Concave production partition (in progress): weighted moving-line kinematics are implemented; a deterministic queue batches same-time events and discards stale edge/loop generations; a validated split operation replaces one target edge with two source-preserving edge instances and produces two child loops. The full multi-loop event state machine, needle resolution and facet collection remain open. The inward-halfspace arrangement remains a rejecting experimental path only.
 6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
 7. Validate surface: compare projected face area with the source polygon, then require every single-use edge to lie on one source boundary segment and require complete edge-chain coverage. Internal open edges are blocking errors.
 8. Shell: duplicate the upper-surface vertices at z-thickness, reverse bottom face winding, create side walls only along validated source-boundary edges, and require every final undirected edge to have exactly two incident faces.
@@ -43,6 +43,18 @@
 
 ### D. Experimental finite-segment field
 `core/distance_field.py` evaluates a continuous lower envelope of finite edge-segment distance features and uniformly refines corner transitions. It is a comparison prototype only: corner patches are approximated, so it is not the production planar-facet solver.
+
+
+### E. Weighted wavefront implementation status
+`core/wavefront.py` currently provides:
+- one inward moving line per source edge, with speed `cot(pitch)` and a constant-Z eave requirement;
+- 2x2 line intersection and constant vertex velocity;
+- edge-collapse candidate computation;
+- reflex split-candidate computation with finite live-segment checks and endpoint-hit distinction;
+- an event priority queue that batches near-simultaneous events and lazily drops stale events using edge and loop generation stamps;
+- a pure `apply_split_event` operation that revalidates a split event, duplicates the target edge as two edge instances retaining the same source-edge ID, and returns two validated child loops.
+
+This is not yet a complete concave solver. The current convex simulator is separate; no general loop collection scheduler currently advances multiple child loops together, collects all facet fragments, resolves every needle/simultaneous event, or emits a complete manifold roof mesh. The Blender operator must not call this path yet.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
