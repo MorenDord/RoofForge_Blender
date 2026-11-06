@@ -14,7 +14,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         settings = context.scene.roof_forge
         col = layout.column(align=True)
         col.label(text="Roof boundary")
-        col.label(text="Select one closed edge loop in Edit Mode")
+        col.label(text="Boundary is detected from the active mesh object")
         col.prop(settings, "pitch_default")
 
         col.separator()
@@ -24,5 +24,5 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
         col.separator()
-        col.label(text="Thickness is extruded along local -Z", icon="INFO")
-        col.label(text="Per-slope pitch map and live link are next")
+        col.label(text="No vertex or edge selection is required", icon="INFO")
+        col.label(text="Individual slope angles are being added")
