@@ -1767,7 +1767,7 @@ def _segment_pair_parameters(a,b,c,d,eps):
     ]
 
 
-def _build_planar_support_arrangement(points,planes,eps,allowed_pairs=None):
+def _build_planar_support_arrangement(\n    points, planes, eps, allowed_pairs=None, label_by_minimum=False\n):
     """Exact planar arrangement with boundary-owned roof cells."""
     xy=[(float(p[0]),float(p[1])) for p in points]
     raw_segments=[]
@@ -1953,52 +1953,70 @@ def _build_planar_support_arrangement(points,planes,eps,allowed_pairs=None):
     for (a,b),face_id in halfedge_face.items():
         edge_faces[(min(a,b),max(a,b))].add(face_id)
 
-    # Propagate source labels across exact support-plane intersections.
-    # Crossing an (i,j) arrangement edge switches from source i to source j.
-    changed=True
-    while changed:
-        changed=False
-        for edge_key,face_ids in edge_faces.items():
-            if len(face_ids)!=2:
+    if label_by_minimum:
+        # The all-pairs arrangement partitions the footprint by every
+        # pairwise plane equality line. Thus the ordering of plane heights is
+        # constant inside each cell; choose its exact lower support at the
+        # centroid instead of propagating labels across coincident DCEL seams.
+        # Boundary-seeded cells retain their source edge by construction.
+        for face_id, loop in enumerate(faces):
+            if face_source[face_id] is not None:
                 continue
-            meta=edges.get(edge_key)
-            if not meta or not meta["pairs"]:
-                continue
-            a_face,b_face=tuple(face_ids)
-            sa,sb=face_source[a_face],face_source[b_face]
-            for pair in sorted(meta["pairs"]):
-                p,q=pair
-                if sa==p and sb is None:
-                    face_source[b_face]=q
-                    changed=True
-                    break
-                if sa==q and sb is None:
-                    face_source[b_face]=p
-                    changed=True
-                    break
-                if sb==p and sa is None:
-                    face_source[a_face]=q
-                    changed=True
-                    break
-                if sb==q and sa is None:
-                    face_source[a_face]=p
-                    changed=True
-                    break
-
-    # Disconnected arrangement components are rare but possible at coincident
-    # events. Choose the lowest plane only for such a component; it is never
-    # used to overwrite a boundary-propagated source.
-    for face_id,loop in enumerate(faces):
-        if face_source[face_id] is not None:
-            continue
-        polygon=[vertices[index] for index in loop]
-        centroid=_polygon_centroid_xy(polygon)
-        face_source[face_id]=min(
-            range(len(planes)),
-            key=lambda source_id:_plane_value(
-                planes[source_id],centroid[0],centroid[1]
+            polygon = [vertices[index] for index in loop]
+            centroid = _polygon_centroid_xy(polygon)
+            face_source[face_id] = min(
+                range(len(planes)),
+                key=lambda source_id: _plane_value(
+                    planes[source_id], centroid[0], centroid[1]
+                )
             )
-        )
+    else:
+        # Propagate source labels across exact support-plane intersections.
+        # Crossing an (i,j) arrangement edge switches from source i to source j.
+        changed = True
+        while changed:
+            changed = False
+            for edge_key, face_ids in edge_faces.items():
+                if len(face_ids) != 2:
+                    continue
+                meta = edges.get(edge_key)
+                if not meta or not meta["pairs"]:
+                    continue
+                a_face, b_face = tuple(face_ids)
+                sa, sb = face_source[a_face], face_source[b_face]
+                for pair in sorted(meta["pairs"]):
+                    p, q = pair
+                    if sa == p and sb is None:
+                        face_source[b_face] = q
+                        changed = True
+                        break
+                    if sa == q and sb is None:
+                        face_source[b_face] = p
+                        changed = True
+                        break
+                    if sb == p and sa is None:
+                        face_source[a_face] = q
+                        changed = True
+                        break
+                    if sb == q and sa is None:
+                        face_source[a_face] = p
+                        changed = True
+                        break
+
+        # Disconnected arrangement components are rare but possible at
+        # coincident events. Choose the lowest plane only for such a component;
+        # never overwrite a boundary-propagated source.
+        for face_id, loop in enumerate(faces):
+            if face_source[face_id] is not None:
+                continue
+            polygon = [vertices[index] for index in loop]
+            centroid = _polygon_centroid_xy(polygon)
+            face_source[face_id] = min(
+                range(len(planes)),
+                key=lambda source_id: _plane_value(
+                    planes[source_id], centroid[0], centroid[1]
+                )
+            )
 
     # Every internal edge between different source cells must be the exact
     # pair of support planes carried by that arrangement edge.
