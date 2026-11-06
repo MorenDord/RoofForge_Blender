@@ -4,9 +4,9 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Working branch:** `develop`  
 **Do not modify:** `main`  
-**Latest full CI-verified project snapshot:** `d6681b5a509d4b8ea07bf5cb4a1420db214c5c8f` (this final handoff metadata update does not change source code or project documentation)  
-**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42260251640  
-**CI result:** 54 pure-Python tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not been tested.
+**Latest full CI-verified project snapshot:** `5569d8311eee906283112cb9001a82f8cbab66b3`  
+**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42263378860  
+**CI result:** 58 pure-Python tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not been tested.
 
 ## Start here after reconnect
 
@@ -45,39 +45,39 @@ Implemented:
 - `apply_split_event`: validates a strict interior hit, splits one target edge into two new instances preserving source-edge identity, and returns two validated child loops.
 - Global multi-loop event state; all live loops advance to the globally earliest event.
 - Per-source-edge swept facet fragments and skeleton vertex trajectories.
-- Restricted cross-needle resolver for one or multiple reflex endpoint-hit groups, only when the remaining finite fronts pair as opposite, coincident segments with matching speeds.
+- Restricted cross-needle resolver for one or multiple reflex endpoint-hit groups, only when the remaining finite fronts pair as opposite, endpoint-matching finite segments at the event height. Opposing speeds may differ.
 - T-junction conformance: inserts shared 3D vertices into earlier facet edges when later split events subdivide them.
 - `run_weighted_wavefront` and `build_wavefront_roof_surface`: trace, weld, verify source planes, projected coverage and source-boundary continuity.
 
 ### Verified end-to-end fixtures
 - Rectangle: point and needle terminal events.
 - V-notch: one split; equal pitches and one asymmetric per-edge pitch set.
-- L contour: equal-pitch cross-needle terminal event; clockwise/reversed contour also passes.
-- U contour: equal-pitch multi-needle terminal event with three terminal skeleton arcs.
+- L contour: equal-pitch and specifically constrained asymmetric cross-needle terminal events; clockwise/reversed contour also passes.
+- U contour: equal-pitch and specifically constrained asymmetric multi-needle events with three terminal skeleton arcs.
 - Nonzero constant eave elevation.
 - The assembled RoofSurface for each listed fixture produces a shell that passes edge/vertex manifold validation.
-- Latest CI: 54/54 tests on Python 3.11 and 3.13.
+- Latest CI: 58/58 tests on Python 3.11 and 3.13, including unequal- and near-equal-speed L/U fixtures plus event-order diagnostics.
 
 ## Known limitations — do not overstate support
 
 - Wavefront supports **constant-Z eaves only**. Mixed-height eaves need a separate generalized 3D formulation.
-- L/U have only been verified for the listed equal-pitch cross-needle configurations. An asymmetric V-notch passes, but arbitrary unequal-pitch L/U event ordering is not solved.
-- The cross-needle resolver requires equal speed on each opposite coincident pair. Unequal-speed opposing fronts must be handled as separate weighted events or rejected explicitly.
+- L/U have been verified for the listed equal-pitch and specifically constrained asymmetric fixtures. This is not arbitrary mixed-pitch L/U support.
+- The cross-needle resolver accepts unequal opposing speeds only when complete finite segments coincide endpoint-to-endpoint at the same event height. Partial overlaps are not resolved.
+- A small change in opposing speed sums can separate the endpoint hit and edge-collapse times. Candidate ordering is tested, but a mixed split/collapse batch or sequential split/collapse state update is not yet implemented.
 - Multiple independent split events on one loop, nested split sequences and higher-order vertex collisions are not generally resolved.
 - Geometric self-intersection checking is not implemented yet.
 - The wavefront alpha is **not connected to the Blender operator** and has not been runtime-tested inside Blender 5.0. Do not route user-facing roof creation through it yet.
 
 ## Exact next development task
 
-Implement and test **unequal-pitch L/U wavefront events**.
+Resolve **weighted split/collapse event ordering and partial-overlap needles**.
 
-1. Add asymmetric L and U fixtures with deliberately different pitch speeds on opposite boundaries.
-2. Record the global event batches and identify whether the first interaction is an unequal-speed opposing-edge collision, endpoint hit, ordinary edge collapse, or a combination.
-3. Derive and implement the correct weighted event update. Do not force unequal-speed lines into the existing equal-speed cross-needle resolver.
-4. Preserve facet plane checks, boundary coverage, T-junction conformance, edge/vertex manifold checks and deterministic output.
-5. Add tests for near-equal speeds, clearly unequal speeds and event-order changes around the equality threshold.
-6. After asymmetric L/U work, address multiple simultaneous splits on one loop and higher-order vertex events.
-7. Keep mixed-Z eaves out of this 2D solver. Do not connect to Blender until the broader geometry gate passes.
+1. Implement a topology update for a reflex split that is simultaneous with an edge collapse on the same loop, with full participant revalidation.
+2. Implement the sequential case where a tiny speed-sum difference makes one event occur first and the other occur later; regenerate candidates after each topology change rather than batching stale candidates.
+3. Add partial-overlap opposing-front events where the coincident segment endpoints do not both match; split the overlap into valid terminal arcs and continue any surviving wavefront portions where mathematically required, or reject explicitly.
+4. Preserve exact source-plane facets, projected coverage, boundary-chain checks, T-junction conformance, edge/vertex manifold checks and deterministic output.
+5. Then address multiple independent splits on one loop, nested split sequences and higher-order vertex collisions.
+6. Keep mixed-Z eaves out of this 2D solver. Do not connect the alpha to the Blender generator until the broader geometry gate passes.
 
 ## Main project documents
 

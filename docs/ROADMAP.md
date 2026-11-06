@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested equal- and unequal-speed L/U cross-needle terminal events when full opposing segments coincide at the event height, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 54 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested equal- and unequal-speed L/U cross-needle terminal events when full opposing segments coincide at the event height, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 58 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest

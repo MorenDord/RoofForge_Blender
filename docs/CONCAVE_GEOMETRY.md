@@ -86,7 +86,7 @@ Therefore:
 - Nonzero constant eave elevation (the split edge copies must preserve their base height).
 - Closed shell with roof-local global `-Z` thickness.
 
-Latest pure-Python CI: **54 tests passed on Python 3.11 and 3.13**. See the latest run linked from `SESSION_HANDOFF.md`.
+Latest pure-Python CI: **58 tests passed on Python 3.11 and 3.13**. See the latest run linked from `SESSION_HANDOFF.md`.
 
 ### Known limitations
 - This is not a general solution for every simple concave polygon. Arbitrary simultaneous split batches, higher-order vertex collisions, partial-overlap unequal-speed needle pairs, and split/collapse events whose times differ still require dedicated resolvers.
