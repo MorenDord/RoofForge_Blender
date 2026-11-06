@@ -1062,6 +1062,72 @@ def run_weighted_wavefront(
 
 
 
+
+def _split_face_edges_at_shared_vertices(
+    vertices: Sequence[Point3],
+    faces: Sequence[tuple[int, ...]],
+    tolerance: float,
+) -> list[tuple[int, ...]]:
+    """Insert every existing mesh vertex lying strictly inside a face edge.
+
+    Wavefront split events can create a T-junction: an earlier facet contains
+    one long edge while later facets use two sub-edges meeting at the split
+    point. This conforming pass subdivides the long edge without adding
+    geometry or changing the face's planar region.
+    """
+    tolerance_sq = tolerance * tolerance
+    output: list[tuple[int, ...]] = []
+
+    for face in faces:
+        expanded: list[int] = []
+        for edge_index, start_id in enumerate(face):
+            end_id = face[(edge_index + 1) % len(face)]
+            start = vertices[start_id]
+            end = vertices[end_id]
+            direction = tuple(end[axis] - start[axis] for axis in range(3))
+            length_sq = sum(value * value for value in direction)
+            if length_sq <= tolerance_sq:
+                raise GeometryInputError(
+                    "ZERO_LENGTH_FACE_EDGE",
+                    "После объединения фасет найдено ребро нулевой длины."
+                )
+
+            points_on_edge: list[tuple[float, int]] = []
+            for candidate_id, candidate in enumerate(vertices):
+                if candidate_id == start_id or candidate_id == end_id:
+                    continue
+                relative = tuple(candidate[axis] - start[axis] for axis in range(3))
+                parameter = sum(relative[axis] * direction[axis] for axis in range(3)) / length_sq
+                if parameter <= tolerance / (length_sq ** 0.5) or parameter >= 1.0 - tolerance / (length_sq ** 0.5):
+                    continue
+                projected = tuple(
+                    start[axis] + parameter * direction[axis] for axis in range(3)
+                )
+                distance_sq = sum(
+                    (candidate[axis] - projected[axis]) ** 2 for axis in range(3)
+                )
+                if distance_sq <= tolerance_sq:
+                    points_on_edge.append((parameter, candidate_id))
+
+            points_on_edge.sort(key=lambda item: (item[0], item[1]))
+            if not expanded:
+                expanded.append(start_id)
+            expanded.extend(candidate_id for _, candidate_id in points_on_edge)
+        compact: list[int] = []
+        for vertex_id in expanded:
+            if not compact or compact[-1] != vertex_id:
+                compact.append(vertex_id)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_CONFORMED_FACE",
+                "Разбиение T-junction создало вырожденную грань."
+            )
+        output.append(tuple(compact))
+    return output
+
+
 def build_wavefront_roof_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
@@ -1146,6 +1212,13 @@ def build_wavefront_roof_surface(
 
     if not faces:
         raise GeometryInputError("EMPTY_WAVEFRONT_SURFACE", "После объединения фасет не осталось граней.")
+
+    # A split can introduce a vertex in the interior of an earlier facet edge.
+    # Make every incident face use the same edge segmentation before manifold
+    # validation; otherwise a geometric T-junction appears as an open edge.
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 5.0
+    )
 
     surface_area = sum(
         abs(signed_area([(registry.vertices[i][0], registry.vertices[i][1]) for i in face]))
