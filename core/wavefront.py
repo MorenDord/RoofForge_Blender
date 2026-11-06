@@ -1034,11 +1034,11 @@ def _resolve_vertex_hit_on_collapsing_edge(
     loop: WavefrontLoop,
     events: Sequence[WavefrontEvent],
 ) -> bool:
-    """Consume endpoint hits that are exactly the endpoint of a collapsing edge.
+    """Consume endpoint hits that are exactly an endpoint of a collapsing edge.
 
-    A reflex vertex can hit the next edge's endpoint at the same instant that
-    its outgoing edge collapses. In that case the hit is not a separate split:
-    removing the collapsed edge already creates the same successor vertex.
+    A reflex vertex can hit the neighboring edge beyond a collapsing front at
+    the same instant that the front collapses. The hit is not a separate split:
+    removing the collapsed edge already creates that successor vertex.
     """
     collapse_events = [
         event for event in events if event.kind == EventKind.EDGE_COLLAPSE
@@ -1062,12 +1062,18 @@ def _resolve_vertex_hit_on_collapsing_edge(
     if not set(collapse_by_edge).issubset(edge_set):
         return False
 
-    hits_by_edge: dict[int, list[WavefrontEvent]] = {}
+    tolerance = state.time_tolerance * 10.0
+    vertices = _loop_vertices(
+        loop, state.edges, state.current_time, state.epsilon
+    )
+    paired_hits: dict[int, WavefrontEvent] = {}
+
     for event in hit_events:
         if (
             event.edge_id is None
-            or event.edge_id not in collapse_by_edge
+            or event.edge_id not in edge_set
             or event.target_edge_id is None
+            or event.target_edge_id not in edge_set
             or event.position is None
             or event.vertex_id is None
             or event.loop_id != loop.loop_id
@@ -1076,25 +1082,40 @@ def _resolve_vertex_hit_on_collapsing_edge(
             or loop_edge_ids[event.vertex_id] != event.edge_id
         ):
             return False
-        hits_by_edge.setdefault(event.edge_id, []).append(event)
 
-    tolerance = state.time_tolerance * 10.0
-    vertices = _loop_vertices(
-        loop, state.edges, state.current_time, state.epsilon
-    )
+        vertex_index = event.vertex_id
+        count = len(loop_edge_ids)
+        current_edge = loop_edge_ids[vertex_index]
+        next_edge = loop_edge_ids[(vertex_index + 1) % count]
+        previous_edge = loop_edge_ids[(vertex_index - 1) % count]
+        previous_previous_edge = loop_edge_ids[(vertex_index - 2) % count]
 
-    for edge_id, hits in hits_by_edge.items():
-        if len(hits) != 1:
+        candidates = []
+        # The hit vertex is the start endpoint of the collapsing current edge.
+        if (
+            current_edge in collapse_by_edge
+            and event.target_edge_id == next_edge
+            and next_edge not in collapse_by_edge
+        ):
+            candidates.append(current_edge)
+        # Or it is the end endpoint of the collapsing previous edge.
+        if (
+            previous_edge in collapse_by_edge
+            and event.target_edge_id == previous_previous_edge
+            and previous_previous_edge not in collapse_by_edge
+        ):
+            candidates.append(previous_edge)
+        if len(candidates) != 1:
             return False
-        hit = hits[0]
-        edge_index = loop_edge_ids.index(edge_id)
-        next_edge_id = loop_edge_ids[(edge_index + 1) % len(loop_edge_ids)]
-        if hit.target_edge_id != next_edge_id or next_edge_id in collapse_by_edge:
-            return False
 
-        collapse = collapse_by_edge[edge_id]
+        collapsed_edge_id = candidates[0]
+        if collapsed_edge_id in paired_hits:
+            return False
+        collapse = collapse_by_edge[collapsed_edge_id]
         if collapse.position is None:
             return False
+
+        edge_index = loop_edge_ids.index(collapsed_edge_id)
         start, end, _, length = _edge_segment(
             loop, edge_index, vertices, state.edges, state.current_time
         )
@@ -1103,21 +1124,22 @@ def _resolve_vertex_hit_on_collapsing_edge(
 
         event_point = collapse.position
         for point in (
-            hit.position,
-            vertices[edge_index].point,
+            event.position,
+            vertices[vertex_index].point,
             start,
             end,
         ):
             if hypot(point[0] - event_point[0], point[1] - event_point[1]) > tolerance:
                 return False
 
-        target = state.edges[next_edge_id]
+        target = state.edges[event.target_edge_id]
         residual = (
             _dot(target.normal, event_point)
             - target.offset_at(state.current_time)
         )
         if abs(residual) > tolerance:
             return False
+        paired_hits[collapsed_edge_id] = event
 
     collapsed = set(collapse_by_edge)
     remaining = tuple(
