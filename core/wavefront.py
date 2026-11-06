@@ -1163,20 +1163,28 @@ def build_wavefront_roof_surface(
         )
     except GeometryInputError as exc:
         if exc.code == "INTERNAL_OPEN_EDGE":
-            from .mesh import _mesh_edge_usage
+            from .mesh import _mesh_edge_usage, _point_on_boundary_segment
             usage = _mesh_edge_usage(faces)
             for (first, second), count in usage.items():
                 if count != 1:
                     continue
                 p, q = registry.vertices[first], registry.vertices[second]
-                incident_faces = [
-                    (face_index, slope_ids[face_index])
-                    for face_index, face in enumerate(faces)
-                    if first in face and second in face
-                ]
-                if "не является частью исходного контура" in exc.message:
+                matches = []
+                for boundary_index, boundary_start in enumerate(boundary_xy):
+                    boundary_end = boundary_xy[(boundary_index + 1) % len(boundary_xy)]
+                    if (
+                        _point_on_boundary_segment((p[0], p[1]), boundary_start, boundary_end, weld_tolerance * 5.0)
+                        and _point_on_boundary_segment((q[0], q[1]), boundary_start, boundary_end, weld_tolerance * 5.0)
+                    ):
+                        matches.append(boundary_index)
+                if len(matches) != 1:
+                    incident_faces = [
+                        (face_index, slope_ids[face_index])
+                        for face_index, face in enumerate(faces)
+                        if first in face and second in face
+                    ]
                     detail = (
-                        f" Открытое ребро ({p[0]:.6g}, {p[1]:.6g}, {p[2]:.6g}) → "
+                        f" Открытое внутреннее ребро ({p[0]:.6g}, {p[1]:.6g}, {p[2]:.6g}) → "
                         f"({q[0]:.6g}, {q[1]:.6g}, {q[2]:.6g}); "
                         f"инцидентные фасеты (face, source_slope): {incident_faces}."
                     )
