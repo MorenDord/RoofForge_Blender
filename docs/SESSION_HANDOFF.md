@@ -21,6 +21,14 @@
 
 Defer ridge/valley/hip profiles, standing seams, UV, LOD, export, detach/relink and complex material systems.
 
+## Latest continuation — multi-split topology
+
+After the validated single split and split+collapse handlers, the feature branch now contains a candidate resolver for **two or more same-time split events on one loop**. It does not trust stale edge IDs: each pending event is re-derived on the current child topology and matched by authored source-edge identity plus event position. Ambiguous, missing or geometrically shifted matches fail explicitly. Final child loops are revalidated for area, winding and simple-polygon topology before the state is committed.
+
+A dedicated test corpus fixture covers a symmetric 12-edge multi-notch contour with equal and variable pitches. The equal-pitch fixture also asserts that the initial topology actually exposes multiple split candidates, so this test exercises the multi-split path rather than merely adding another ordinary contour.
+
+**CI status for this continuation:** not yet counted as passing. The connected workflow API has not surfaced a new Actions run for the latest code commits, so no success claim is made yet.
+
 ## Current implementation on the feature branch
 
 ### Automatic object boundary
