@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: \${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
       - name: Compile Python sources
         run: python -m compileall -q core addon __init__.py
       - name: Run geometry tests
