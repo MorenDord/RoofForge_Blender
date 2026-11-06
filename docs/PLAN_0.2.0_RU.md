@@ -7,7 +7,7 @@
 
 ## User-confirmed priorities
 
-1. Support arbitrary **simple** polygon contours: convex, concave, narrow notches, non-uniform edge lengths and arbitrary vertex counts. Self-intersecting contours, zero-length projected edges and multiple independent boundary loops must be diagnosed, not silently repaired.
+1. Support **simple** polygon contours with up to 64 boundary edges: convex, concave, narrow notches and non-uniform edge lengths. More than 64 edges are outside the 0.2.0 target; self-intersecting contours, zero-length projected edges and multiple independent boundary loops must be diagnosed, not silently repaired.
 2. Do not require selecting vertices or edges in Edit Mode. Selecting the mesh object is enough; RoofForge discovers one outer boundary from the mesh topology. A face mesh uses its boundary edges; a wire-only mesh uses its closed wire loop.
 3. Give every boundary edge/slope its own pitch angle. Start with a compact list of numeric fields; a numbered top-view pitch map is not in this milestone.
 4. Pitch edits trigger a debounced live rebuild. Keep the last valid roof visible until the replacement is built and validated. Coalesce rapid changes; never regenerate inside a UI draw callback.
@@ -36,7 +36,7 @@ Benchmark separately:
 - Blender mesh datablock creation;
 - complete live rebuild.
 
-Use deterministic synthetic inputs at 8, 16, 32, 64 and 128 boundary edges, plus concave adversarial fixtures (L, U, narrow neck, repeated reflex vertices and near-simultaneous events). Record median and p95 wall time over repeated runs, peak triangle/face count and memory where practical. Run the benchmarks on the same CI runner so revisions are comparable.
+Use deterministic synthetic inputs at 8, 16, 32 and 64 boundary edges. **64 edges is the upper performance and acceptance target for 0.2.0; routine CI does not benchmark 128-edge contours.** Include concave adversarial fixtures (L, U, narrow neck, repeated reflex vertices and near-simultaneous events). Record median and p95 wall time over repeated runs, peak triangle/face count and memory where practical. Run the benchmarks on the same CI runner so revisions are comparable.
 
 Optimization requirements:
 - no global uniform four-way refinement of the whole polygon at every depth;
@@ -68,7 +68,7 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [ ] Per-edge pitch values remain mapped to the correct source edge after rebuilds.
 - [ ] Changing a pitch causes one debounced live update; rapid changes do not queue unbounded builds.
 - [ ] A failed update leaves the last valid output unchanged.
-- [ ] Performance baselines exist at 8–128 edges; preview and final thresholds are defined from measured results.
+- [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
 - [ ] No overhang/eaves generator, ridge/valley/hip, seam, UV, LOD or export controls are included.
 - [ ] Blender 5.0.1 background smoke and official extension package validation pass; manual viewport QA remains a separate gate.
 
