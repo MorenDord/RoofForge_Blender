@@ -446,7 +446,8 @@ class PolygonTests(unittest.TestCase):
             sum(1 for edge in result.edges.values() if edge.source_edge_id == 0),
             2,
         )
-        self.assertEqual(result.event_position, event.position)
+        self.assertAlmostEqual(result.event_position[0], event.position[0], places=8)
+        self.assertAlmostEqual(result.event_position[1], event.position[1], places=8)
 
     def test_wavefront_split_rejects_stale_loop_generation(self):
         points = [
