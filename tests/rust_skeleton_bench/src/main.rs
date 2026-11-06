@@ -53,6 +53,7 @@ fn extract_and_validate_roof(
     time_to_z: f64,
 ) -> Result<(usize, usize, f64), String> {
     let mut top_faces: Vec<(usize, Vec<RoofPoint>)> = Vec::new();
+    let mut degenerate_sources = Vec::new();
     let halfedges = skeleton.halfedges();
     let nodes = skeleton.nodes();
 
@@ -89,14 +90,18 @@ fn extract_and_validate_roof(
                 break;
             }
         }
-        if source_edge >= points.len() || loop_points.len() < 3 {
-            return Err(format!("invalid source face {source_edge} with {} vertices", loop_points.len()));
+        if source_edge >= points.len() {
+            return Err(format!("source face references invalid boundary edge {source_edge}"));
+        }
+        if loop_points.len() < 3 || signed_area(&loop_points.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>()).abs() <= 1.0e-12 {
+            degenerate_sources.push(source_edge);
+            continue;
         }
         top_faces.push((source_edge, loop_points));
     }
 
-    if top_faces.len() != points.len() {
-        return Err(format!("expected {} source facets, got {}", points.len(), top_faces.len()));
+    if top_faces.is_empty() {
+        return Err("weighted skeleton returned no non-degenerate roof facets".to_string());
     }
 
     let signed_footprint = signed_area(points);
@@ -106,6 +111,7 @@ fn extract_and_validate_roof(
     let mut edge_uses: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
     let mut boundary_source_edges = BTreeMap::<usize, usize>::new();
     let mut boundary_directed = Vec::<(usize, usize)>::new();
+    let mut boundary_intervals = vec![Vec::<(f64, f64)>::new(); points.len()];
     let mut max_plane_residual = 0.0f64;
 
     for (source, face) in &top_faces {
@@ -149,6 +155,9 @@ fn extract_and_validate_roof(
                 {
                     boundary_source_edges.insert(*source, 1);
                     boundary_directed.push((p.node_id, q.node_id));
+                    let t0 = dot_p / (length * length);
+                    let t1 = dot_q / (length * length);
+                    boundary_intervals[*source].push((t0.min(t1), t0.max(t1)));
                 }
             }
         }
@@ -159,11 +168,18 @@ fn extract_and_validate_roof(
             "projected coverage mismatch: roof {projected_area:.12}, outline {footprint_area:.12}"
         ));
     }
-    if boundary_source_edges.len() != points.len() {
-        return Err(format!(
-            "boundary coverage mismatch: {}/{} source edges touched",
-            boundary_source_edges.len(), points.len()
-        ));
+    for (edge_id, intervals) in boundary_intervals.iter_mut().enumerate() {
+        intervals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut covered = 0.0f64;
+        for (low, high) in intervals.iter().copied() {
+            if low > covered + 1.0e-7 {
+                return Err(format!("boundary edge {edge_id} has a gap at t={covered:.6} before {low:.6}; degenerate source facets={degenerate_sources:?}"));
+            }
+            covered = covered.max(high);
+        }
+        if covered < 1.0 - 1.0e-7 {
+            return Err(format!("boundary edge {edge_id} is only covered to t={covered:.6}; degenerate source facets={degenerate_sources:?}"));
+        }
     }
 
     for (edge, uses) in &edge_uses {
@@ -228,6 +244,10 @@ fn extract_and_validate_roof(
         return Err(format!("closed shell edge {}-{} has {} uses", edge.0, edge.1, uses));
     }
 
+    if !degenerate_sources.is_empty() {
+        return Err(format!("degenerate source facets {:?} were omitted although boundary coverage passed", degenerate_sources));
+    }
+
     Ok((top_faces.len(), used_nodes.len(), max_plane_residual))
 }
 
@@ -237,7 +257,16 @@ fn run_points_case(
     pitches_degrees: &[f64],
     repeats: usize,
 ) {
+    let mut points = points.to_vec();
+    let mut pitches_degrees = pitches_degrees.to_vec();
     let count = points.len();
+    if signed_area(&points) < 0.0 {
+        let old_pitches = pitches_degrees.clone();
+        points.reverse();
+        pitches_degrees = (0..count)
+            .map(|index| old_pitches[(count + count - 2 - index) % count])
+            .collect();
+    }
     let variable_pitch = pitches_degrees.iter().any(|value| {
         (*value - pitches_degrees[0]).abs() > 1.0e-9
     });
@@ -255,9 +284,8 @@ fn run_points_case(
         .map(|pitch| 1.0 / pitch.to_radians().tan())
         .collect();
 
-    let label_is_cw = signed_area(points) < 0.0;
-    // Equal weights can be scaled globally, so use the canonical polygon API
-    // for equal pitch. Per-edge pitches use the weighted PSLG path.
+    // Inputs are normalized to CCW above. Equal weights can be scaled
+    // globally; per-edge pitches use the weighted PSLG path.
     let (input_pslg, input_polygon) = if variable_pitch {
         match Pslg::from_flat(points, &edges, Some(&weights)) {
             Ok(value) => (Some(value), None),
@@ -276,9 +304,7 @@ fn run_points_case(
         }
     };
 
-    let options = Options {
-        components: ComponentMode::Index(if label_is_cw { 1 } else { 0 }),
-    };
+    let options = Options { components: ComponentMode::Index(0) };
     let z_scale = if variable_pitch { 1.0 } else { weights[0] };
     let speeds = if variable_pitch { weights.clone() } else { vec![1.0; count] };
 
