@@ -1061,6 +1061,116 @@ def run_weighted_wavefront(
     )
 
 
+
+def build_wavefront_roof_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    *,
+    eps: float = 1e-9,
+    max_event_batches: int = 10000,
+):
+    """Assemble and validate welded roof facets from a completed wavefront trace.
+
+    The result is the same RoofSurface payload used by the existing shell
+    builder. This function remains pure Python and is not yet wired into bpy.
+    """
+    from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
+    from .planes import build_boundary_planes
+
+    trace = run_weighted_wavefront(
+        points, pitches_degrees, eps=eps,
+        max_event_batches=max_event_batches,
+        require_area_coverage=True,
+    )
+    boundary_xy = tuple((point[0], point[1]) for point in points)
+    source_area = abs(signed_area(boundary_xy))
+    scale = max(
+        1.0,
+        max(point[0] for point in points) - min(point[0] for point in points),
+        max(point[1] for point in points) - min(point[1] for point in points),
+        max(point[2] for point in points) - min(point[2] for point in points),
+    )
+    weld_tolerance = max(1e-12, eps * scale * 100.0)
+    area_tolerance = max(eps * scale * scale * 100.0, source_area * 1e-7)
+    planes = build_boundary_planes(points, pitches_degrees, eps)
+
+    registry = _VertexRegistry(weld_tolerance)
+    faces: list[tuple[int, ...]] = []
+    slope_ids: list[int] = []
+    face_keys: set[tuple[int, ...]] = set()
+
+    for fragment in trace.facets:
+        if not (0 <= fragment.source_edge_id < len(planes)):
+            raise GeometryInputError(
+                "INVALID_SOURCE_SLOPE_ID",
+                f"Фрагмент ссылается на неизвестный исходный скат {fragment.source_edge_id}."
+            )
+        indices = [registry.add(point) for point in fragment.vertices]
+        compact: list[int] = []
+        for index in indices:
+            if not compact or compact[-1] != index:
+                compact.append(index)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            continue
+
+        projected = [(registry.vertices[index][0], registry.vertices[index][1]) for index in compact]
+        signed = signed_area(projected)
+        if abs(signed) <= area_tolerance:
+            continue
+        if signed < 0.0:
+            compact.reverse()
+            projected.reverse()
+
+        plane = planes[fragment.source_edge_id]
+        for vertex_index in compact:
+            x, y, z = registry.vertices[vertex_index]
+            expected_z = plane.height(x, y)
+            if abs(expected_z - z) > max(weld_tolerance * 20.0, eps * scale * 1000.0):
+                raise GeometryInputError(
+                    "FACET_PLANE_MISMATCH",
+                    f"Фрагмент ската {fragment.source_edge_id + 1} отклоняется от плоскости на "
+                    f"{abs(expected_z - z):.9g}."
+                )
+
+        key = tuple(sorted(compact))
+        if key in face_keys:
+            raise GeometryInputError(
+                "DUPLICATE_WAVEFRONT_FACET",
+                "Волновой фронт сформировал две одинаковые фасеты."
+            )
+        face_keys.add(key)
+        faces.append(tuple(compact))
+        slope_ids.append(fragment.source_edge_id)
+
+    if not faces:
+        raise GeometryInputError("EMPTY_WAVEFRONT_SURFACE", "После объединения фасет не осталось граней.")
+
+    surface_area = sum(
+        abs(signed_area([(registry.vertices[i][0], registry.vertices[i][1]) for i in face]))
+        for face in faces
+    )
+    if abs(surface_area - source_area) > area_tolerance:
+        raise GeometryInputError(
+            "WAVEFRONT_MESH_COVERAGE_MISMATCH",
+            f"Собранная сетка покрывает {surface_area:.9g} из {source_area:.9g} единиц площади."
+        )
+
+    validate_surface_boundary_edges(
+        registry.vertices, faces, boundary_xy, weld_tolerance * 5.0
+    )
+    return RoofSurface(
+        vertices=tuple(registry.vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(slope_ids),
+        planes=tuple(planes),
+        source_area_xy=source_area,
+        surface_area_xy=surface_area,
+        boundary_xy=boundary_xy,
+    )
+
+
 def simulate_convex_wavefront(points: Sequence[Point3], pitches_degrees: Sequence[float],
                               eps: float = 1e-9, max_events: int = 10000) -> WavefrontTrace:
     """Simulate a strictly convex constant-height contour to its first terminal wavefront.
