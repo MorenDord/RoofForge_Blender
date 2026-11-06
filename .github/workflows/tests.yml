@@ -76,3 +76,19 @@ jobs:
           path: benchmark-results.json
           if-no-files-found: error
           retention-days: 30
+  rust-skeleton-candidate:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Benchmark weighted Rust skeleton candidate
+        run: |
+          set -o pipefail
+          cargo run --release --manifest-path tests/rust_skeleton_bench/Cargo.toml | tee rust-skeleton-bench.csv
+      - name: Upload Rust candidate benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-skeleton-candidate
+          path: rust-skeleton-bench.csv
+          if-no-files-found: error
+          retention-days: 30
