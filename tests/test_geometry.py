@@ -738,6 +738,11 @@ class PolygonTests(unittest.TestCase):
             (3.0, 2.0, base_z), (2.0, 4.0, base_z),
             (0.0, 4.0, base_z),
         ]
+        trace = run_weighted_wavefront(points, [45.0] * len(points))
+        print("ELEVATED TRACE", trace.terminal_time, trace.terminal_kind, trace.projected_facet_area)
+        print("ELEVATED EVENTS", [(e.kind.value, e.time, e.edge_id, e.vertex_id, e.target_edge_id, e.position) for e in trace.events])
+        for i, fragment in enumerate(trace.facets):
+            print("ELEVATED FACET", i, fragment.source_edge_id, fragment.start_time, fragment.end_time, fragment.vertices)
         surface = build_wavefront_roof_surface(points, [45.0] * len(points))
         self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
         self.assertTrue(all(vertex[2] >= base_z - 1e-8 for vertex in surface.vertices))
