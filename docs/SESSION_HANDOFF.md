@@ -68,7 +68,7 @@ Implemented:
 - Wavefront supports **constant-Z eaves only**. Mixed-height eaves need a separate generalized 3D formulation.
 - L/U have been verified for the listed equal-pitch and specifically constrained asymmetric fixtures. This is not arbitrary mixed-pitch L/U support.
 - The ordinary cross-needle resolver accepts unequal opposing speeds only when complete finite segments coincide endpoint-to-endpoint at the same event height. A constrained same-loop batch of exactly one strict split plus one edge collapse is also supported; the split point and collapse point delimit the terminal partial segment. Generic partial overlaps, multiple overlap intervals and arbitrary surviving tails remain unsupported.
-- The compound event is not a general simultaneous-event resolver. It does not yet support multiple splits, additional collapses in the same batch or higher-order vertex collisions. Distinct-time event pairs after a topology change still need explicit end-to-end adversarial fixtures and stale-queue verification.
+- The compound event is not a general simultaneous-event resolver. It does not yet support multiple splits, additional collapses in the same batch or higher-order vertex collisions. Two asymmetric L fixtures now verify distinct-time continuation in both orders: the later batch occurs beyond the queue batching tolerance, references the live child-loop generation and only active edge instances. Do not generalize this evidence to arbitrary topologies.
 - The surface assembler retains narrow fragments, but the final shell validator rejects any face below its scale-aware area threshold. Very narrow sliver fixtures are therefore explicitly rejected rather than silently simplified.
 - Multiple independent split events on one loop, nested split sequences and higher-order vertex collisions are not generally resolved.
 - Geometric self-intersection checking is not implemented yet.
@@ -78,10 +78,10 @@ Implemented:
 
 Extend beyond the **constrained one-split/one-collapse batch** without broadening support claims prematurely.
 
-1. Add a distinct-time split/collapse fixture where the event-time delta is safely above the queue's numerical batching tolerance. Process the first event, assert the old loop generation and stale candidates cannot mutate the replacement topology, and confirm the second event is recomputed on the new child loop(s).
-2. Cover both event orders (collapse first and split first) with exact event logs, monotonic time, source-plane membership, projected coverage, perimeter-chain continuity and full shell manifold validation.
-3. Implement generic partial-overlap opposing-front events, including overlap endpoints, multiple intervals and surviving tails. Until each topology is fully derived, reject it with a stable diagnostic.
-4. Then handle multiple independent splits on one loop, nested split sequences and higher-order vertex collisions.
+1. Implement generic partial-overlap opposing-front events beyond the constrained one-split/one-collapse case: calculate overlap endpoints, handle multiple intervals and preserve/reconstruct surviving tails. Until a topology is fully derived, reject it with a stable diagnostic.
+2. Add multiple independent splits on one loop and verify disjoint split chords, stable edge/source IDs, child-loop winding and no event loss.
+3. Expand simultaneous-event coverage to additional collapse participants and higher-order vertex collisions; stale queue entries must never mutate new topology.
+4. Broaden adversarial fixtures: narrow necks, multiple notches, acute corners, nearly parallel edges and seeded randomized simple polygons.
 5. Keep the face-area validator unchanged; report sub-tolerance slivers as unsupported geometry.
 6. Keep mixed-Z eaves out of this 2D solver. Do not connect the alpha to the Blender generator until the broader geometry gate passes.
 
