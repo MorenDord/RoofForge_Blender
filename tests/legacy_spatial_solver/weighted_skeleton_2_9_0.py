@@ -918,8 +918,15 @@ def _merge_face_patches(patches, scale):
     all_points = list(unique_points.values())
 
     # Index projected XY positions; all final segment-distance checks
-    # still use XYZ. The 2D grid cuts per-cell lookup from 27 neighbours to 9.
-    cell_size = max(tolerance * 10.0, scale / 12.0)
+    # still use XYZ. Derive the grid scale from patch coordinates rather than
+    # the caller's tolerance argument: some arrangement paths pass a weld
+    # tolerance where the sweep solver passes the plan's full linear scale.
+    xy_extent = max(
+        max(point[0] for point in all_points) - min(point[0] for point in all_points),
+        max(point[1] for point in all_points) - min(point[1] for point in all_points),
+        tolerance * 100.0,
+    )
+    cell_size = max(tolerance * 10.0, xy_extent / 12.0)
     point_grid = defaultdict(list)
     for point_id, point in enumerate(all_points):
         cell = (int(math.floor(point[0] / cell_size)),
