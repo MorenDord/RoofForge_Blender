@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested equal- and unequal-speed L/U cross-needle terminal events when full opposing segments coincide at the event height, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 58 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a strict reflex split, tested L/U cross-needle terminals, and one constrained same-loop simultaneous split-plus-collapse topology. In that compound event, the split partitions the target front; a validated terminal partial segment becomes a skeleton arc while the surviving child loop continues. It validates finite needle segments and explicitly rejects unsupported partial-overlap terminal configurations. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures and two constrained asymmetric L split/collapse cases. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 61 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -25,9 +25,13 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 - [x] Swept facet-fragment and skeleton-arc collection
 - [x] Single reflex split with child-loop replacement and stale event invalidation
 - [x] Tested L/U cross-needle terminal events with unequal opposing speeds when finite segments coincide exactly at the event height
+- [x] Restricted same-loop simultaneous strict split + one edge-collapse resolver; validates child topology transactionally and permits the resulting terminal partial needle only when its event endpoints lie on both coincident fronts
+- [x] Finite-segment endpoint validation for ordinary two-front needle termination; reject partial overlap rather than misclassifying it as a full needle
 - [x] T-junction conformance and welded facet assembly into RoofSurface
 - [ ] Complete weighted straight-skeleton solver for arbitrary concave contours and all simultaneous/parallel event classes
-- [ ] Partial-overlap unequal-speed needle events, split/collapse event ordering and higher-order vertex-event resolution
+- [ ] General partial-overlap opposing-front resolver, including multiple overlap intervals and surviving tails not represented by the constrained split/collapse fixture
+- [ ] Sequential near-simultaneous split/collapse cases where the events are distinct in time and topology changes between them
+- [ ] Multiple independent splits on one loop, nested split sequences and higher-order vertex-event resolution
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
@@ -82,4 +86,4 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Integrate the event queue, edge-collapse update and split-loop operation into a multi-loop simulation state machine. Advance every live loop to the globally earliest event, collect source-edge facet fragments, invalidate stale events after every topology change, and explicitly resolve or reject needle/simultaneous cases. Keep the finite-segment distance field as a comparator, not a production substitute. Do not connect to Blender until exact facet and manifold tests pass.
+Extend same-loop topology handling beyond the verified one-split/one-collapse batch. First cover two independently timed events after a topology change and prove that newly scheduled candidates—not stale pre-split candidates—control the next step. Then support multiple independent splits on one loop and generic partial-overlap needle segments with explicit surviving-tail topology. Keep exact source-plane, coverage, boundary-chain, T-junction and closed-shell manifold checks. Treat sub-tolerance sliver faces as rejected geometry, not as a reason to weaken validation. Keep mixed-height eaves out of this solver and do not connect it to Blender until the broader event suite passes.
