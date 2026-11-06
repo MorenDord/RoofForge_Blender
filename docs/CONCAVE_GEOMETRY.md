@@ -66,20 +66,33 @@ Therefore:
 - do not silently feed mixed-Z eaves into the flat-eave wavefront solver;
 - investigate a generalized 3D event formulation or another mathematically equivalent construction before claiming concave + mixed-height eaves support.
 
-## 2.5 Implemented wavefront slice (2026-11-06)
+## 2.5 Implemented wavefront alpha (2026-11-06)
 
-`core/wavefront.py` now contains the first executable slice:
-- `build_moving_lines`: validates constant-Z eaves and maps each pitch to positive inward speed `cot(pitch)`;
-- `_line_intersection`: solves moving-line intersection and constant vertex velocity;
-- `_edge_collapse_events`: calculates future edge-collapse times;
-- `find_split_candidates`: detects reflex-vertex hits on finite target segments and distinguishes interior hits from endpoint hits;
-- `WavefrontEventQueue`: deterministic event ordering, same-time batching and lazy invalidation using edge/loop generation stamps;
-- `apply_split_event`: revalidates the event and returns two child loops after splitting the target into two edge instances retaining its source-edge identity;
-- `simulate_convex_wavefront`: restricted convex-contour simulation with lifted planar facet fragments and needle/point terminal handling.
+`core/wavefront.py` now includes a working pure-Python global wavefront-to-surface path for a deliberately bounded fixture set:
 
-A V-notched contour fixture now verifies that a genuine non-parallel split creates two valid child loops. A parallel-edge L fixture is a different degeneracy and must not be forced through that simple split operation.
+1. **Moving lines and time:** one moving line per source boundary edge; speed is `cot(pitch)`; event time is absolute local Z, with a stored base-eave height. Negative and positive local eave elevations are valid; all eaves must share one Z.
+2. **Kinematics and events:** 2x2 moving-line intersections, constant vertex velocities, edge-collapse candidates and reflex split candidates validated against finite live segments.
+3. **Event queue:** one deterministic priority queue, near-simultaneous batching and stale-event invalidation using both edge generations and loop generations.
+4. **Topology changes:** a strict interior split creates two child loops and two edge instances that preserve the target's source-slope identity. The global state machine advances all active loops to the earliest queued event.
+5. **L/U terminal nodes:** a restricted cross-needle resolver handles one or more reflex vertices hitting adjacent target-edge endpoints in the same event batch, provided every remaining finite wavefront segment pairs with an opposite coincident segment of matching speed. Those segment pairs become skeleton arcs.
+6. **Facet collection and assembly:** every active source edge produces swept planar fragments between event heights; moving vertices produce skeleton arcs. The assembler welds 3D points, checks each fragment against its original plane, inserts intermediate vertices along T-junction edges, validates projected coverage and requires every open upper-surface edge to match the original perimeter.
+7. **Solid shell:** the resulting `RoofSurface` passes through the existing roof-shell builder and edge/vertex manifold validator.
 
-**Not implemented yet:** one global simulator that advances several loops together, processes a queue containing both collapse and split events, resolves all simultaneous/needle cases, records all skeleton arcs and returns a complete manifold concave roof mesh. The wavefront code remains a pure-Python research/alpha subsystem and is not connected to the Blender generation operator.
+### Verified fixtures
+- Rectangle: point and needle terminal events.
+- V-notch: one reflex split; both equal pitches and one asymmetric per-edge pitch set.
+- L contour: one cross-needle terminal node, equal pitches; also tested with reversed contour winding.
+- U contour: two endpoint-hit groups and three terminal needle arcs, equal pitches.
+- Nonzero constant eave elevation (the split edge copies must preserve their base height).
+- Closed shell with roof-local global `-Z` thickness.
+
+Latest pure-Python CI: **54 tests passed on Python 3.11 and 3.13**. See the latest run linked from `SESSION_HANDOFF.md`.
+
+### Known limitations
+- This is not a general solution for every simple concave polygon. Arbitrary simultaneous split batches, higher-order vertex collisions, and unequal-speed opposing needle pairs still require dedicated resolvers.
+- L/U support is verified only for the listed equal-pitch cross-needle fixtures; unequal pitch combinations may produce a different event topology and must currently fail explicitly.
+- Mixed-height eaves are not supported by this 2D wavefront formulation.
+- The code is not connected to the Blender generation operator and has not been runtime-tested inside Blender 5.0.
 
 ## 3. Experimental comparison path
 
