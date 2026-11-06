@@ -1,6 +1,6 @@
 # RoofForge 1.0 — Concave Roof Geometry Research
 
-**Status:** Research/implementation decision record  
+**Status:** Research and implementation decision record  
 **Updated:** 2026-11-06  
 **Branch:** `develop`
 
@@ -65,6 +65,21 @@ Therefore:
 - keep the existing 3D plane builder for convex roofs where its plane-envelope model is valid;
 - do not silently feed mixed-Z eaves into the flat-eave wavefront solver;
 - investigate a generalized 3D event formulation or another mathematically equivalent construction before claiming concave + mixed-height eaves support.
+
+## 2.5 Implemented wavefront slice (2026-11-06)
+
+`core/wavefront.py` now contains the first executable slice:
+- `build_moving_lines`: validates constant-Z eaves and maps each pitch to positive inward speed `cot(pitch)`;
+- `_line_intersection`: solves moving-line intersection and constant vertex velocity;
+- `_edge_collapse_events`: calculates future edge-collapse times;
+- `find_split_candidates`: detects reflex-vertex hits on finite target segments and distinguishes interior hits from endpoint hits;
+- `WavefrontEventQueue`: deterministic event ordering, same-time batching and lazy invalidation using edge/loop generation stamps;
+- `apply_split_event`: revalidates the event and returns two child loops after splitting the target into two edge instances retaining its source-edge identity;
+- `simulate_convex_wavefront`: restricted convex-contour simulation with lifted planar facet fragments and needle/point terminal handling.
+
+A V-notched contour fixture now verifies that a genuine non-parallel split creates two valid child loops. A parallel-edge L fixture is a different degeneracy and must not be forced through that simple split operation.
+
+**Not implemented yet:** one global simulator that advances several loops together, processes a queue containing both collapse and split events, resolves all simultaneous/needle cases, records all skeleton arcs and returns a complete manifold concave roof mesh. The wavefront code remains a pure-Python research/alpha subsystem and is not connected to the Blender generation operator.
 
 ## 3. Experimental comparison path
 
