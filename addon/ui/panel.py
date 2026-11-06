@@ -18,9 +18,11 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col.prop(settings, "pitch_default")
 
         col.separator()
+        col.label(text="Solid shell")
+        col.prop(settings, "thickness")
         col.operator("roof_forge.validate_input", icon="CHECKMARK")
-        col.operator("roof_forge.generate_surface", icon="MESH_PLANE")
+        col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
         col.separator()
-        col.label(text="Alpha: open upper surface only", icon="INFO")
-        col.label(text="No thickness, overhang or live link yet")
+        col.label(text="Thickness is extruded along local -Z", icon="INFO")
+        col.label(text="Per-slope pitch map and live link are next")
