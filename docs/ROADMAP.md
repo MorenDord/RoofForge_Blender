@@ -14,7 +14,7 @@ The initial geometry vertical slice now builds a closed solid shell for a verifi
 - [x] Simple XY contour validation and winding detection
 - [x] Plane construction from ordered 3D boundary edges and per-edge pitch values
 - [x] Deterministic ear-clipping for simple concave contours without collinear vertices
-- [x] Restricted lower-envelope partition for concave contours
+- [x] Experimental concave arrangement partition (cell-area tests only; not yet accepted as continuous roof geometry)
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
