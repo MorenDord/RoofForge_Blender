@@ -18,7 +18,7 @@ from core.wavefront import (
     build_wavefront_roof_surface,
     collect_loop_events, create_wavefront_state, find_split_candidates,
     run_weighted_wavefront,
-    simulate_convex_wavefront, _line_intersection,
+    simulate_convex_wavefront, _line_intersection, _resolve_edge_collapse_group,
 )
 
 
@@ -849,6 +849,61 @@ class PolygonTests(unittest.TestCase):
              if event.kind == EventKind.SPLIT_CANDIDATE},
             {(3, 0)},
         )
+
+    def test_wavefront_l_shape_resolves_simultaneous_split_collapse_batches(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        scenarios = (
+            # The right-side cross-needle is first: split 3 -> edge 5,
+            # simultaneous with collapse of edge 4.
+            [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7],
+            # The bottom cross-needle is first: split 3 -> edge 0,
+            # simultaneous with collapse of edge 1.
+            [0.8, 1.0, 1.2, 1.2998, 1.0, 0.7],
+        )
+        for speeds in scenarios:
+            pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+            state = create_wavefront_state(points, pitches)
+            batch = advance_wavefront_state(state)
+            self.assertIsNotNone(batch)
+            self.assertEqual(
+                {event.kind for event in batch.events},
+                {EventKind.SPLIT_CANDIDATE, EventKind.EDGE_COLLAPSE},
+            )
+            self.assertEqual(len(state.loops), 1)
+            self.assertTrue(state.terminal_loops)
+
+            while not state.is_complete:
+                advance_wavefront_state(state)
+
+            trace = run_weighted_wavefront(points, pitches)
+            self.assertTrue(trace.is_complete)
+            self.assertAlmostEqual(trace.projected_facet_area, 7.0, places=6)
+            surface = build_wavefront_roof_surface(points, pitches)
+            self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
+            shell = build_roof_shell(surface, 0.10)
+            self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_rejects_partial_overlap_as_complete_needle(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        speeds = [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        state = create_wavefront_state(points, pitches)
+        loop = state.loops[0]
+        state.current_time = 1.0 / (speeds[3] + speeds[5])
+        fake_collapse_batch = tuple(
+            WavefrontEvent(EventKind.EDGE_COLLAPSE, state.current_time, loop.loop_id,
+                           edge_id=edge_id)
+            for edge_id in (0, 1, 2, 4)
+        )
+        with self.assertRaises(GeometryInputError) as ctx:
+            _resolve_edge_collapse_group(state, loop, fake_collapse_batch)
+        self.assertEqual(ctx.exception.code, "PARTIAL_OVERLAP_NEEDLE_UNRESOLVED")
 
 
 if __name__ == "__main__":
