@@ -35,7 +35,6 @@ def validate_closed_mesh(vertices: Sequence[Point3], faces: Sequence[Face],
     max_values = [max(point[axis] for point in vertices) for axis in range(3)]
     scale = max(1.0, sqrt(sum((max_values[i] - min_values[i]) ** 2 for i in range(3))))
     length_eps = eps * scale
-    area_eps = eps * scale * scale
 
     edge_uses: dict[tuple[int, int], list[tuple[int, int, int]]] = defaultdict(list)
     vertex_neighbors: dict[int, set[int]] = defaultdict(set)
@@ -68,14 +67,23 @@ def validate_closed_mesh(vertices: Sequence[Point3], faces: Sequence[Face],
         face_keys.add(face_key)
 
         # Newell's formula gives a stable area vector for planar n-gons.
+        # Compare against the global linear-coordinate tolerance multiplied
+        # by this face's own longest edge. A global scale^2 threshold rejects
+        # small but well-shaped local facets on otherwise large meshes.
         nx = ny = nz = 0.0
+        max_edge_length_sq = 0.0
         for local_index, current_index in enumerate(face):
             current = vertices[current_index]
             nxt = vertices[face[(local_index + 1) % len(face)]]
             nx += (current[1] - nxt[1]) * (current[2] + nxt[2])
             ny += (current[2] - nxt[2]) * (current[0] + nxt[0])
             nz += (current[0] - nxt[0]) * (current[1] + nxt[1])
+            edge_length_sq = sum(
+                (current[axis] - nxt[axis]) ** 2 for axis in range(3)
+            )
+            max_edge_length_sq = max(max_edge_length_sq, edge_length_sq)
         area = 0.5 * sqrt(nx * nx + ny * ny + nz * nz)
+        area_eps = length_eps * sqrt(max_edge_length_sq)
         if area <= area_eps:
             diagnostics.append(Diagnostic(
                 "ZERO_AREA_FACE", f"Грань {face_index} имеет нулевую или слишком малую площадь."
