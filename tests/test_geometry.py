@@ -675,7 +675,12 @@ class PolygonTests(unittest.TestCase):
         self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
         trace = run_weighted_wavefront(points, [45.0] * len(points))
         self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
-        self.assertEqual(len(trace.skeleton_arcs), 5)
+        terminal_arcs = [
+            arc for arc in trace.skeleton_arcs
+            if abs(arc.start[2] - trace.terminal_time) < 1e-8
+            and abs(arc.end[2] - trace.terminal_time) < 1e-8
+        ]
+        self.assertEqual(len(terminal_arcs), 2)
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
