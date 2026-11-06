@@ -247,9 +247,9 @@ class _WaveVertex:
                 # the event so the topology update cannot select a sibling
                 # segment with the same original edge id.
                 try:
-                    for edge_id, segment_start, segment_end, point_a, point_b in self.lav.slav.active_segments(event_time):
-                        if edge_id != edge.index:
-                            continue
+                    for segment_start, segment_end, point_a, point_b in (
+                        self.lav.slav.active_segments_for_edge(edge.index, event_time)
+                    ):
                         segment_length = abs(point_b - point_a)
                         tolerance = max(1.0e-7, segment_length * 1.0e-7)
                         if _point_strictly_on_segment(hit, point_a, point_b, tolerance):
@@ -385,17 +385,37 @@ class _SLAV:
             _OriginalEdge(vertex.edge_left, vertex.prev.bisector, vertex.bisector)
             for vertex in lav
         ]
+        self._segments_by_edge = {}
+        self._rebuild_segment_index()
 
-    def active_segments(self, time):
-        result = []
+    def _rebuild_segment_index(self):
+        """Index live finite wavefront segments by original edge id."""
+        by_edge = defaultdict(list)
         for lav in self.lavs:
             for vertex in lav:
                 next_vertex = vertex.next
                 edge = vertex.edge_right
                 if edge.index != next_vertex.edge_left.index:
                     raise SkeletonError("Straight skeleton: нарушена связность wavefront-рёбер.")
-                result.append((edge.index, vertex, next_vertex,
-                               vertex.position_at(time), next_vertex.position_at(time)))
+                by_edge[edge.index].append((vertex, next_vertex))
+        self._segments_by_edge = dict(by_edge)
+
+    def active_segments_for_edge(self, edge_id, time):
+        """Return only live descendants of one original boundary edge."""
+        return [
+            (vertex, next_vertex, vertex.position_at(time), next_vertex.position_at(time))
+            for vertex, next_vertex in self._segments_by_edge.get(int(edge_id), ())
+            if vertex.valid and next_vertex.valid and vertex.next is next_vertex
+        ]
+
+    def active_segments(self, time):
+        result = []
+        for edge_id, segments in self._segments_by_edge.items():
+            for vertex, next_vertex in segments:
+                result.append((
+                    edge_id, vertex, next_vertex,
+                    vertex.position_at(time), next_vertex.position_at(time)
+                ))
         return result
 
     def handle_edge_event(self, event, projected_edge_events=False):
@@ -405,11 +425,13 @@ class _SLAV:
             self.lavs.remove(lav)
             for vertex in list(lav):
                 vertex.invalidate()
+            self._rebuild_segment_index()
             return []
 
         replacement = lav.unify(
             event.vertex_a, event.vertex_b, event.intersection_point, event.distance
         )
+        self._rebuild_segment_index()
         next_event = replacement.next_event(event.distance, projected_edge_events)
         return [next_event] if next_event is not None else []
 
@@ -501,6 +523,7 @@ class _SLAV:
                     vertex.invalidate()
 
         event.vertex.invalidate()
+        self._rebuild_segment_index()
         events = []
         for head in new_heads:
             next_event = head.next_event(event.distance, projected_edge_events)
