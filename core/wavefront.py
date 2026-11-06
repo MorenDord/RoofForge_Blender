@@ -1617,9 +1617,9 @@ def advance_wavefront_state(
 ) -> EventBatch | None:
     """Advance all live loops to and process the globally earliest event batch.
 
-    Independent loops may process events at the same time. Events of different
-    kinds on the same loop at the same instant are rejected until a dedicated
-    simultaneous-event resolver is implemented.
+    Independent loops may process events at the same time. A same-loop
+    batch is resolved only when every topology mutation is explicitly
+    revalidated; unsupported mixed event groups fail without partial output.
     """
     if state.is_complete:
         return None
