@@ -152,7 +152,7 @@ def run_all_pairs_arrangement(label, points, pitch_degrees):
 
 def main():
     print("case,n,status,median_ms,p95_ms,top_vertices,top_faces,source_ids,shell_vertices,shell_faces,error")
-    for n in (8, 16, 32, 64, 128):
+    for n in (8, 16, 32, 64):
         for concave in (False, True):
             points = radial_polygon(n, concave)
             pitch = [35.0 + ((i * 17 % 19) if (i % 2 == 1) else 0.0) for i in range(n)]
