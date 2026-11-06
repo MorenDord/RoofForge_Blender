@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice now builds a closed solid shell for verified continuous/convex roof surfaces. Pure-Python CI covers plane construction, rectangle surface winding and manifold shell generation. L/U arrangements are still experimental: if they create an internal open edge, RoofForge rejects the surface before creating an object. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice now builds a closed solid shell for a verified rectangular fixture. Pure-Python CI covers plane construction, top-face winding, global-Z shell thickness, boundary continuity, and edge/vertex manifold validation. L/U arrangements are still experimental: if they create an internal open edge, RoofForge rejects the surface before creating an object. Blender 5.0 runtime validation remains pending. Latest recorded CI run passed 21 tests on Python 3.11 and 3.13.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -18,13 +18,14 @@ The initial geometry vertical slice now builds a closed solid shell for verified
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
-- [x] Closed solid shell for continuous convex fixtures; thickness extrudes along roof-local -Z
+- [x] Closed solid shell for the verified rectangle fixture; thickness extrudes along roof-local -Z
 - [ ] Continuous concave L/U surface solver; current invalid outputs are rejected safely
-- [ ] Full boundary-loop and non-manifold vertex validator
+- [x] Closed-mesh edge/vertex-link validator (boundary edges, edge incidence, winding, connected components, bow-tie vertices)
+- [ ] Geometric self-intersection detection and zero-area diagnostics integrated into the Blender UI
 - [ ] Robust handling of collinear and near-degenerate contour vertices
 - [ ] Multi-plane node solver and adversarial precision suite
 - [ ] Eaves overhang, fascia and soffit
-**Exit:** supported convex fixtures pass pure-Python tests and closed-shell edge-manifold checks. Blender integration tests and full concave support remain open.
+**Exit:** verified rectangle fixture passes pure-Python tests and closed-shell edge/vertex manifold checks. Broader convex fixtures, Blender integration tests and continuous concave support remain open.
 
 ## Milestone 2 — Artist workflow (Critical)
 - [ ] Numbered top-view pitch map
@@ -66,4 +67,4 @@ The initial geometry vertical slice now builds a closed solid shell for verified
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Implement continuous finite roof-face regions for concave contours and solve multi-plane junctions. Preserve the new rejection guard. Then add overhang/eaves and complete vertex-manifold, degeneracy and self-intersection validation before starting pitch-map UI.
+Implement continuous finite roof-face regions for concave contours and solve multi-plane junctions. Preserve the new rejection guard. Then add overhang/eaves and geometric self-intersection validation before starting pitch-map UI.
