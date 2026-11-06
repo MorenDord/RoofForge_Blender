@@ -12,6 +12,10 @@ from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
+from core.wavefront import (
+    EventKind, WavefrontLoop, build_moving_lines, find_split_candidates,
+    simulate_convex_wavefront, _line_intersection,
+)
 
 
 class PolygonTests(unittest.TestCase):
@@ -261,6 +265,79 @@ class PolygonTests(unittest.TestCase):
             ]
             self.assertTrue(matches)
             self.assertTrue(all(abs(vertex[2] - z) < 1e-8 for vertex in matches))
+
+
+
+    def test_wavefront_line_intersection_and_velocity(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        edges = build_moving_lines(points, [45.0] * 4)
+        vertex = _line_intersection(edges[3], edges[0], 0.0, 1e-9)
+        self.assertAlmostEqual(vertex.point[0], 0.0, places=7)
+        self.assertAlmostEqual(vertex.point[1], 0.0, places=7)
+        self.assertAlmostEqual(vertex.velocity[0], 1.0, places=7)
+        self.assertAlmostEqual(vertex.velocity[1], 1.0, places=7)
+
+    def test_weighted_wavefront_rectangle_ends_in_needle_and_covers_domain(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        trace = simulate_convex_wavefront(points, [45.0] * 4)
+        self.assertEqual(trace.terminal_kind, "NEEDLE")
+        self.assertAlmostEqual(trace.terminal_time, 1.0, places=7)
+        self.assertAlmostEqual(trace.projected_facet_area, 8.0, places=7)
+        self.assertEqual(len(trace.facets), 4)
+        self.assertEqual(len(trace.skeleton_arcs), 1)
+        arc = trace.skeleton_arcs[0]
+        self.assertAlmostEqual(arc.start[2], 1.0, places=7)
+        self.assertAlmostEqual(arc.end[2], 1.0, places=7)
+        self.assertAlmostEqual(abs(arc.start[0] - arc.end[0]), 2.0, places=7)
+
+    def test_wavefront_square_ends_in_simultaneous_point_event(self):
+        points = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0),
+                  (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        trace = simulate_convex_wavefront(points, [45.0] * 4)
+        self.assertEqual(trace.terminal_kind, "POINT")
+        self.assertAlmostEqual(trace.terminal_time, 1.0, places=7)
+        self.assertAlmostEqual(trace.projected_facet_area, 4.0, places=7)
+        simultaneous = [event for event in trace.events if event.kind == EventKind.SIMULTANEOUS]
+        self.assertEqual(len(simultaneous), 1)
+
+    def test_weighted_wavefront_supports_unequal_pitch_rectangle(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)]
+        pitches = [45.0, 30.0, 45.0, 30.0]
+        trace = simulate_convex_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(trace.projected_facet_area, 12.0, places=7)
+        for facet in trace.facets:
+            self.assertGreaterEqual(facet.end_time, facet.start_time)
+
+    def test_wavefront_rejects_mixed_eave_heights(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.5),
+                  (4.0, 2.0, 0.5), (0.0, 2.0, 0.0)]
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_moving_lines(points, [45.0] * 4)
+        self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
+
+    def test_wavefront_convex_simulation_rejects_reflex_contour(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+                  (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0)]
+        with self.assertRaises(GeometryInputError) as ctx:
+            simulate_convex_wavefront(points, [45.0] * len(points))
+        self.assertEqual(ctx.exception.code, "REFLEX_SPLIT_REQUIRED")
+
+    def test_wavefront_detects_reflex_split_candidate_on_finite_edge(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+                  (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0)]
+        pitches = [45.0, 45.0, 45.0, 78.6900675, 45.0, 78.6900675]
+        moving = build_moving_lines(points, pitches)
+        loop = WavefrontLoop(0, tuple(range(len(moving))))
+        candidates = find_split_candidates(loop, {edge.edge_id: edge for edge in moving})
+        split_events = [event for event in candidates if event.kind == EventKind.SPLIT_CANDIDATE]
+        self.assertTrue(split_events)
+        expected_time = 0.5
+        self.assertTrue(any(abs(event.time - expected_time) < 1e-6 for event in split_events))
+        self.assertTrue(any(event.target_edge_id == 0 for event in split_events))
 
 
 
