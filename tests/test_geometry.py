@@ -700,5 +700,23 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_surface_resolves_u_shape_multi_needle_event(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 4.0, 0.0),
+            (3.0, 4.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+            (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        trace = run_weighted_wavefront(points, [45.0] * len(points))
+        self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
+        terminal_arcs = [
+            arc for arc in trace.skeleton_arcs
+            if abs(arc.start[2] - trace.terminal_time) < 1e-8
+            and abs(arc.end[2] - trace.terminal_time) < 1e-8
+        ]
+        self.assertEqual(len(terminal_arcs), 3)
+        self.assertAlmostEqual(trace.projected_facet_area, 10.0, places=6)
+
+
+
 if __name__ == "__main__":
     unittest.main()
