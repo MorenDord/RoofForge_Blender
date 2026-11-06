@@ -118,7 +118,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Profile 128-edge concave solver cases
+      - name: Profile 64-edge target solver cases
         run: python tests/profile_legacy_solver.py | tee legacy-solver-profile.txt
       - name: Upload solver profile
         uses: actions/upload-artifact@v4
