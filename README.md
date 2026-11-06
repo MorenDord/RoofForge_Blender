@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, designed for environment artists and game-ready asset workflows.
 
-> **Development status:** early 1.0 alpha. Current code builds an open planar upper roof surface from one selected closed edge loop. It is not yet a complete solid roof generator and has not yet been runtime-tested in Blender 5.0.
+> **Development status:** early 1.0 alpha. The current code generates a closed shell from one selected closed edge loop. It is not yet a complete parametric roof editor and has not yet been runtime-tested in Blender 5.0.
 
 ## Project documents
 - Technical specification: docs/SPECIFICATION.md
@@ -13,20 +13,21 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Blender Extension manifest, registration scaffold and 3D View sidebar panel.
 - Edit Mode and Object Mode selected closed-edge-loop adapter, preserving local XYZ.
 - 3D slope plane construction from pitch angle, eave edge grade and polygon winding.
-- Deterministic ear clipping for simple concave polygons without collinear vertices.
-- Concave-domain arrangement partition that restricts planes to the inward halfspace of their source edge.
-- Lower-envelope roof surface assembly with 3D vertex welding, face-to-slope integer attribute, and projected domain-coverage validation.
-- Create Roof Surface operator (open upper surface only; no thickness, eaves, overhang or live link).
+- Deterministic ear clipping and concave-domain arrangement partition.
+- Lower-envelope roof surface assembly, 3D vertex welding and projected domain-coverage validation.
+- Closed roof shell with thickness extruded along roof-local global -Z.
+- Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
+- Unit tests for rectangle, L/U contours, plane constraints, winding and closed-shell topology.
 
 ## Development install
 1. Clone or download this repository.
 2. Install the package as a Blender Extension using Blender's Extension workflow.
 3. Enable RoofForge.
 4. In the 3D View, open the N-panel and choose RoofForge.
-5. In Edit Mode, select exactly one closed edge loop and set the default pitch.
-6. Run Validate Roof Boundary, then Create Roof Surface.
+5. In Edit Mode, select exactly one closed edge loop; set pitch and thickness.
+6. Run Validate Roof Boundary, then Create Roof Shell.
 
-The generated object is a separate object and inherits the source object's world transform. The source mesh is not modified.
+The generated object is separate from the source and inherits its world transform. The source mesh is not modified.
 
 ## Run pure Python tests
 From the repository root:
@@ -35,25 +36,24 @@ From the repository root:
     python -m unittest discover -s tests -v
 
 ## Not implemented yet
-- A closed roof shell, thickness, overhang and fascia.
-- Per-slope interactive pitch map and individual UI values.
+- Eaves overhang, fascia and soffit.
+- Per-slope interactive pitch map and independent slope values.
 - Live update, detach, relink and lifecycle handlers.
 - Ridge, valley and hip profiles and junction patches.
 - Standing seams, UVs, material assignment, LOD and export automation.
-- Full topology and self-intersection validator.
+- Full self-intersection and connected-vertex manifold validator.
 
 ## Known geometry limitations
 - Input must be one simple closed loop in XY.
 - Collinear contour vertices and projected-vertical edges are rejected.
-- Ear clipping and arrangement splitting are dependency-free but need more adversarial precision/performance tests.
-- The current mesh checks projected area coverage and edge use count; it is not yet a complete manifold/solid validator.
-- Blender runtime behavior, mesh attributes and Edit Mode adapter have not yet been verified in Blender 5.0.
+- The dependency-free arrangement algorithm needs further adversarial precision/performance testing.
+- The geometry kernel has unit coverage, but Blender runtime behavior, mesh attributes and Edit Mode workflow have not yet been verified in Blender 5.0.
+- Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
 
 ## Development principles
 - Source geometry is immutable.
-- Build into temporary data, validate, then swap.
-- Never destroy last-valid output on failed rebuild.
-- Stable UUIDs identify slopes and generated parts.
+- Build and validate output before linking it into the scene.
+- Stable slope indices/UUIDs identify generated regions.
 - Pure geometry code must be testable outside Blender.
 - Blender datablock changes happen on Blender's main thread.
 
