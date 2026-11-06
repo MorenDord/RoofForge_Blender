@@ -132,7 +132,7 @@ def run_all_pairs_arrangement(label, points, pitch_degrees):
             for index in range(count)
         ]
         vertices, faces, sources = spatial_module._build_planar_support_arrangement(
-            points, planes, eps, allowed_pairs=None
+            points, planes, eps, allowed_pairs=None, label_by_minimum=True
         )
         spatial_module._validate_lifted_mesh(
             vertices, faces, sources, points, planes, eps, scale
