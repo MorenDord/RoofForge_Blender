@@ -25,8 +25,9 @@ from .mesh import (
 )
 from .planes import build_boundary_planes
 
-Point2 = tuple[float, float, float]
-Triangle2 = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+Point2 = tuple[float, float]
+Point3 = tuple[float, float, float]
+Triangle2 = tuple[Point2, Point2, Point2]
 
 
 @dataclass(frozen=True)
