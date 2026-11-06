@@ -102,9 +102,9 @@ All stored dimensions use Blender scene units. UI labels must display the active
 
 ### FR-09 — Validation
 - Validate boundary input, roof regions, generated shell, profiles and seam geometry.
-- Detect boundary edges, non-manifold edges/vertices, zero-area faces, duplicate vertices, inverted normals, self-intersections where computationally feasible, and disconnected components.
+- Detect boundary edges, non-manifold edges/vertices (including disconnected vertex links), zero-area faces, duplicate faces, inconsistent face winding, inverted normals, self-intersections where computationally feasible, and disconnected components.
 - Report counts and locations; distinguish warnings from blocking errors.
-- Include a one-click Validate Roof operation and optional debug overlays.
+- Include a one-click Validate Roof operation that runs the same complete surface/shell pipeline as Create Roof without committing output, plus optional debug overlays.
 
 ### FR-10 — Game-ready preparation
 - Generate UVs per slope or continuous where possible; provide UV padding and texel-density controls.
