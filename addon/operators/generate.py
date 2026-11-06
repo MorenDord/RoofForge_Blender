@@ -1,7 +1,7 @@
 """Generate a closed RoofForge shell from the selected boundary loop."""
 import bpy
 
-from ..adapters.mesh_io import read_selected_boundary
+from ..adapters.mesh_io import read_object_boundary
 from ...core.geometry import GeometryInputError
 from ...core.mesh import build_roof_surface
 from ...core.shell import build_roof_shell
@@ -21,7 +21,7 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
         source = context.object
         settings = context.scene.roof_forge
         try:
-            points = read_selected_boundary(source)
+            points = read_object_boundary(source)
             if len(points) < 3:
                 raise GeometryInputError("POLY_TOO_SMALL", "Контур должен содержать минимум три вершины.")
             surface = build_roof_surface(points, [settings.pitch_default] * len(points))
@@ -81,6 +81,6 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             {"INFO"},
             f"Создана замкнутая оболочка: {len(shell.vertices)} вершин, "
             f"{len(shell.faces)} граней; верх {shell.top_face_count}, "
-            f"низ {shell.bottom_face_count}, карнизы {shell.side_face_count}."
+            f"низ {shell.bottom_face_count}, боковые стенки {shell.side_face_count}."
         )
         return {"FINISHED"}
