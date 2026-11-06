@@ -156,10 +156,10 @@ class WavefrontEventQueue:
         )
 
     def push(self, event: WavefrontEvent) -> None:
-        if not isfinite(event.time) or event.time < 0.0:
+        if not isfinite(event.time):
             raise GeometryInputError(
                 "INVALID_EVENT_TIME",
-                "Время события волнового фронта должно быть конечным и неотрицательным."
+                "Время события волнового фронта должно быть конечным."
             )
         heappush(self._heap, (self._event_key(event), self._sequence, event))
         self._sequence += 1
@@ -723,7 +723,8 @@ def create_wavefront_state(
     edges_tuple = build_moving_lines(points, pitches_degrees, eps)
     edges = {edge.edge_id: edge for edge in edges_tuple}
     loop = WavefrontLoop(0, tuple(edge.edge_id for edge in edges_tuple), 0)
-    vertices = _loop_vertices(loop, edges, 0.0, eps)
+    base_height = sum(point[2] for point in points) / len(points)
+    vertices = _loop_vertices(loop, edges, base_height, eps)
     if abs(_signed_area_at(vertices)) <= eps:
         raise GeometryInputError("DEGENERATE_INITIAL_WAVEFRONT", "Начальный волновой фронт имеет нулевую площадь.")
 
@@ -733,7 +734,6 @@ def create_wavefront_state(
         max(point[1] for point in points) - min(point[1] for point in points),
     )
     queue = WavefrontEventQueue()
-    base_height = sum(point[2] for point in points) / len(points)
     source_area = abs(signed_area([(point[0], point[1]) for point in points]))
     queue.push_many(collect_loop_events(loop, edges, base_height, eps))
     return WavefrontSimulationState(
