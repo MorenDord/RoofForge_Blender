@@ -656,7 +656,7 @@ def apply_split_event(
     )
     right_copy = MovingLine(
         second_new_edge, target.source_edge_id, target.normal, target.offset,
-        target.speed, target.tangent, 0,
+        target.speed, target.tangent, 0, target.base_height,
     )
 
     def cyclic_path(start_index: int, stop_index: int) -> tuple[int, ...]:
