@@ -13,7 +13,8 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Blender Extension manifest, registration scaffold and 3D View sidebar panel.
 - Edit Mode and Object Mode selected closed-edge-loop adapter, preserving local XYZ.
 - 3D slope plane construction from pitch angle, eave edge grade and polygon winding.
-- Deterministic ear clipping and concave-domain arrangement partition.
+- Deterministic ear clipping and an experimental concave-domain arrangement (production path rejects discontinuities).
+- Experimental finite-segment distance field for continuous closed L/U comparison meshes; corner transitions are approximated and are not the production planar-facet solver.
 - Lower-envelope roof surface assembly, 3D vertex welding and projected domain-coverage validation.
 - Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
 - Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
@@ -47,6 +48,7 @@ From the repository root:
 - Input must be one simple closed loop in XY.
 - Collinear contour vertices and projected-vertical edges are rejected.
 - Convex contour shells are covered by the current acceptance fixtures. Some concave L/U roof layouts currently create internal discontinuities in the edge-plane arrangement and are rejected instead of emitting a broken mesh; resolving this is a critical open geometry task.
+- The weighted straight-skeleton solver for exact planar concave roofs is not yet implemented. `docs/CONCAVE_GEOMETRY.md` records the target algorithm, event taxonomy, constraints and test fixtures.
 - The geometry kernel has unit coverage, but Blender runtime behavior, mesh attributes and Edit Mode workflow have not yet been verified in Blender 5.0.
 - Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
 
