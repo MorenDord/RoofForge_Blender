@@ -9,6 +9,7 @@ from .geometry import GeometryInputError, PlaneZ, signed_area
 from .planes import boundary_envelope_conflicts, build_boundary_planes
 from .envelope import lower_envelope_restricted_cells
 
+Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
 Face = tuple[int, ...]
 
@@ -22,6 +23,7 @@ class RoofSurface:
     planes: tuple[PlaneZ, ...]
     source_area_xy: float
     surface_area_xy: float
+    boundary_xy: tuple[Point2, ...]
 
     @property
     def is_empty(self) -> bool:
@@ -71,10 +73,9 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
                        eps: float = 1e-9) -> RoofSurface:
     """Build an open planar upper surface from a closed 3D boundary loop.
 
-    The function does not create Blender datablocks. It returns welded vertex
-    and polygon arrays ready for an adapter. The source contour is never
-    modified. Concave contours are partitioned by the valid halfspace of each
-    source edge before the lower envelope is evaluated.
+    Returned roof-face winding is always counter-clockwise in XY, so normals
+    point toward the roof-local +Z direction even if the source loop is CW.
+    The source contour is never modified.
     """
     planes = build_boundary_planes(points, pitches_degrees, eps)
     conflicts = boundary_envelope_conflicts(points, planes)
@@ -115,6 +116,8 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
                 compact.pop()
             if len(set(compact)) < 3:
                 continue
+            if signed_area(cell) < 0.0:
+                compact.reverse()
             key = tuple(sorted(compact))
             if key in face_keys:
                 continue
@@ -132,7 +135,7 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     if abs(surface_area_xy - domain_area) > max(area_tolerance * 100.0, domain_area * 1e-7):
         raise GeometryInputError(
             "DOMAIN_COVERAGE_MISMATCH",
-            f"Области крыши покрывают {surface_area_xy:.9g} м² из {domain_area:.9g} м² контура."
+            f"Области крыши покрывают {surface_area_xy:.9g} из {domain_area:.9g} квадратных единиц контура."
         )
 
     edge_usage = _mesh_edge_usage(faces)
@@ -150,4 +153,5 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
         planes=tuple(planes),
         source_area_xy=domain_area,
         surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(domain),
     )
