@@ -1029,6 +1029,130 @@ def _resolve_simultaneous_point_termination(
     return True
 
 
+def _resolve_vertex_hit_on_collapsing_edge(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> bool:
+    """Consume endpoint hits that are exactly the endpoint of a collapsing edge.
+
+    A reflex vertex can hit the next edge's endpoint at the same instant that
+    its outgoing edge collapses. In that case the hit is not a separate split:
+    removing the collapsed edge already creates the same successor vertex.
+    """
+    collapse_events = [
+        event for event in events if event.kind == EventKind.EDGE_COLLAPSE
+    ]
+    hit_events = [
+        event for event in events if event.kind == EventKind.VERTEX_HIT
+    ]
+    if not collapse_events or not hit_events:
+        return False
+    if len(collapse_events) + len(hit_events) != len(events):
+        return False
+
+    collapse_by_edge = {
+        event.edge_id: event for event in collapse_events
+        if event.edge_id is not None
+    }
+    if len(collapse_by_edge) != len(collapse_events):
+        return False
+    loop_edge_ids = loop.edge_ids
+    edge_set = set(loop_edge_ids)
+    if not set(collapse_by_edge).issubset(edge_set):
+        return False
+
+    hits_by_edge: dict[int, list[WavefrontEvent]] = {}
+    for event in hit_events:
+        if (
+            event.edge_id is None
+            or event.edge_id not in collapse_by_edge
+            or event.target_edge_id is None
+            or event.position is None
+            or event.vertex_id is None
+            or event.loop_id != loop.loop_id
+            or event.loop_generation != loop.generation
+            or not 0 <= event.vertex_id < len(loop_edge_ids)
+            or loop_edge_ids[event.vertex_id] != event.edge_id
+        ):
+            return False
+        hits_by_edge.setdefault(event.edge_id, []).append(event)
+
+    tolerance = state.time_tolerance * 10.0
+    vertices = _loop_vertices(
+        loop, state.edges, state.current_time, state.epsilon
+    )
+
+    for edge_id, hits in hits_by_edge.items():
+        if len(hits) != 1:
+            return False
+        hit = hits[0]
+        edge_index = loop_edge_ids.index(edge_id)
+        next_edge_id = loop_edge_ids[(edge_index + 1) % len(loop_edge_ids)]
+        if hit.target_edge_id != next_edge_id or next_edge_id in collapse_by_edge:
+            return False
+
+        collapse = collapse_by_edge[edge_id]
+        if collapse.position is None:
+            return False
+        start, end, _, length = _edge_segment(
+            loop, edge_index, vertices, state.edges, state.current_time
+        )
+        if abs(length) > tolerance:
+            return False
+
+        event_point = collapse.position
+        for point in (
+            hit.position,
+            vertices[edge_index].point,
+            start,
+            end,
+        ):
+            if hypot(point[0] - event_point[0], point[1] - event_point[1]) > tolerance:
+                return False
+
+        target = state.edges[next_edge_id]
+        residual = (
+            _dot(target.normal, event_point)
+            - target.offset_at(state.current_time)
+        )
+        if abs(residual) > tolerance:
+            return False
+
+    collapsed = set(collapse_by_edge)
+    remaining = tuple(
+        edge_id for edge_id in loop_edge_ids if edge_id not in collapsed
+    )
+    if len(remaining) >= 3:
+        prospective = WavefrontLoop(
+            loop.loop_id, remaining, loop.generation + 1
+        )
+        new_vertices = _loop_vertices(
+            prospective, state.edges, state.current_time, state.epsilon
+        )
+        polygon = [vertex.point for vertex in new_vertices]
+        scale = max(
+            1.0,
+            max(point[0] for point in polygon) - min(point[0] for point in polygon),
+            max(point[1] for point in polygon) - min(point[1] for point in polygon),
+        )
+        area = signed_area(polygon)
+        if (
+            abs(area) <= state.epsilon * scale * scale * 100.0
+            or (1 if area > 0.0 else -1) != state.input_winding
+            or validate_simple_polygon(polygon, state.epsilon)
+        ):
+            return False
+
+    child = _resolve_edge_collapse_group(
+        state, loop, collapse_events
+    )
+    state.loops.pop(loop.loop_id, None)
+    if child is not None:
+        state.loops[child.loop_id] = child
+    return True
+
+
 def _resolve_cross_needle_vertex_hit(
     state: WavefrontSimulationState,
     loop: WavefrontLoop,
@@ -1389,6 +1513,7 @@ def advance_wavefront_state(
         elif EventKind.VERTEX_HIT in kinds:
             resolved = (
                 _resolve_simultaneous_point_termination(state, loop, loop_events)
+                or _resolve_vertex_hit_on_collapsing_edge(state, loop, loop_events)
                 or (
                     kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT})
                     and _resolve_cross_needle_vertex_hit(state, loop, loop_events)
