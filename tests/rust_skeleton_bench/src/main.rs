@@ -519,12 +519,13 @@ fn main() {
         [0.0, 0.0], [4.0, 0.0], [4.0, 1.0],
         [1.0, 1.0], [1.0, 4.0], [0.0, 4.0],
     ];
-    for (case, speeds) in [
+    let event_l_scenarios: [(&str, [f64; 6]); 4] = [
         ("event_L_unequal_needle", [0.8, 1.0, 1.2, 1.3, 1.0, 0.7]),
         ("event_L_split_collapse_right_first", [0.8, 1.0, 1.2, 1.32, 1.0, 0.7]),
         ("event_L_split_collapse_bottom_first", [0.8, 1.0, 1.2, 1.28, 1.0, 0.7]),
         ("event_L_near_equal", [0.999999, 1.0, 1.000001, 1.000001, 1.0, 0.999999]),
-    ] {
+    ];
+    for (case, speeds) in event_l_scenarios {
         let pitches: Vec<f64> = speeds
             .iter()
             .map(|speed| (1.0 / speed).atan().to_degrees())
@@ -536,7 +537,7 @@ fn main() {
         [0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [3.0, 4.0],
         [3.0, 1.0], [1.0, 1.0], [1.0, 4.0], [0.0, 4.0],
     ];
-    let event_u_speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6];
+    let event_u_speeds: [f64; 8] = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6];
     let event_u_pitches: Vec<f64> = event_u_speeds
         .iter()
         .map(|speed| (1.0 / speed).atan().to_degrees())
