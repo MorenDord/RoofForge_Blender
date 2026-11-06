@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import cos, hypot, isfinite, sin, tan, radians
+from heapq import heappop, heappush
+from math import hypot, isfinite, tan, radians
 from typing import Sequence
 
 from .geometry import GeometryInputError, Point2, Point3, signed_area, validate_simple_polygon
@@ -69,6 +70,14 @@ class WavefrontEvent:
     target_edge_id: int | None = None
     position: Point2 | None = None
     participant_generations: tuple[tuple[int, int], ...] = ()
+    loop_generation: int = 0
+
+
+@dataclass(frozen=True)
+class EventBatch:
+    """All valid events whose times are equal within the configured tolerance."""
+    time: float
+    events: tuple[WavefrontEvent, ...]
 
 
 @dataclass(frozen=True)
@@ -100,6 +109,123 @@ class WavefrontTrace:
     @property
     def is_complete(self) -> bool:
         return self.terminal_kind in {"POINT", "NEEDLE"}
+
+
+class WavefrontEventQueue:
+    """Deterministic priority queue with lazy invalidation of stale events.
+
+    Event participants carry edge-generation stamps. A loop-generation stamp
+    invalidates all events computed before that loop's topology changed. The
+    queue never mutates wavefront topology; the simulation owns that operation.
+    """
+
+    _PRIORITY = {
+        EventKind.EDGE_COLLAPSE: 0,
+        EventKind.SPLIT_CANDIDATE: 1,
+        EventKind.VERTEX_HIT: 2,
+        EventKind.NEEDLE: 3,
+        EventKind.SIMULTANEOUS: 4,
+    }
+
+    def __init__(self) -> None:
+        self._heap: list[tuple[tuple, int, WavefrontEvent]] = []
+        self._sequence = 0
+        self.discarded_stale = 0
+
+    @staticmethod
+    def _event_key(event: WavefrontEvent) -> tuple:
+        missing = 2**63 - 1
+        return (
+            event.time,
+            WavefrontEventQueue._PRIORITY[event.kind],
+            event.loop_id,
+            event.vertex_id if event.vertex_id is not None else missing,
+            event.edge_id if event.edge_id is not None else missing,
+            event.target_edge_id if event.target_edge_id is not None else missing,
+        )
+
+    def push(self, event: WavefrontEvent) -> None:
+        if not isfinite(event.time) or event.time < 0.0:
+            raise GeometryInputError(
+                "INVALID_EVENT_TIME",
+                "Время события волнового фронта должно быть конечным и неотрицательным."
+            )
+        heappush(self._heap, (self._event_key(event), self._sequence, event))
+        self._sequence += 1
+
+    def push_many(self, events: Sequence[WavefrontEvent]) -> None:
+        for event in events:
+            self.push(event)
+
+    def __len__(self) -> int:
+        return len(self._heap)
+
+    def _is_current(
+        self,
+        event: WavefrontEvent,
+        current_time: float,
+        time_tolerance: float,
+        current_edge_generations: dict[int, int] | None,
+        current_loop_generations: dict[int, int] | None,
+    ) -> bool:
+        if event.time < current_time - time_tolerance:
+            return False
+        if current_loop_generations is not None:
+            if current_loop_generations.get(event.loop_id) != event.loop_generation:
+                return False
+        if current_edge_generations is not None:
+            for edge_id, generation in event.participant_generations:
+                if current_edge_generations.get(edge_id) != generation:
+                    return False
+        return True
+
+    def pop_next_batch(
+        self,
+        *,
+        current_time: float = 0.0,
+        time_tolerance: float = 1e-9,
+        current_edge_generations: dict[int, int] | None = None,
+        current_loop_generations: dict[int, int] | None = None,
+    ) -> EventBatch | None:
+        """Pop the earliest valid time batch, lazily dropping stale entries.
+
+        All events within 'time_tolerance' of the earliest valid event are
+        returned together so a caller can resolve simultaneous topology changes
+        as one operation. Staleness is tested both for source edges and loops.
+        """
+        if not isfinite(current_time) or not isfinite(time_tolerance) or time_tolerance < 0.0:
+            raise GeometryInputError("INVALID_QUEUE_TIME", "Неверные параметры времени очереди событий.")
+
+        first: WavefrontEvent | None = None
+        while self._heap:
+            _, _, candidate = heappop(self._heap)
+            if self._is_current(
+                candidate, current_time, time_tolerance,
+                current_edge_generations, current_loop_generations,
+            ):
+                first = candidate
+                break
+            self.discarded_stale += 1
+
+        if first is None:
+            return None
+
+        batch = [first]
+        cutoff = first.time + time_tolerance
+        deferred: list[tuple[tuple, int, WavefrontEvent]] = []
+        while self._heap and self._heap[0][2].time <= cutoff:
+            item = heappop(self._heap)
+            candidate = item[2]
+            if self._is_current(
+                candidate, current_time, time_tolerance,
+                current_edge_generations, current_loop_generations,
+            ):
+                batch.append(candidate)
+            else:
+                self.discarded_stale += 1
+
+        batch.sort(key=self._event_key)
+        return EventBatch(first.time, tuple(batch))
 
 
 def _dot(a: Point2, b: Point2) -> float:
@@ -267,6 +393,7 @@ def _edge_collapse_events(loop: WavefrontLoop, edges: dict[int, MovingLine],
             EventKind.EDGE_COLLAPSE, event_time, loop.loop_id, edge_id=edge_id,
             vertex_id=index, position=event_position,
             participant_generations=participants,
+            loop_generation=loop.generation,
         ))
     return candidates
 
@@ -344,10 +471,38 @@ def find_split_candidates(loop: WavefrontLoop, edges: dict[int, MovingLine],
                 kind, hit_time, loop.loop_id, edge_id=loop.edge_ids[vertex_index],
                 vertex_id=vertex_index, target_edge_id=target_id, position=hit,
                 participant_generations=generations,
+                loop_generation=loop.generation,
             ))
 
-    events.sort(key=lambda event: (event.time, event.vertex_id or -1, event.target_edge_id or -1))
+    events.sort(key=lambda event: (
+        event.time,
+        event.vertex_id if event.vertex_id is not None else 2**63 - 1,
+        event.target_edge_id if event.target_edge_id is not None else 2**63 - 1,
+    ))
     return tuple(events)
+
+
+def collect_loop_events(
+    loop: WavefrontLoop,
+    edges: dict[int, MovingLine],
+    time: float = 0.0,
+    eps: float = 1e-9,
+) -> tuple[WavefrontEvent, ...]:
+    """Collect collapse and split candidates for one current loop state."""
+    vertices = _loop_vertices(loop, edges, time, eps)
+    scale = max(
+        1.0,
+        max(vertex.point[0] for vertex in vertices) - min(vertex.point[0] for vertex in vertices),
+        max(vertex.point[1] for vertex in vertices) - min(vertex.point[1] for vertex in vertices),
+    )
+    collapse = _edge_collapse_events(
+        loop, edges, vertices, time,
+        length_eps=eps * scale * 100.0,
+        time_eps=eps * max(1.0, scale) * 100.0,
+    )
+    split = find_split_candidates(loop, edges, time, eps)
+    events = (*collapse, *split)
+    return tuple(sorted(events, key=WavefrontEventQueue._event_key))
 
 
 def _dedupe_polygon(points: Sequence[Point3], tolerance: float) -> tuple[Point3, ...]:
