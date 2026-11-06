@@ -889,6 +889,131 @@ def _record_wavefront_interval(
             ))
 
 
+
+def _resolve_cross_needle_vertex_hit(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> bool:
+    """Resolve one reflex vertex hitting the shared endpoint of two edges.
+
+    This specific multi-event is accepted only when:
+    - exactly two endpoint-hit events share one reflex vertex and position;
+    - their target edges are adjacent around the contour;
+    - after simultaneous edge collapses, all remaining fronts form pairs of
+      opposite, coincident, equally weighted finite segments.
+
+    The coincident pairs become terminal skeleton arcs. Other mixed batches are
+    left to the caller as unsupported; this is not a generic multi-event solver.
+    """
+    endpoint_hits = [event for event in events if event.kind == EventKind.VERTEX_HIT]
+    collapse_events = [event for event in events if event.kind == EventKind.EDGE_COLLAPSE]
+    if len(endpoint_hits) != 2 or len(endpoint_hits) + len(collapse_events) != len(events):
+        return False
+
+    first_hit, second_hit = endpoint_hits
+    if (
+        first_hit.vertex_id is None
+        or first_hit.vertex_id != second_hit.vertex_id
+        or first_hit.edge_id != second_hit.edge_id
+        or first_hit.target_edge_id is None
+        or second_hit.target_edge_id is None
+        or first_hit.position is None
+        or second_hit.position is None
+    ):
+        return False
+
+    tolerance = state.time_tolerance * 10.0
+    if hypot(
+        first_hit.position[0] - second_hit.position[0],
+        first_hit.position[1] - second_hit.position[1],
+    ) > tolerance:
+        return False
+
+    target_a = loop.edge_ids.index(first_hit.target_edge_id)
+    target_b = loop.edge_ids.index(second_hit.target_edge_id)
+    count = len(loop.edge_ids)
+    if (target_a - target_b) % count not in {1, count - 1}:
+        return False
+
+    collapsed = {event.edge_id for event in collapse_events}
+    if None in collapsed:
+        return False
+    remaining = [edge_id for edge_id in loop.edge_ids if edge_id not in collapsed]
+    if len(remaining) < 4 or len(remaining) % 2:
+        return False
+
+    vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
+    segments = {}
+    for index, edge_id in enumerate(loop.edge_ids):
+        if edge_id in collapsed:
+            continue
+        start, end, tangent, length = _edge_segment(
+            loop, index, vertices, state.edges, state.current_time
+        )
+        segments[edge_id] = (start, end, tangent, length)
+
+    unused = set(remaining)
+    matched_pairs: list[tuple[int, int, Point2, Point2]] = []
+    while unused:
+        first_id = min(unused)
+        first_line = state.edges[first_id]
+        first_segment = segments[first_id]
+        partner = None
+        for second_id in sorted(unused - {first_id}):
+            second_line = state.edges[second_id]
+            second_segment = segments[second_id]
+            alignment = _dot(first_line.normal, second_line.normal)
+            line_gap = first_line.offset_at(state.current_time) + second_line.offset_at(state.current_time)
+            speed_delta = abs(first_line.speed - second_line.speed)
+            scale = max(
+                1.0,
+                abs(first_line.offset_at(state.current_time)),
+                abs(second_line.offset_at(state.current_time)),
+                first_segment[3],
+                second_segment[3],
+            )
+            tol = state.epsilon * scale * 100.0
+            endpoints_match = (
+                hypot(first_segment[0][0] - second_segment[1][0],
+                      first_segment[0][1] - second_segment[1][1]) <= tol
+                and hypot(first_segment[1][0] - second_segment[0][0],
+                           first_segment[1][1] - second_segment[0][1]) <= tol
+            )
+            if (
+                alignment <= -1.0 + state.epsilon * 100.0
+                and abs(line_gap) <= tol
+                and speed_delta <= state.epsilon * max(1.0, first_line.speed, second_line.speed) * 100.0
+                and first_segment[3] > tol
+                and second_segment[3] > tol
+                and abs(first_segment[3] - second_segment[3]) <= tol
+                and endpoints_match
+            ):
+                partner = second_id
+                break
+        if partner is None:
+            return False
+        matched_pairs.append((first_id, partner, first_segment[0], first_segment[1]))
+        unused.remove(first_id)
+        unused.remove(partner)
+
+    if len(matched_pairs) != len(remaining) // 2:
+        return False
+
+    for first_id, second_id, start, end in matched_pairs:
+        state.skeleton_arcs.append(SkeletonArc(
+            (start[0], start[1], state.current_time),
+            (end[0], end[1], state.current_time),
+            state.current_time,
+        ))
+
+    state.terminal_loops[loop.loop_id] = "MULTI_NEEDLE"
+    for edge_id in loop.edge_ids:
+        state.edges.pop(edge_id, None)
+    state.loops.pop(loop.loop_id, None)
+    return True
+
+
 def advance_wavefront_state(
     state: WavefrontSimulationState,
 ) -> EventBatch | None:
@@ -961,11 +1086,20 @@ def advance_wavefront_state(
                 state.loops[child.loop_id] = child
                 changed_loops.append(child)
 
-        elif kinds == {EventKind.VERTEX_HIT}:
-            raise GeometryInputError(
-                "SPLIT_ENDPOINT_EVENT_UNRESOLVED",
-                "Рефлексная вершина попала в конец ребра; требуется обработка vertex-hit/needle вырождения."
-            )
+        elif EventKind.VERTEX_HIT in kinds:
+            if not kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT}) or not _resolve_cross_needle_vertex_hit(
+                state, loop, loop_events
+            ):
+                details = [
+                    (event.kind.value, event.edge_id, event.vertex_id,
+                     event.target_edge_id, event.position, event.time)
+                    for event in sorted(loop_events, key=WavefrontEventQueue._event_key)
+                ]
+                raise GeometryInputError(
+                    "SIMULTANEOUS_EVENT_BATCH_UNRESOLVED",
+                    "Смешанный endpoint/edge event не соответствует проверенному cross-needle узлу. "
+                    f"Контур {loop_id}, события: {details}."
+                )
         else:
             details = [
                 (
