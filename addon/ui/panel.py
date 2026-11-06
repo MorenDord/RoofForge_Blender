@@ -13,10 +13,14 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         layout = self.layout
         settings = context.scene.roof_forge
         col = layout.column(align=True)
-        col.label(text="Roof input")
+        col.label(text="Roof boundary")
+        col.label(text="Select one closed edge loop in Edit Mode")
         col.prop(settings, "pitch_default")
-        col.prop(settings, "overhang")
-        col.prop(settings, "thickness")
-        col.prop(settings, "live_update")
+
+        col.separator()
         col.operator("roof_forge.validate_input", icon="CHECKMARK")
-        layout.label(text="1.0 development scaffold", icon="INFO")
+        col.operator("roof_forge.generate_surface", icon="MESH_PLANE")
+
+        col.separator()
+        col.label(text="Alpha: open upper surface only", icon="INFO")
+        col.label(text="No thickness, overhang or live link yet")
