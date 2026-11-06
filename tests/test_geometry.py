@@ -640,5 +640,28 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_surface_assembles_asymmetric_weighted_v_notch(self):
+        points = [
+            (0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 4.0, 0.0),
+            (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
+            (0.0, 4.0, 0.0),
+        ]
+        pitches = [45.0, 50.0, 42.0, 58.0, 47.0, 55.0, 48.0]
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
+        self.assertEqual(len(surface.planes), len(pitches))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+        for face, slope_index in zip(surface.faces, surface.face_slope_indices):
+            plane = surface.planes[slope_index]
+            z_values = [plane.height(surface.vertices[i][0], surface.vertices[i][1])
+                        for i in face]
+            self.assertTrue(all(
+                abs(surface.vertices[i][2] - z) < 1e-6
+                for i, z in zip(face, z_values)
+            ))
+
+
+
 if __name__ == "__main__":
     unittest.main()
