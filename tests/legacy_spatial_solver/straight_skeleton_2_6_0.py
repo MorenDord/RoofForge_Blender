@@ -13,6 +13,7 @@ from __future__ import annotations
 import heapq
 import math
 from collections import defaultdict
+from bisect import bisect_left, bisect_right
 
 _EPS = 1.0e-9
 
@@ -718,81 +719,6 @@ def _simplify_loop(loop, tolerance):
     return points
 
 
-_SEGMENT_CELL_NEIGHBORS_2D = (
-    (-1, -1), (0, -1), (1, -1),
-    (-1, 0),  (0, 0),  (1, 0),
-    (-1, 1),  (0, 1),  (1, 1),
-)
-
-
-def _segment_candidate_point_ids(start, end, point_grid, cell_size):
-    """Find nearby canonical vertices with a 2D voxel walk in roof XY.
-
-    The 2D cell width is at least ten times the full XYZ point tolerance.
-    The final projection and distance checks remain three-dimensional.
-    """
-    direction_x = end[0] - start[0]
-    direction_y = end[1] - start[1]
-    cell_x = int(math.floor(start[0] / cell_size))
-    cell_y = int(math.floor(start[1] / cell_size))
-    final_x = int(math.floor(end[0] / cell_size))
-    final_y = int(math.floor(end[1] / cell_size))
-
-    if direction_x > 0.0:
-        step_x = 1
-        t_max_x = ((cell_x + 1) * cell_size - start[0]) / direction_x
-        t_delta_x = cell_size / direction_x
-    elif direction_x < 0.0:
-        step_x = -1
-        t_max_x = (cell_x * cell_size - start[0]) / direction_x
-        t_delta_x = -cell_size / direction_x
-    else:
-        step_x = 0
-        t_max_x = float("inf")
-        t_delta_x = float("inf")
-
-    if direction_y > 0.0:
-        step_y = 1
-        t_max_y = ((cell_y + 1) * cell_size - start[1]) / direction_y
-        t_delta_y = cell_size / direction_y
-    elif direction_y < 0.0:
-        step_y = -1
-        t_max_y = (cell_y * cell_size - start[1]) / direction_y
-        t_delta_y = -cell_size / direction_y
-    else:
-        step_y = 0
-        t_max_y = float("inf")
-        t_delta_y = float("inf")
-
-    candidate_cells = set()
-    while True:
-        for dx, dy in _SEGMENT_CELL_NEIGHBORS_2D:
-            candidate_cells.add((cell_x + dx, cell_y + dy))
-
-        if cell_x == final_x and cell_y == final_y:
-            break
-
-        next_t = min(t_max_x, t_max_y)
-        if next_t > 1.0 + 1.0e-12:
-            break
-        # Step both axes at exact corner crossings; the 3x3 stencil around
-        # each visited cell covers all adjacent cells touched at that corner.
-        if t_max_x <= next_t + 1.0e-12:
-            cell_x += step_x
-            t_max_x += t_delta_x
-        if t_max_y <= next_t + 1.0e-12:
-            cell_y += step_y
-            t_max_y += t_delta_y
-
-    # A point belongs to exactly one grid cell, and each neighbouring cell is
-    # read once, so candidate IDs are already unique.
-    return sorted(
-        point_id
-        for cell in candidate_cells
-        for point_id in point_grid.get(cell, ())
-    )
-
-
 def _merge_face_patches(patches, scale):
     """Union coplanar swept quads into planar roof-face boundary loops.
 
@@ -847,14 +773,16 @@ def _merge_face_patches(patches, scale):
     point_keys = {point: index for index, point in unique_points.items()}
     all_points = list(unique_points.values())
 
-    # Index projected XY positions; all final segment-distance checks
-    # still use XYZ. The 2D grid cuts per-cell lookup from 27 neighbours to 9.
-    cell_size = max(tolerance * 10.0, scale / 12.0)
-    point_grid = defaultdict(list)
-    for point_id, point in enumerate(all_points):
-        cell = (int(math.floor(point[0] / cell_size)),
-                int(math.floor(point[1] / cell_size)))
-        point_grid[cell].append(point_id)
+    # Candidate vertices can be range-filtered along the dominant segment
+    # axis. Exact 3D distance remains the final inclusion test.
+    sorted_point_ids = [
+        sorted(range(len(all_points)), key=lambda index: all_points[index][axis])
+        for axis in range(3)
+    ]
+    sorted_axis_values = [
+        [all_points[index][axis] for index in sorted_point_ids[axis]]
+        for axis in range(3)
+    ]
 
     # Signed incidence of every split, undirected edge. Adjacent consistently
     # oriented patches contribute opposite signs and cancel exactly.
@@ -878,10 +806,19 @@ def _merge_face_patches(patches, scale):
             if denominator <= tolerance * tolerance:
                 continue
 
+            dominant_axis = max(range(3), key=lambda axis: abs(ab[axis]))
+            axis_length = abs(ab[dominant_axis])
+            axis_margin = axis_length * 1.0e-8 + tolerance * 5.0
+            axis_low = min(a[dominant_axis], b[dominant_axis]) - axis_margin
+            axis_high = max(a[dominant_axis], b[dominant_axis]) + axis_margin
+            axis_values = sorted_axis_values[dominant_axis]
+            axis_ids = sorted_point_ids[dominant_axis]
+            first_candidate = bisect_left(axis_values, axis_low)
+            after_candidate = bisect_right(axis_values, axis_high)
+
             on_edge = []
-            candidate_ids = _segment_candidate_point_ids(a, b, point_grid, cell_size)
-            for candidate_id in candidate_ids:
-                point = all_points[candidate_id]
+            for candidate_position in range(first_candidate, after_candidate):
+                point = all_points[axis_ids[candidate_position]]
                 ap = _sub3(point, a)
                 t = _dot3(ap, ab) / denominator
                 if t < -1.0e-8 or t > 1.0 + 1.0e-8:
