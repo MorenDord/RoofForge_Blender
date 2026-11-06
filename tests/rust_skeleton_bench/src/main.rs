@@ -251,13 +251,28 @@ fn extract_and_validate_roof(
     Ok((top_faces.len(), used_nodes.len(), max_plane_residual))
 }
 
+#[derive(Clone, Copy)]
+enum InputMode {
+    Polygon,
+    PslgUnitWeights,
+    PslgPitchWeights,
+}
+
 fn run_points_case(
     label: &str,
     points: &[[f64; 2]],
     pitches_degrees: &[f64],
     repeats: usize,
 ) {
-    run_points_case_mode(label, points, pitches_degrees, repeats, None);
+    // Variable pitch requires one multiplicative wavefront speed per edge.
+    // Equal pitch stays on the ordinary polygon path unless an explicit
+    // control case requests the PSLG API.
+    let mode = if pitches_degrees.iter().any(|value| (*value - pitches_degrees[0]).abs() > 1.0e-9) {
+        InputMode::PslgPitchWeights
+    } else {
+        InputMode::Polygon
+    };
+    run_points_case_mode(label, points, pitches_degrees, repeats, mode);
 }
 
 fn run_points_case_mode(
@@ -265,7 +280,7 @@ fn run_points_case_mode(
     points: &[[f64; 2]],
     pitches_degrees: &[f64],
     repeats: usize,
-    force_pslg: Option<bool>,
+    mode: InputMode,
 ) {
     let mut points = points.to_vec();
     let mut pitches_degrees = pitches_degrees.to_vec();
@@ -294,32 +309,44 @@ fn run_points_case_mode(
         .map(|pitch| 1.0 / pitch.to_radians().tan())
         .collect();
 
-    // Inputs are normalized to CCW above. The ordinary polygon API uses
-    // unit-speed wavefronts; the PSLG API applies multiplicative edge weights.
-    // Force both APIs on the same equal-pitch fixtures to separate weighted
-    // propagation defects from DCEL extraction / component-selection defects.
-    let use_pslg = force_pslg.unwrap_or(variable_pitch);
-    let (input_pslg, input_polygon) = if use_pslg {
-        match Pslg::from_flat(&points, &edges, Some(&weights)) {
-            Ok(value) => (Some(value), None),
-            Err(error) => {
-                println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
-                return;
-            }
-        }
-    } else {
-        match Polygon::from_flat(&points, &[0]) {
+    // Surfer2's PSLG edge weight multiplies the inward wavefront speed.
+    // For pitch measured above horizontal, that speed is cot(pitch). The
+    // unweighted API therefore uses z = time * tan(pitch), while the weighted
+    // API with physical speeds uses z = time. Keep these conversions explicit
+    // so equal-pitch control runs compare the same roof planes.
+    let speeds = match mode {
+        InputMode::PslgPitchWeights => weights.clone(),
+        InputMode::Polygon | InputMode::PslgUnitWeights => vec![1.0; count],
+    };
+    let time_to_z = match mode {
+        InputMode::PslgPitchWeights => 1.0,
+        InputMode::Polygon | InputMode::PslgUnitWeights => 1.0 / weights[0],
+    };
+    let (input_pslg, input_polygon) = match mode {
+        InputMode::Polygon => match Polygon::from_flat(&points, &[0]) {
             Ok(value) => (None, Some(value)),
             Err(error) => {
                 println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
                 return;
             }
+        },
+        InputMode::PslgUnitWeights | InputMode::PslgPitchWeights => {
+            let api_weights = if matches!(mode, InputMode::PslgUnitWeights) {
+                vec![1.0; count]
+            } else {
+                speeds.clone()
+            };
+            match Pslg::from_flat(&points, &edges, Some(&api_weights)) {
+                Ok(value) => (Some(value), None),
+                Err(error) => {
+                    println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
+                    return;
+                }
+            }
         }
     };
 
     let options = Options { components: ComponentMode::Index(0) };
-    let z_scale = if use_pslg { 1.0 } else { weights[0] };
-    let speeds = if use_pslg { weights.clone() } else { vec![1.0; count] };
 
     let mut times_ms = Vec::new();
     let mut segment_count = 0usize;
@@ -338,7 +365,7 @@ fn run_points_case_mode(
 
         match result {
             Ok(skeleton) => {
-                match extract_and_validate_roof(&skeleton, &points, &speeds, z_scale) {
+                match extract_and_validate_roof(&skeleton, &points, &speeds, time_to_z) {
                     Ok((faces, vertices, residual)) => {
                         times_ms.push(start.elapsed().as_secs_f64() * 1000.0);
                         segment_count = skeleton.finite_segments().count();
@@ -409,7 +436,8 @@ fn main() {
         [4.0, 4.0], [4.0, 8.0], [0.0, 8.0],
     ];
     run_points_case("concave_L_equal_pitch", &l_shape, &[35.0; 6], repeats);
-    run_points_case_mode("concave_L_equal_pitch_pslg", &l_shape, &[35.0; 6], repeats, Some(true));
+    run_points_case_mode("concave_L_equal_pitch_pslg_unit", &l_shape, &[35.0; 6], repeats, InputMode::PslgUnitWeights);
+    run_points_case_mode("concave_L_equal_pitch_pslg_weighted", &l_shape, &[35.0; 6], repeats, InputMode::PslgPitchWeights);
     run_points_case("concave_L_variable_pitch", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats);
 
     let u_shape = [
@@ -417,7 +445,8 @@ fn main() {
         [7.0, 3.0], [3.0, 3.0], [3.0, 8.0], [0.0, 8.0],
     ];
     run_points_case("concave_U_equal_pitch", &u_shape, &[35.0; 8], repeats);
-    run_points_case_mode("concave_U_equal_pitch_pslg", &u_shape, &[35.0; 8], repeats, Some(true));
+    run_points_case_mode("concave_U_equal_pitch_pslg_unit", &u_shape, &[35.0; 8], repeats, InputMode::PslgUnitWeights);
+    run_points_case_mode("concave_U_equal_pitch_pslg_weighted", &u_shape, &[35.0; 8], repeats, InputMode::PslgPitchWeights);
     run_points_case("concave_U_variable_pitch", &u_shape, &[32.0, 35.0, 38.0, 40.0, 34.0, 37.0, 31.0, 36.0], repeats);
 
     let multi_notch = [
