@@ -31,9 +31,12 @@ def _ordered_cycle_points(bm, edges):
             edge for edge in current.link_edges
             if edge in edge_set and edge is not previous_edge
         ]
-        if len(candidates) != 1:
+        if previous_edge is None and current is start:
+            edge = min(candidates, key=lambda item: item.index)
+        elif len(candidates) == 1:
+            edge = candidates[0]
+        else:
             raise ValueError("Не удалось однозначно обойти границу объекта.")
-        edge = candidates[0]
         next_vertex = edge.other_vert(current)
         if next_vertex is start:
             break
