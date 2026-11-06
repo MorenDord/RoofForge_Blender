@@ -469,5 +469,25 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_split_topology_is_winding_independent(self):
+        ccw = [
+            (0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 4.0, 0.0),
+            (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
+            (0.0, 4.0, 0.0),
+        ]
+        for points in (ccw, list(reversed(ccw))):
+            moving = build_moving_lines(points, [45.0] * len(points))
+            edges = {edge.edge_id: edge for edge in moving}
+            loop = WavefrontLoop(0, tuple(range(len(moving))), generation=2)
+            candidates = find_split_candidates(loop, edges)
+            event = next(item for item in candidates if item.kind == EventKind.SPLIT_CANDIDATE)
+            result = apply_split_event(loop, edges, event)
+            self.assertEqual(len(result.loops), 2)
+            self.assertEqual(sorted(len(child.edge_ids) for child in result.loops), [4, 4])
+            self.assertEqual(result.loops[0].generation, 3)
+            self.assertEqual(result.loops[1].generation, 3)
+
+
+
 if __name__ == "__main__":
     unittest.main()
