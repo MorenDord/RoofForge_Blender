@@ -2,11 +2,12 @@ import math
 import unittest
 
 from core.geometry import (
-    GeometryInputError, PlaneZ, boundary_envelope_conflicts,
-    build_boundary_planes, clip_half_plane, lower_envelope_cells,
+    GeometryInputError, PlaneZ, clip_half_plane, lower_envelope_cells,
     lower_envelope_regions, signed_area, triangulate_simple_polygon,
     validate_simple_polygon,
 )
+from core.planes import boundary_envelope_conflicts, build_boundary_planes
+from core.envelope import lower_envelope_restricted_cells
 
 
 class PolygonTests(unittest.TestCase):
@@ -62,6 +63,18 @@ class PolygonTests(unittest.TestCase):
             cell_area = sum(abs(signed_area(cell)) for group in cells for cell in group)
             self.assertAlmostEqual(cell_area, abs(signed_area(shape)), places=7)
 
+    def test_restricted_lower_envelope_covers_concave_domain(self):
+        shapes = [
+            [(0, 0), (3, 0), (3, 1), (1, 1), (1, 3), (0, 3)],
+            [(0, 0), (4, 0), (4, 3), (3, 3), (3, 1), (1, 1), (1, 3), (0, 3)],
+        ]
+        for shape in shapes:
+            points_3d = [(x, y, 0.0) for x, y in shape]
+            planes = build_boundary_planes(points_3d, [35.0] * len(points_3d))
+            cells = lower_envelope_restricted_cells(shape, planes)
+            area = sum(abs(signed_area(cell)) for group in cells for cell in group)
+            self.assertAlmostEqual(area, abs(signed_area(shape)), places=7)
+
     def test_plane_for_horizontal_edge(self):
         pitch = 35.0
         plane = build_boundary_planes(
@@ -94,7 +107,6 @@ class PolygonTests(unittest.TestCase):
         for contour in (ccw, cw):
             planes = build_boundary_planes(contour, [30.0] * 4)
             self.assertEqual(len(planes), 4)
-            # The inward component is positive at the midpoint of each edge.
             for index, plane in enumerate(planes):
                 p = contour[index]
                 q = contour[(index + 1) % len(contour)]
@@ -106,6 +118,30 @@ class PolygonTests(unittest.TestCase):
         points = [(0, 0, 0), (4, 0, 0), (4, 3, 0), (0, 3, 0)]
         planes = build_boundary_planes(points, [30.0] * 4)
         self.assertEqual(boundary_envelope_conflicts(points, planes), [])
+
+    def test_surface_mesh_works_for_rectangle_l_and_u(self):
+        from core.mesh import build_roof_surface
+
+        fixtures = [
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
+             (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0),
+             (3.0, 3.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+             (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+        ]
+        for points in fixtures:
+            surface = build_roof_surface(points, [35.0] * len(points))
+            self.assertAlmostEqual(surface.surface_area_xy, surface.source_area_xy, places=7)
+            self.assertEqual(len(surface.faces), len(surface.face_slope_indices))
+            edge_uses = {}
+            for face in surface.faces:
+                for index, first in enumerate(face):
+                    second = face[(index + 1) % len(face)]
+                    key = tuple(sorted((first, second)))
+                    edge_uses[key] = edge_uses.get(key, 0) + 1
+            self.assertLessEqual(max(edge_uses.values()), 2)
+            self.assertTrue(all(len(face) >= 3 for face in surface.faces))
 
 
 if __name__ == "__main__":
