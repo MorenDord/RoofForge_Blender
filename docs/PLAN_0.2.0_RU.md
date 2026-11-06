@@ -95,7 +95,7 @@ The custom Python weighted-wavefront candidate currently assumes constant-Z eave
 
 ### Собственный Python weighted wavefront (кандидат; пока не подключён к Blender)
 
-CI runs [42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) и [42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR) прошли полностью на commit `603a7b5d0fa696af801cf55154a05549aecc1317`: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
+CI runs [42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302884369) (push) и [42302896037](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302896037) (PR) прошли полностью на commit `2a65724cd3df7cd7566a06295b7a3e38246c4e38`: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark с отдельными wavy L/U, Rust diagnostics, исторические benchmarks и cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -110,6 +110,14 @@ CI runs [42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/run
 | 32 | 7.77 мс | 17.09 мс | 35.13 мс | 74.13 мс | 525 / 526 |
 | 64 | 21.34 мс | 32.19 мс | 212.63 мс | 474.54 мс | 2089 / 2091 |
 
+Отдельные волнистые L/U fixtures, 64 ребра, variable pitch, median трёх повторов:
+
+| Форма | Trace | Сборка поверхности | Фасет / вершины |
+|---|---:|---:|---:|
+| Wavy L | 159.66 мс | 352.61 мс | 2038 / 2041 |
+| Wavy U | 149.17 мс | 360.82 мс | 2085 / 2086 |
+
+Оба сценария проходят полное покрытие XY-контура, сохранение slope metadata и закрытый manifold-shell. Это benchmark тех же геометрий, что используются в 64-edge L/U регрессионных тестах.
 На предельном variable-pitch случае сборка поверхности первоначально занимала 28.50 секунды. Причина — T-junction pass проверял все вершины для каждого ребра каждой фасеты. После добавления трёх отсортированных координатных индексов с выбором наиболее узкого диапазона и сохранения точной 3D-проверки то же время снизилось до 474.54 мс (примерно в 60 раз). Это уже на порядок практичнее, но около половины секунды на сложном 64-рёберном contour пока остаётся верхним, не идеальным live-preview временем.
 
 Для 64 рёбер переменный профиль создаёт 2 089 фасет и 2 091 вершину. Все фасеты сохраняют source-slope metadata; проверки подтверждают полное покрытие исходного XY-контура, shell edge/vertex manifold и отсутствие граней ниже локальной координатной точности.
