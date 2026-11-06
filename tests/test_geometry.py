@@ -10,6 +10,7 @@ from core.planes import boundary_envelope_conflicts, build_boundary_planes
 from core.envelope import lower_envelope_restricted_cells
 from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
+from core.validation import validate_closed_mesh
 
 
 class PolygonTests(unittest.TestCase):
@@ -188,6 +189,32 @@ class PolygonTests(unittest.TestCase):
         with self.assertRaises(GeometryInputError) as ctx:
             build_roof_shell(surface, 0.0)
         self.assertEqual(ctx.exception.code, "INVALID_THICKNESS")
+
+
+    def test_closed_mesh_validator_accepts_generated_shell(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)]
+        surface = build_roof_surface(points, [35.0] * len(points))
+        shell = build_roof_shell(surface, 0.12)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_closed_mesh_validator_rejects_open_surface(self):
+        vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        diagnostics = validate_closed_mesh(vertices, [(0, 1, 2)])
+        self.assertIn("BOUNDARY_EDGE", {item.code for item in diagnostics})
+
+    def test_closed_mesh_validator_detects_bow_tie_vertex(self):
+        vertices = [
+            (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1),
+            (-1, 0, 0), (0, -1, 0), (0, 0, -1),
+        ]
+        faces = [
+            (0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3),
+            (0, 5, 4), (0, 4, 6), (0, 6, 5), (4, 5, 6),
+        ]
+        codes = {item.code for item in validate_closed_mesh(vertices, faces)}
+        self.assertIn("NON_MANIFOLD_VERTEX", codes)
+
 
 
 if __name__ == "__main__":
