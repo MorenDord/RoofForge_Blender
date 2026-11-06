@@ -4,7 +4,12 @@ import unittest
 from core.geometry import signed_area
 from core.mesh import build_roof_shell
 from core.validation import validate_closed_mesh
-from core.wavefront import build_wavefront_roof_surface, run_weighted_wavefront
+from core.wavefront import (
+    build_wavefront_roof_surface,
+    collect_loop_events,
+    create_wavefront_state,
+    run_weighted_wavefront,
+)
 
 
 class WeightedWavefrontCorpusTests(unittest.TestCase):
@@ -24,6 +29,26 @@ class WeightedWavefrontCorpusTests(unittest.TestCase):
             (0.0, 8.0),
         ]
         self.assertGreater(signed_area(points_xy), 0.0)
+
+        state = create_wavefront_state(
+            [(x, y, 0.0) for x, y in points_xy],
+            [35.0] * len(points_xy),
+        )
+        initial_events = collect_loop_events(
+            state.loops[0],
+            state.edges,
+            state.current_time,
+            state.epsilon,
+        )
+        split_events = [
+            event for event in initial_events
+            if event.kind.value == "SPLIT_CANDIDATE"
+        ]
+        self.assertGreaterEqual(
+            len(split_events),
+            2,
+            "Fixture should contain a genuinely simultaneous multi-split opportunity.",
+        )
 
         pitch_sets = [
             [35.0] * len(points_xy),
