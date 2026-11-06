@@ -155,7 +155,7 @@ The geometry benchmark artifact shows the symmetric concave 64-edge wavefront su
 
 ## Remaining 0.2.0 blockers and next work
 
-1. **Solver correctness first.** The custom Python wavefront now passes the deterministic symmetric concave radial family at 8/16/32/64 edges and existing hand-built L/U fixtures. Next gates are asymmetric/narrow-neck concave contours, per-edge variable pitch on the 64-edge family, near-simultaneous events and multiple split events at one time. Do not weaken validation or drop facets to make a test pass.
+1. **Solver correctness first.** The custom Python wavefront now passes the deterministic symmetric and variable-pitch concave radial family at 8/16/32/64 edges and existing hand-built L/U fixtures. Next gates are seeded/asymmetric/narrow-neck contours, near-simultaneous events and multiple split events at one time. Do not weaken validation or drop facets to make a test pass.
 2. **XYZ policy.** Preserve XYZ and support non-planar concave contours if the solver can prove a valid shell. Otherwise reject unsupported combinations with actionable diagnostics. Never flatten silently.
 3. **Runtime/distribution.** If using Rust, build and test distributable binaries for Blender-supported Windows/macOS/Linux without requiring users to install a compiler.
 4. **Per-edge UI.** Store stable source-edge IDs and a reliable mapping from each edge to its pitch.
@@ -167,7 +167,8 @@ The PR remains draft/WIP. Do not package or tag 0.2.0 until solver correctness, 
 
 ## Useful links
 - [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6)
-- [Latest code CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42296262858)
+- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301390659)
+- [Latest PR CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301399106)
 - [Implementation plan](https://github.com/MorenDord/RoofForge_Blender/blob/feature/0.2.0-arbitrary-contours-live-pitch/docs/PLAN_0.2.0_RU.md)
 - [Issue #3: weighted wavefront arbitrary events](https://github.com/MorenDord/RoofForge_Blender/issues/3)
 
