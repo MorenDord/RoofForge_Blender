@@ -164,8 +164,28 @@ fn extract_and_validate_roof(
     }
 
     if (projected_area - footprint_area).abs() > footprint_area.max(1.0) * 1.0e-7 {
+        let source_stats = (0..points.len())
+            .map(|source| {
+                let mut area = 0.0f64;
+                let mut face_count = 0usize;
+                for (face_source, face) in &top_faces {
+                    if *face_source == source {
+                        face_count += 1;
+                        let xy: Vec<[f64; 2]> = face.iter().map(|p| [p.x, p.y]).collect();
+                        area += signed_area(&xy).abs();
+                    }
+                }
+                let intervals = &boundary_intervals[source];
+                let boundary_ranges = intervals.iter()
+                    .map(|(lo, hi)| format!("{lo:.3}-{hi:.3}"))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                format!("e{source}:faces={face_count},area={area:.4},boundary=[{boundary_ranges}]")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
         return Err(format!(
-            "projected coverage mismatch: roof {projected_area:.12}, outline {footprint_area:.12}"
+            "projected coverage mismatch: roof {projected_area:.12}, outline {footprint_area:.12}; source facets: {source_stats}; degenerate={degenerate_sources:?}"
         ));
     }
     for (edge_id, intervals) in boundary_intervals.iter_mut().enumerate() {
@@ -399,7 +419,7 @@ fn run_points_case_mode(
     }
 
     if let Some(error) = last_error {
-        let compact = error.chars().take(180).collect::<String>().replace(',', ";");
+        let compact = error.chars().take(900).collect::<String>().replace(',', ";");
         println!("{label},{count},{concave},{variable_pitch},error,,,0,0,0,\"{compact}\"");
         return;
     }
