@@ -4,9 +4,9 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated baseline:** develop at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Current branch head:** `65c963ea6faac06ae813120772ef5b1f3a258f06`  
+**Current branch head:** see [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6); latest code-tested commit: `edc8a2422d911c315179d43f6c820227fcda1d7b`  
 **Current PR:** [#6 — WIP: RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; do not merge)  
-**Latest full code CI:** [Run 42296262858](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42296262858), successful on code commit `62adbce0608c5aa9e7d353cfb4900453724ac2ce`. The later branch commit `65c963e...` only refreshes documentation/measurements.  
+**Latest full code CI:** [Run 42298606023](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42298606023) (push) and [Run 42298615339](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42298615339) (PR), both successful on code commit `edc8a2422d911c315179d43f6c820227fcda1d7b`. The run includes the whole-point resolver, 8/16/32/64 concave regression, Blender 5.0.1 smoke/package validation and the geometry benchmarks.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## Confirmed 0.2.0 product scope
@@ -44,6 +44,27 @@ Validate/Create use this path. UI text no longer asks users to select an edge lo
 File: `tests/blender_smoke.py`
 
 Background smoke covers wire-only and face meshes, in Object and Edit Mode, with all mesh elements deselected. Latest CI passed Blender 5.0.1 smoke, ZIP package build and official extension validation. This does not replace manual GUI/viewport QA, nor does it prove native runtime compatibility on Windows/macOS.
+
+### Custom Python weighted wavefront — alpha candidate
+
+Files: `core/wavefront.py`, `tests/test_geometry.py`, `tests/benchmark_geometry.py`.
+
+The current implementation is a global event-driven state machine, not merely a convex-only solver. It supports flat-Z contours with one pitch per source edge, validated reflex split operations, separate child loops, one-split/one-collapse batches, grouped edge collapses, selected endpoint/cross-needle events, exact facet fragments, and strict surface boundary validation. Unsupported mixed event groups and multiple same-time splits on one loop are still rejected.
+
+A concrete failure was found in the deterministic alternating-radius concave fixture: from 16 through 64 edges the batch contained many `VERTEX_HIT` and `EDGE_COLLAPSE` events, all converging at one center point, but the resolver treated it as an unsupported cross-needle. Added `_resolve_simultaneous_point_termination()` now accepts that case only after rechecking every current vertex, every finite active edge, and every event position against the same point. It does not accept partial collapses or multiple terminal nodes.
+
+Regression coverage: `test_wavefront_resolves_symmetric_concave_point_terminations_through_64_edges` runs 8/16/32/64 edges, verifies full projected-area coverage, assembles the surface, builds the thickness shell and checks closed-mesh validity. It passes on Python 3.11/3.13.
+
+Latest CI artifact timings on the Actions Linux runner (three repeats; comparative only; equal pitch 35°):
+
+| Edges | Convex trace median | Concave trace median | Concave surface median |
+|---:|---:|---:|---:|
+| 8 | 1.33 ms | 0.40 ms | 1.12 ms |
+| 16 | 3.74 ms | 1.99 ms | 4.16 ms |
+| 32 | 13.76 ms | 6.29 ms | 13.86 ms |
+| 64 | 54.31 ms | 21.83 ms | 48.62 ms |
+
+The 64-edge concave case yields 64 faces and 65 welded vertices. This is one deterministic family, not a general correctness claim. Per-edge variable pitch on this radial family, narrow-neck cases, more general simultaneous split groups and mixed-height eaves remain to be tested. `build_moving_lines()` explicitly rejects mixed Z eaves. **The user-facing operator still calls `core.mesh.build_roof_surface()`; `build_wavefront_roof_surface()` is not yet wired into Blender.** Keep the PR draft until this is addressed.
 
 ### Historical solver optimization — test-only
 The old 2.6/2.9 Python solvers are copied under `tests/legacy_spatial_solver/` strictly for comparisons; they are not included in the installable extension.
@@ -96,24 +117,24 @@ Profiling overhead is included. Remaining cost is split between wavefront event 
 Conclusion: useful as a correctness/reference implementation for small flat L/U cases, but too slow for a genuinely live rebuild on complex 64-edge contours and not a validated general 3D solution.
 
 ### Other prototypes
-- `core/wavefront.py`: custom Python weighted event solver; useful constrained fixtures, but unresolved simultaneous/multi-split cases. Not approved for production integration.
 - `core/distance_field.py`: approximate transition geometry and global uniform refinement. Not an acceptable production replacement.
 - Non-planar support-plane lifting/all-pairs experiments are test-only and failed strict topology checks. Do not use them as fallback.
+- `surfer2 0.1.0`: source review found that weighted-event refinement work is discarded by the Rust port instead of being processed like the C++ engine. This is a source-level limitation, not merely a RoofForge test-harness issue; see [refine.rs](https://github.com/atsyplenkov/surfer2-rs/blob/master/src/triangulation/refine.rs). Do not keep tuning speed normalization as a substitute for implementing that missing logic.
 
 ## Latest CI
-Run [42296262858](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42296262858) completed successfully:
-- Python tests on 3.11 and 3.13;
+Runs [42298606023](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42298606023) (push) and [42298615339](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42298615339) (PR) both completed successfully on `edc8a2422d911c315179d43f6c820227fcda1d7b`:
+- Python tests on 3.11 and 3.13, including the new simultaneous-point regression for 8/16/32/64 edges;
 - Blender 5.0.1 background smoke, package build and official extension validation;
-- geometry benchmark (now limited to 64 edges);
-- Rust candidate diagnostics (now limited to 64 edges);
-- legacy spatial benchmarks (now limited to 64 edges);
+- geometry benchmark for convex and concave wavefront traces/surface assembly through 64 edges;
+- Rust candidate diagnostics (64-edge scope);
+- legacy spatial benchmarks (64-edge scope);
 - 64-edge cProfile.
 
-The latest code-tested commit is `62adbce...`; the current branch head `65c963e...` is a docs-only follow-up.
+The geometry benchmark artifact shows the symmetric concave 64-edge wavefront surface completing in 48.62 ms median, with 65 vertices and 64 faces.
 
 ## Remaining 0.2.0 blockers and next work
 
-1. **Solver correctness first.** A single production solver must pass convex, L, U, multi-notch and symmetric simultaneous-event fixtures with equal and per-edge pitches. Do not weaken validation or drop facets to make a test pass.
+1. **Solver correctness first.** The custom Python wavefront now passes the deterministic symmetric concave radial family at 8/16/32/64 edges and existing hand-built L/U fixtures. Next gates are asymmetric/narrow-neck concave contours, per-edge variable pitch on the 64-edge family, near-simultaneous events and multiple split events at one time. Do not weaken validation or drop facets to make a test pass.
 2. **XYZ policy.** Preserve XYZ and support non-planar concave contours if the solver can prove a valid shell. Otherwise reject unsupported combinations with actionable diagnostics. Never flatten silently.
 3. **Runtime/distribution.** If using Rust, build and test distributable binaries for Blender-supported Windows/macOS/Linux without requiring users to install a compiler.
 4. **Per-edge UI.** Store stable source-edge IDs and a reliable mapping from each edge to its pitch.
