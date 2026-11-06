@@ -20,7 +20,8 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
 - Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
 - Closed-mesh validator for edge incidence, face winding, connected components and vertex links.
-- Unit tests for rectangle, L/U contours, plane constraints, winding and closed-shell topology.
+- Weighted wavefront kinematics for constant-height eaves, convex collapse simulation, stale-aware event queue, finite-edge split candidates and pure single-loop split mutation.
+- Unit tests for rectangle, experimental L/U distance-field meshes, plane constraints, winding, closed-shell topology and weighted wavefront event/split primitives.
 
 ## Development install
 1. Clone or download this repository.
@@ -50,7 +51,7 @@ From the repository root:
 - Input must be one simple closed loop in XY.
 - Collinear contour vertices and projected-vertical edges are rejected.
 - Convex contour shells are covered by the current acceptance fixtures. Some concave L/U roof layouts currently create internal discontinuities in the edge-plane arrangement and are rejected instead of emitting a broken mesh; resolving this is a critical open geometry task.
-- The weighted straight-skeleton solver for exact planar concave roofs is not yet implemented. `docs/CONCAVE_GEOMETRY.md` records the target algorithm, event taxonomy, constraints and test fixtures.
+- The full weighted straight-skeleton solver for exact planar concave roofs is not yet implemented. The current wavefront module has the first event/topology primitives, but not the multi-loop event simulation or complete facet assembly. `docs/CONCAVE_GEOMETRY.md` records current implementation and the remaining work.
 - The geometry kernel has unit coverage, but Blender runtime behavior, mesh attributes and Edit Mode workflow have not yet been verified in Blender 5.0.
 - Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
 
