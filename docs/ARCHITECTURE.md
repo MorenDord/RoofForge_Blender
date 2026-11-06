@@ -10,103 +10,55 @@
 
 ## Package layout
 
-```text
-roof_forge/
-  blender_manifest.toml
-  __init__.py
-  addon/
-    registration.py
-    properties.py
-    operators/
-      generate.py
-      rebuild.py
-      detach.py
-      validate.py
-      analyze_existing.py
-      profiles.py
-      export.py
-    ui/
-      panel.py
-      pitch_map.py
-      draw_helpers.py
-      state.py
-    handlers/
-      lifecycle.py
-      live_update.py
-      depsgraph.py
-    adapters/
-      mesh_io.py
-      object_registry.py
-      collections.py
-      units.py
-  core/
-    model.py
-    ids.py
-    validation.py
-    polygon2d.py
-    triangulation.py
-    planes.py
-    envelope.py
-    topology.py
-    shell.py
-    adjacency.py
-    classification.py
-    profiles.py
-    seams.py
-    uv.py
-    optimization.py
-    lod.py
-  tests/
-    fixtures/
-    test_polygon2d.py
-    test_planes.py
-    test_envelope.py
-    test_topology.py
-    test_profiles.py
-    blender/
-      smoke_test.py
-docs/
-  SPECIFICATION.md
-  ARCHITECTURE.md
-  ROADMAP.md
-```
+- addon/registration.py, properties.py
+- addon/operators/generate.py, validate.py, rebuild.py, detach.py, analyze_existing.py, profiles.py, export.py
+- addon/ui/panel.py, pitch_map.py, draw_helpers.py, state.py
+- addon/handlers/lifecycle.py, live_update.py, depsgraph.py
+- addon/adapters/mesh_io.py, object_registry.py, collections.py, units.py
+- core/geometry.py — predicates, clipping, plane primitives and shared math
+- core/planes.py — boundary-edge plane generation and active-halfspace checks
+- core/envelope.py — convex and concave lower-envelope partition
+- core/mesh.py — welded mesh payload assembly and coverage checks
+- core/model.py, ids.py, validation.py, shell.py, adjacency.py, classification.py, profiles.py, seams.py, uv.py, optimization.py, lod.py
+- tests/ — pure Python fixtures and Blender background integration tests
 
 ## Data flow
 
-1. **Acquire:** adapter reads one source boundary loop into immutable `RoofInput`.
-2. **Validate input:** polygon simplicity, edge lengths, winding, coordinate scale and pitch values.
-3. **Build planes:** one plane per boundary edge, identified by persistent `slope_id`.
-4. **Partition:** clip the domain by pairwise plane equality half-planes; each region is where its plane is the lower envelope. Use a robust 2D polygon clipping strategy; do not rely on arbitrary face inset or XY-only welding.
-5. **Assemble surface:** create shared vertices from quantized/clustered XYZ with scale-aware tolerance, preserving exact plane constraints. Resolve multi-plane nodes deterministically.
-6. **Shell:** create bottom surface and boundary walls. Validate before commit.
-7. **Features:** derive adjacency graph from final roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
-8. **Validate output:** manifold, degeneracy, normal, intersection and continuity checks.
-9. **Commit:** swap temporary output to scene only if valid; otherwise keep last-valid output.
-10. **Lifecycle:** attach metadata UUIDs and generation tokens; register only the required callbacks; detach removes all callbacks and invalidates tokens.
+1. Acquire: adapter reads one source boundary loop into ordered XYZ tuples in source-local coordinates.
+2. Validate: polygon simplicity, edge lengths, winding, projected vertical edges and pitch compatibility.
+3. Build planes: one plane per boundary edge, identified by a stable slope index/UUID at the model layer.
+4. Convex partition: clip the domain by pairwise plane equality halfplanes.
+5. Concave partition: ear-clip the simple polygon; split each triangle by all source-edge supporting lines; determine the active inward-halfspace planes per convex arrangement cell; calculate a lower envelope only among active planes.
+6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
+7. Validate coverage: sum projected face areas and compare against the input polygon; reject missing/overlapping coverage and edges shared by more than two faces.
+8. Shell: create bottom surface and boundary walls in a later stage.
+9. Features: derive adjacency graph from roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
+10. Validate output and commit temporary datablocks only after success.
+11. Lifecycle: attach metadata UUIDs and generation tokens; detach removes all callbacks and invalidates tokens.
 
 ## Core data structures
+- RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
+- SlopeSpec: slope UUID, boundary edge UUID, pitch degrees, plane coefficients.
+- RoofRegion: slope UUID, ordered 3D boundary vertices, 2D polygon, adjacency references.
+- RoofSurface: welded XYZ vertex list, polygon index lists, face-to-slope indices, source/surface projected areas.
+- RoofBuildSettings: overhang, thickness, quality, tolerance policy.
+- FeatureGraph: nodes and shared region boundaries with semantic type.
+- GeneratedPart: stable part UUID, type, source UUID, mesh payload, dependency signature.
+- BuildResult: meshes, diagnostics, statistics, dependency signature.
 
-- `RoofInput`: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
-- `SlopeSpec`: slope UUID, boundary edge UUID, pitch radians/degrees, plane coefficients.
-- `RoofRegion`: slope UUID, ordered 3D boundary vertices, 2D polygon, adjacency references.
-- `RoofBuildSettings`: overhang, thickness, quality, tolerance policy.
-- `FeatureGraph`: nodes and shared region boundaries with semantic type.
-- `GeneratedPart`: stable part UUID, type, source UUID, mesh payload, dependency signature.
-- `BuildResult`: meshes, diagnostics, statistics, dependency signature.
+## Geometry algorithms
 
-## Algorithms
+### A. Plane from a 3D boundary edge
+Given edge endpoints P0 and P1, projected XY edge length L, unit tangent t, inward unit normal n, and edge grade g_t=(z1-z0)/L, require plane gradient magnitude |g|=tan(pitch). The remaining inward component is g_n=sqrt(tan(pitch)^2-g_t^2), and g=g_t*t+g_n*n. This exactly preserves both endpoints. If the radicand is negative, the requested pitch is incompatible with the existing eave grade and the build is rejected.
 
-### A. Lower envelope
-For plane i, represent height as z_i(x,y)=a_i x+b_i y+c_i. For each candidate region i, start with the roof domain polygon and clip it against every inequality z_i <= z_j + eps. Each inequality is a 2D half-plane. The surviving polygon is the region where plane i is lowest. Empty regions are discarded. Coincident planes require deterministic ownership and diagnostics. Use adaptive eps based on bounding-box scale.
+### B. Lower envelope for convex contours
+Represent each plane as z_i(x,y)=a_i*x+b_i*y+c_i. For candidate plane i, clip the domain by every inequality z_i<=z_j. Coincident planes are assigned to the earliest stable input index so they do not duplicate the same region.
 
-### B. Concave domain
-Validate polygon simplicity first. Triangulate with a constrained polygon triangulator and clip each triangle or use a robust polygon library only if it can be shipped without dependency risk. Merge resulting coplanar cells by slope ID while preserving shared boundaries. Do not use unconstrained fan triangulation for concave shapes.
+### C. Concave contours and finite plane domains
+An infinite extension of a concave edge plane may cut across a remote part of the polygon. Treat each plane as valid only on the interior halfspace of its source edge. Ear-clip the source polygon, split each triangle by all edge supporting lines, classify each resulting convex cell by its active plane set, and compute a lower envelope inside that active set. This arrangement method is deterministic but can produce many small cells; sliver-area filtering and performance benchmarking remain required.
 
-### C. Shared topology
-Build a vertex registry keyed by 3D position with scale-aware tolerance and plane-membership metadata. Never merge solely by XY. At multi-plane intersections, solve/verify all participating plane equations and choose a canonical coordinate. Record any merge that exceeds tolerance as an error.
-
-### D. Feature classification
-Build a region adjacency graph. For each shared boundary, compare oriented region normals and interior-side relationship. Classify convex and concave junctions with signed dihedral angle in roof-local frame. Boundary edges are eaves unless overridden. Manual overrides take precedence and are stored by stable edge/feature IDs.
+### D. Shared topology
+Build a vertex registry keyed by 3D position with scale-aware tolerance and plane-membership metadata. Never merge solely by XY. At multi-plane intersections, solve/verify all participating plane equations and choose a canonical coordinate. Record any merge that exceeds tolerance as an error. The initial implementation uses a 3D spatial hash and coverage checks; a full multi-plane constraint solver is still required for release quality.
 
 ### E. Profile construction
 Generate profile strips from the shared boundary graph, not isolated per-edge solids. Each edge has a cross-section profile. At nodes, solve a junction patch that trims/joins incident strips; remove internal caps and weld compatible vertices. Default extrusion/rise vector is roof-local +Z. Profile generation is transactional and separate from roof generation.
@@ -123,9 +75,9 @@ Property updates enqueue a dirty-set with a debounce interval. A per-roof token 
 - Persist UUIDs and settings as Blender ID properties or PropertyGroups; do not persist raw Python pointers.
 
 ## Test strategy
-- Pure unit tests for 2D predicates, clipping, plane intersections, lower envelope and stable IDs.
-- Property-based/random polygon tests with seeded reproducibility.
-- Golden fixtures: rectangle, convex pentagon, L, U, narrow notch, acute corner, different boundary Z, mixed pitch, parallel planes, coincident planes.
+- Pure unit tests for 2D predicates, clipping, plane construction, restricted envelopes, vertex welding and surface coverage.
+- Seeded random simple polygon tests and adversarial polygons.
+- Golden fixtures: rectangle, convex pentagon, L, U, narrow notch, acute corner, different boundary Z, mixed pitch, parallel planes and coincident planes.
 - Topology tests: manifold shell, shared ridge, valley, hip, three-way and four-way junctions.
 - Blender background tests for registration, save/reopen, live update, detach, rename invalidation, undo/redo and export.
 - Performance benchmarks at 4, 8, 16, 32 and 64 boundary edges.
