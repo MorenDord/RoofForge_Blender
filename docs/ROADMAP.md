@@ -1,21 +1,27 @@
 # RoofForge 1.0 — Development Roadmap
 
+## Current implementation state
+The initial surface-generation vertical slice is on branch develop. Pure-Python tests cover plane construction and open-surface generation for rectangle, L and U fixtures. The Blender operator and UI entry point are scaffolded but still need runtime validation in Blender 5.0.
+
 ## Milestone 0 — Repository and engineering foundation
-- [ ] Modular Blender extension package and manifest
-- [ ] CI: syntax/import checks and pure Python tests
-- [ ] Versioned specification, architecture and contribution guide
-- [ ] Baseline regression fixtures from the 0.3 prototype
-**Exit:** clean install/enable/disable in Blender 5.0; no registration leaks.
+- [x] Modular Blender extension package and manifest
+- [x] CI workflow for syntax checks and pure Python tests
+- [x] Versioned specification, architecture and roadmap
+**Exit:** clean install/enable/disable in Blender 5.0; no registration leaks. Not yet verified.
 
 ## Milestone 1 — Geometry kernel alpha (Critical)
-- [ ] Immutable input model and stable UUIDs
-- [ ] Robust boundary validation and diagnostics
-- [ ] Plane construction from arbitrary 3D boundary edges
-- [ ] Scale-aware 2D half-plane clipping
-- [ ] Lower-envelope partition and deterministic shared vertices
-- [ ] Concave polygon support with constrained triangulation
-- [ ] Solid shell and topology validator
-**Exit:** supported fixtures pass unit and Blender integration tests; no known open/non-manifold edges in closed-shell output.
+- [x] Selected closed-loop acquisition in Edit/Object Mode (adapter implemented; Blender test pending)
+- [x] Simple XY contour validation and winding detection
+- [x] Plane construction from ordered 3D boundary edges and per-edge pitch values
+- [x] Deterministic ear-clipping for simple concave contours without collinear vertices
+- [x] Restricted lower-envelope partition for concave contours
+- [x] 3D vertex welding and face-to-slope metadata
+- [x] Projected domain coverage check and >2-face edge guard
+- [ ] Full boundary-loop and non-manifold vertex validator
+- [ ] Robust handling of collinear and near-degenerate contour vertices
+- [ ] Multi-plane node solver and adversarial precision suite
+- [ ] Closed solid shell with thickness and eaves
+**Exit:** supported fixtures pass unit and Blender integration tests; closed-shell output is manifold.
 
 ## Milestone 2 — Artist workflow (Critical)
 - [ ] Numbered top-view pitch map
@@ -56,12 +62,5 @@
 - [ ] 1.0 release candidate and signed release notes
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
-## Initial issue candidates
-1. Define stable slope identity and source-boundary fingerprint.
-2. Implement scale-aware geometry tolerance policy.
-3. Implement robust polygon simplicity validation and constrained triangulation.
-4. Implement lower-envelope clipping with degeneracy diagnostics.
-5. Build deterministic shared vertex registry.
-6. Add shell manifold validator.
-7. Implement transactional output swap.
-8. Implement timer/handler lifecycle manager.
+## Next implementation task
+Close the geometry alpha gate by adding a boundary/manifold validator, stress tests for near-degenerate intersections and a watertight thickness/eaves builder. Do not begin the pitch-map UI until the geometry core can produce a closed shell reliably.
