@@ -4,9 +4,10 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Working branch:** `develop`  
 **Do not modify:** `main`  
-**Latest full CI-verified project snapshot:** `5569d8311eee906283112cb9001a82f8cbab66b3`  
-**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42263378860  
-**CI result:** 58 pure-Python tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not been tested.
+**Latest full code/test snapshot:** `e5bf78df25a26f1acce04ce5e736cc27cf85e239`  
+**Latest documentation snapshot before this handoff:** `d9af89c9ed4ebb48fb06f5809180ea28408179dd`  
+**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42264904390  
+**CI result:** 61 pure-Python tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not been tested.
 
 ## Start here after reconnect
 
@@ -46,6 +47,9 @@ Implemented:
 - Global multi-loop event state; all live loops advance to the globally earliest event.
 - Per-source-edge swept facet fragments and skeleton vertex trajectories.
 - Restricted cross-needle resolver for one or multiple reflex endpoint-hit groups, only when the remaining finite fronts pair as opposite, endpoint-matching finite segments at the event height. Opposing speeds may differ.
+- Transactional resolver for exactly one strict split plus one edge-collapse on the same loop at the same event time. It splits the target front, revalidates the collapsing segment from adjacent support-line intersections, terminates one child from the independently checked split/collapse points when they lie on both coincident fronts, and reschedules the surviving child.
+- Ordinary two-edge needle termination now checks the finite segment endpoints, not only the coincident infinite support lines. Partial overlap is rejected unless handled by the constrained compound split/collapse case.
+- Surface assembly retains valid small swept facets down to the vertex-weld precision threshold; the solid-shell validator still rejects faces below its scale-aware minimum-area threshold.
 - T-junction conformance: inserts shared 3D vertices into earlier facet edges when later split events subdivide them.
 - `run_weighted_wavefront` and `build_wavefront_roof_surface`: trace, weld, verify source planes, projected coverage and source-boundary continuity.
 
@@ -55,28 +59,30 @@ Implemented:
 - L contour: equal-pitch and specifically constrained asymmetric cross-needle terminal events; clockwise/reversed contour also passes.
 - U contour: equal-pitch and specifically constrained asymmetric multi-needle events with three terminal skeleton arcs.
 - Nonzero constant eave elevation.
-- The assembled RoofSurface for each listed fixture produces a shell that passes edge/vertex manifold validation.
-- Latest CI: 58/58 tests on Python 3.11 and 3.13, including unequal- and near-equal-speed L/U fixtures plus event-order diagnostics.
+- The assembled RoofSurface for rectangle, V-notch, equal/asymmetric L/U, and the two constrained asymmetric L split/collapse fixtures produces shells that pass edge/vertex manifold validation.
+- A sub-tolerance sliver test confirms the surface retains the real facet but shell creation rejects it with `ZERO_AREA_FACE`; no manifold validator tolerance has been weakened.
+- Latest CI: 61/61 tests on Python 3.11 and 3.13, including unequal-/near-equal-speed fixtures, event-order diagnostics, two compound split/collapse cases, partial-overlap rejection and sub-tolerance shell rejection.
 
 ## Known limitations — do not overstate support
 
 - Wavefront supports **constant-Z eaves only**. Mixed-height eaves need a separate generalized 3D formulation.
 - L/U have been verified for the listed equal-pitch and specifically constrained asymmetric fixtures. This is not arbitrary mixed-pitch L/U support.
-- The cross-needle resolver accepts unequal opposing speeds only when complete finite segments coincide endpoint-to-endpoint at the same event height. Partial overlaps are not resolved.
-- A small change in opposing speed sums can separate the endpoint hit and edge-collapse times. Candidate ordering is tested, but a mixed split/collapse batch or sequential split/collapse state update is not yet implemented.
+- The ordinary cross-needle resolver accepts unequal opposing speeds only when complete finite segments coincide endpoint-to-endpoint at the same event height. A constrained same-loop batch of exactly one strict split plus one edge collapse is also supported; the split point and collapse point delimit the terminal partial segment. Generic partial overlaps, multiple overlap intervals and arbitrary surviving tails remain unsupported.
+- The compound event is not a general simultaneous-event resolver. It does not yet support multiple splits, additional collapses in the same batch or higher-order vertex collisions. Distinct-time event pairs after a topology change still need explicit end-to-end adversarial fixtures and stale-queue verification.
+- The surface assembler retains narrow fragments, but the final shell validator rejects any face below its scale-aware area threshold. Very narrow sliver fixtures are therefore explicitly rejected rather than silently simplified.
 - Multiple independent split events on one loop, nested split sequences and higher-order vertex collisions are not generally resolved.
 - Geometric self-intersection checking is not implemented yet.
 - The wavefront alpha is **not connected to the Blender operator** and has not been runtime-tested inside Blender 5.0. Do not route user-facing roof creation through it yet.
 
 ## Exact next development task
 
-Resolve **weighted split/collapse event ordering and partial-overlap needles**.
+Extend beyond the **constrained one-split/one-collapse batch** without broadening support claims prematurely.
 
-1. Implement a topology update for a reflex split that is simultaneous with an edge collapse on the same loop, with full participant revalidation.
-2. Implement the sequential case where a tiny speed-sum difference makes one event occur first and the other occur later; regenerate candidates after each topology change rather than batching stale candidates.
-3. Add partial-overlap opposing-front events where the coincident segment endpoints do not both match; split the overlap into valid terminal arcs and continue any surviving wavefront portions where mathematically required, or reject explicitly.
-4. Preserve exact source-plane facets, projected coverage, boundary-chain checks, T-junction conformance, edge/vertex manifold checks and deterministic output.
-5. Then address multiple independent splits on one loop, nested split sequences and higher-order vertex collisions.
+1. Add a distinct-time split/collapse fixture where the event-time delta is safely above the queue's numerical batching tolerance. Process the first event, assert the old loop generation and stale candidates cannot mutate the replacement topology, and confirm the second event is recomputed on the new child loop(s).
+2. Cover both event orders (collapse first and split first) with exact event logs, monotonic time, source-plane membership, projected coverage, perimeter-chain continuity and full shell manifold validation.
+3. Implement generic partial-overlap opposing-front events, including overlap endpoints, multiple intervals and surviving tails. Until each topology is fully derived, reject it with a stable diagnostic.
+4. Then handle multiple independent splits on one loop, nested split sequences and higher-order vertex collisions.
+5. Keep the face-area validator unchanged; report sub-tolerance slivers as unsupported geometry.
 6. Keep mixed-Z eaves out of this 2D solver. Do not connect the alpha to the Blender generator until the broader geometry gate passes.
 
 ## Main project documents
