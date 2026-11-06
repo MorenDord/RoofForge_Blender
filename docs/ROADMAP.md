@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice now builds a closed solid shell for a verified rectangular fixture. Pure-Python CI covers plane construction, top-face winding, global-Z shell thickness, boundary continuity, and edge/vertex manifold validation. L/U arrangements are still experimental: if they create an internal open edge, RoofForge rejects the surface before creating an object. Blender 5.0 runtime validation remains pending. Latest recorded CI run passed 21 tests on Python 3.11 and 3.13.
+The initial geometry vertical slice builds a closed solid shell for a verified rectangular fixture. A separate experimental finite-segment distance field also creates closed L/U shells with per-edge pitches, but its endpoint transition patches are approximated and it is not the production planar-facet solution. Pure-Python CI now passes 24 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -14,12 +14,15 @@ The initial geometry vertical slice now builds a closed solid shell for a verifi
 - [x] Simple XY contour validation and winding detection
 - [x] Plane construction from ordered 3D boundary edges and per-edge pitch values
 - [x] Deterministic ear-clipping for simple concave contours without collinear vertices
-- [x] Experimental concave arrangement partition (cell-area tests only; not yet accepted as continuous roof geometry)
+- [x] Experimental concave arrangement partition (rejected for production due internal discontinuities)
+- [x] Experimental finite-segment distance field builds continuous closed L/U comparison meshes (corner transitions approximated; not a production roof solver)
+- [ ] Weighted straight-skeleton solver for concave contours with per-edge pitch
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
 - [x] Closed solid shell for the verified rectangle fixture; thickness extrudes along roof-local -Z
-- [ ] Continuous concave L/U surface solver; current invalid outputs are rejected safely
+- [ ] Exact planar concave L/U solver with edge-collapse, split, parallel-edge and simultaneous-event handling
+- [ ] Generalized concave solver for mixed-height eaves
 - [x] Closed-mesh edge/vertex-link validator (boundary edges, edge incidence, winding, connected components, bow-tie vertices)
 - [ ] Geometric self-intersection detection and zero-area diagnostics integrated into the Blender UI
 - [ ] Robust handling of collinear and near-degenerate contour vertices
@@ -67,4 +70,4 @@ The initial geometry vertical slice now builds a closed solid shell for a verifi
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Implement continuous finite roof-face regions for concave contours and solve multi-plane junctions. Preserve the new rejection guard. Then add overhang/eaves and geometric self-intersection validation before starting pitch-map UI.
+Implement the weighted straight-skeleton wavefront solver for constant-Z concave contours. Keep the finite-segment distance field as a comparator, not a production substitute. After exact planar L/U support, generalize to mixed-height eaves, then add overhang/eaves and self-intersection validation.
