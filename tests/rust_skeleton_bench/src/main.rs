@@ -472,6 +472,16 @@ fn main() {
     run_points_case_mode("concave_L_equal_pitch_pslg_weighted_raw", &l_shape, &[35.0; 6], repeats, InputMode::PslgPitchWeightsRaw);
     run_points_case("concave_L_variable_pitch", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats);
     run_points_case_mode("concave_L_variable_pitch_raw", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats, InputMode::PslgPitchWeightsRaw);
+    for varied_edge in 0..6 {
+        let mut pitches = [35.0; 6];
+        pitches[varied_edge] = 30.0 + varied_edge as f64;
+        run_points_case(
+            &format!("concave_L_only_edge_{varied_edge}_varies"),
+            &l_shape,
+            &pitches,
+            repeats,
+        );
+    }
 
     let u_shape = [
         [0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [7.0, 8.0],
