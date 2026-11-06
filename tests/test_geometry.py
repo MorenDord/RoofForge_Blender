@@ -8,7 +8,7 @@ from core.geometry import (
 )
 from core.planes import boundary_envelope_conflicts, build_boundary_planes
 from core.envelope import lower_envelope_restricted_cells
-from core.mesh import build_roof_surface
+from core.mesh import build_roof_surface, validate_surface_boundary_edges
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
@@ -990,7 +990,79 @@ class PolygonTests(unittest.TestCase):
                 self.assertEqual(
                     len(surface.face_slope_indices), len(surface.faces)
                 )
-                shell = build_roof_shell(surface, 0.10)
+
+                # Emit useful diagnostics before the closed-shell validator
+                # rejects an exceptionally small cap or perimeter segment.
+                thickness = 0.10
+                scale = max(
+                    1.0,
+                    max(v[0] for v in surface.vertices) - min(v[0] for v in surface.vertices),
+                    max(v[1] for v in surface.vertices) - min(v[1] for v in surface.vertices),
+                    max(v[2] for v in surface.vertices) - min(v[2] for v in surface.vertices),
+                    thickness,
+                )
+                tolerance = max(1e-12, 1e-9 * scale * 100.0)
+                boundary_edges = validate_surface_boundary_edges(
+                    surface.vertices, surface.faces, surface.boundary_xy, tolerance * 5.0
+                )
+                vertex_count = len(surface.vertices)
+                shell_vertices = tuple(surface.vertices) + tuple(
+                    (x, y, z - thickness) for x, y, z in surface.vertices
+                )
+                top_faces = list(surface.faces)
+                bottom_faces = [
+                    tuple(index + vertex_count for index in reversed(face))
+                    for face in surface.faces
+                ]
+                side_faces = [
+                    (first, first + vertex_count, second + vertex_count, second)
+                    for first, second in boundary_edges
+                ]
+                shell_faces = top_faces + bottom_faces + side_faces
+
+                def face_area(face):
+                    nx = ny = nz = 0.0
+                    for local_index, current_index in enumerate(face):
+                        current = shell_vertices[current_index]
+                        following = shell_vertices[face[(local_index + 1) % len(face)]]
+                        nx += (current[1] - following[1]) * (current[2] + following[2])
+                        ny += (current[2] - following[2]) * (current[0] + following[0])
+                        nz += (current[0] - following[0]) * (current[1] + following[1])
+                    return 0.5 * math.sqrt(nx * nx + ny * ny + nz * nz)
+
+                area_limit = 1e-9 * scale * scale
+                small_faces = [
+                    (index, face_area(face), face)
+                    for index, face in enumerate(shell_faces)
+                    if face_area(face) <= area_limit
+                ]
+                if small_faces:
+                    details = []
+                    top_count = len(top_faces)
+                    for index, area, face in small_faces[:8]:
+                        if index < top_count:
+                            kind = "top"
+                            source = surface.face_slope_indices[index]
+                        elif index < 2 * top_count:
+                            kind = "bottom"
+                            source = surface.face_slope_indices[index - top_count]
+                        else:
+                            kind = "side"
+                            source = None
+                        details.append({
+                            "face": index,
+                            "kind": kind,
+                            "source_slope": source,
+                            "area": area,
+                            "vertices": [shell_vertices[v] for v in face],
+                        })
+                    self.fail(
+                        f"edge_count={count}: {len(surface.faces)} top faces, "
+                        f"{len(boundary_edges)} side faces, area_limit={area_limit:.9g}; "
+                        f"small faces={details}"
+                    )
+
+                shell = build_roof_shell(surface, thickness)
                 self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_wavefront_rejects_sub_tolerance_split_collapse_sliver_in_shell(self):
