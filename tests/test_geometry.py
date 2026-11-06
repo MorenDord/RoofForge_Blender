@@ -14,7 +14,8 @@ from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
 from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
-    apply_split_event, build_moving_lines, collect_loop_events, find_split_candidates,
+    advance_wavefront_state, apply_split_event, build_moving_lines,
+    collect_loop_events, create_wavefront_state, find_split_candidates,
     simulate_convex_wavefront, _line_intersection,
 )
 
@@ -486,6 +487,51 @@ class PolygonTests(unittest.TestCase):
             self.assertEqual(sorted(len(child.edge_ids) for child in result.loops), [4, 4])
             self.assertEqual(result.loops[0].generation, 3)
             self.assertEqual(result.loops[1].generation, 3)
+
+
+
+    def test_global_wavefront_state_resolves_rectangle_needle(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        state = create_wavefront_state(points, [45.0] * 4)
+        batch = advance_wavefront_state(state)
+        self.assertIsNotNone(batch)
+        self.assertAlmostEqual(state.current_time, 1.0, places=7)
+        self.assertTrue(state.is_complete)
+        self.assertEqual(state.terminal_loops, {0: "NEEDLE"})
+
+    def test_global_wavefront_state_resolves_square_point(self):
+        points = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0),
+                  (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        state = create_wavefront_state(points, [45.0] * 4)
+        batch = advance_wavefront_state(state)
+        self.assertIsNotNone(batch)
+        self.assertAlmostEqual(state.current_time, 1.0, places=7)
+        self.assertTrue(state.is_complete)
+        self.assertEqual(state.terminal_loops, {0: "POINT"})
+
+    def test_global_wavefront_state_processes_v_notch_split(self):
+        points = [
+            (0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 4.0, 0.0),
+            (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
+            (0.0, 4.0, 0.0),
+        ]
+        state = create_wavefront_state(points, [45.0] * len(points))
+        split_seen = False
+        for _ in range(16):
+            batch = advance_wavefront_state(state)
+            if batch is None:
+                break
+            if any(event.kind == EventKind.SPLIT_CANDIDATE for event in batch.events):
+                split_seen = True
+                break
+        self.assertTrue(split_seen)
+        self.assertEqual(len(state.loops), 2)
+        self.assertEqual(sorted(len(loop.edge_ids) for loop in state.loops.values()), [4, 4])
+        self.assertEqual(
+            sorted(loop.generation for loop in state.loops.values()),
+            [1, 1],
+        )
 
 
 
