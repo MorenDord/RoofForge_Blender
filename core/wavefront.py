@@ -557,6 +557,7 @@ def apply_split_event(
     next_edge_id: int | None = None,
     next_loop_id: int | None = None,
     eps: float = 1e-9,
+    validate_children: bool = True,
 ) -> SplitResult:
     """Split one wavefront loop at a validated reflex-vertex/edge hit.
 
@@ -692,17 +693,20 @@ def apply_split_event(
     )
 
     # The split point is shared by both child loops at the event instant. Each
-    # child must form a non-degenerate, consistently oriented polygon.
-    for child in children:
-        child_vertices = _loop_vertices(child, new_edges, event.time, eps)
-        child_polygon = [vertex.point for vertex in child_vertices]
-        child_area = signed_area(child_polygon)
-        if abs(child_area) <= tolerance * tolerance:
-            raise GeometryInputError("DEGENERATE_SPLIT_LOOP", "Split-событие создало контур нулевой площади.")
-        if (1 if child_area > 0.0 else -1) != winding:
-            raise GeometryInputError("SPLIT_WINDING_CHANGED", "После split изменилась ориентация одного из дочерних контуров.")
-        if validate_simple_polygon(child_polygon, eps):
-            raise GeometryInputError("SPLIT_LOOP_NOT_SIMPLE", "Split-событие создало самопересекающийся контур.")
+    # child must form a non-degenerate, consistently oriented polygon. A
+    # compound split/collapse event may temporarily contain its explicitly
+    # collapsing edge; that case validates the children after the collapse.
+    if validate_children:
+        for child in children:
+            child_vertices = _loop_vertices(child, new_edges, event.time, eps)
+            child_polygon = [vertex.point for vertex in child_vertices]
+            child_area = signed_area(child_polygon)
+            if abs(child_area) <= tolerance * tolerance:
+                raise GeometryInputError("DEGENERATE_SPLIT_LOOP", "Split-событие создало контур нулевой площади.")
+            if (1 if child_area > 0.0 else -1) != winding:
+                raise GeometryInputError("SPLIT_WINDING_CHANGED", "После split изменилась ориентация одного из дочерних контуров.")
+            if validate_simple_polygon(child_polygon, eps):
+                raise GeometryInputError("SPLIT_LOOP_NOT_SIMPLE", "Split-событие создало самопересекающийся контур.")
 
     next_loop = max(first_loop_id, second_loop_id) + 1
     return SplitResult(
@@ -771,6 +775,53 @@ def _resolve_edge_collapse_group(
         raise GeometryInputError("STALE_COLLAPSE_EVENT", "Схлопываемое ребро больше не принадлежит активному контуру.")
 
     remaining = tuple(edge_id for edge_id in loop.edge_ids if edge_id not in collapsed)
+    needle_arc: tuple[Point2, Point2] | None = None
+
+    # When two fronts remain, validate their finite segments, not only their
+    # infinite supporting lines. This prevents a partial overlap from being
+    # silently promoted to a complete needle.
+    if len(remaining) == 2:
+        first, second = state.edges[remaining[0]], state.edges[remaining[1]]
+        alignment = _dot(first.normal, second.normal)
+        first_offset = first.offset_at(state.current_time)
+        second_offset = second.offset_at(state.current_time)
+        gap = first_offset + second_offset
+        vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
+        first_index = loop.edge_ids.index(remaining[0])
+        second_index = loop.edge_ids.index(remaining[1])
+        first_segment = _edge_segment(
+            loop, first_index, vertices, state.edges, state.current_time
+        )
+        second_segment = _edge_segment(
+            loop, second_index, vertices, state.edges, state.current_time
+        )
+        tolerance = state.epsilon * max(
+            1.0, abs(first_offset), abs(second_offset),
+            first_segment[3], second_segment[3],
+        ) * 100.0
+        if alignment > -1.0 + state.epsilon * 100.0 or abs(gap) > tolerance:
+            raise GeometryInputError(
+                "TWO_EDGE_TERMINATION_UNRESOLVED",
+                "После схлопывания остались два фронта, но их опорные прямые не образуют needle-пару."
+            )
+        endpoints_match = (
+            hypot(first_segment[0][0] - second_segment[1][0],
+                  first_segment[0][1] - second_segment[1][1]) <= tolerance
+            and hypot(first_segment[1][0] - second_segment[0][0],
+                      first_segment[1][1] - second_segment[0][1]) <= tolerance
+        )
+        if (
+            first_segment[3] <= tolerance
+            or second_segment[3] <= tolerance
+            or not endpoints_match
+        ):
+            raise GeometryInputError(
+                "PARTIAL_OVERLAP_NEEDLE_UNRESOLVED",
+                "Оставшиеся противоположные фронты совпадают не полными конечными отрезками; "
+                "частичное перекрытие требует отдельного split/overlap-разрешителя."
+            )
+        needle_arc = (first_segment[0], first_segment[1])
+
     for edge_id in collapsed:
         state.edges.pop(edge_id, None)
 
@@ -778,35 +829,14 @@ def _resolve_edge_collapse_group(
         return WavefrontLoop(loop.loop_id, remaining, loop.generation + 1)
 
     if len(remaining) == 2:
-        first, second = state.edges[remaining[0]], state.edges[remaining[1]]
-        alignment = _dot(first.normal, second.normal)
-        gap = first.offset_at(state.current_time) + second.offset_at(state.current_time)
-        tolerance = state.epsilon * max(1.0, abs(first.offset_at(state.current_time)),
-                                        abs(second.offset_at(state.current_time))) * 100.0
-        if alignment > -1.0 + state.epsilon * 100.0 or abs(gap) > tolerance:
-            raise GeometryInputError(
-                "TWO_EDGE_TERMINATION_UNRESOLVED",
-                "После схлопывания остались два фронта, но они не образуют подтверждённую needle-пару."
-            )
         state.terminal_loops[loop.loop_id] = "NEEDLE"
-        collapse_positions = []
-        for event in events:
-            if event.position is not None and not any(
-                hypot(event.position[0] - point[0], event.position[1] - point[1])
-                <= tolerance * 10.0 for point in collapse_positions
-            ):
-                collapse_positions.append(event.position)
-        if len(collapse_positions) == 2:
+        if needle_arc is not None:
+            start, end = needle_arc
             state.skeleton_arcs.append(SkeletonArc(
-                (collapse_positions[0][0], collapse_positions[0][1], state.current_time),
-                (collapse_positions[1][0], collapse_positions[1][1], state.current_time),
+                (start[0], start[1], state.current_time),
+                (end[0], end[1], state.current_time),
                 state.current_time,
             ))
-        elif len(collapse_positions) > 2:
-            raise GeometryInputError(
-                "AMBIGUOUS_NEEDLE_ARC",
-                "Финальные события схлопывания образовали более двух различных концов needle."
-            )
         state.edges.pop(remaining[0], None)
         state.edges.pop(remaining[1], None)
         return None
@@ -1030,6 +1060,129 @@ def _resolve_cross_needle_vertex_hit(
     return True
 
 
+def _resolve_split_collapse_batch(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> tuple[WavefrontLoop, ...]:
+    """Resolve one strict split and one collapse occurring on the same loop/time.
+
+    The split partitions the target front at the reflex hit. The collapsing
+    edge must belong to exactly one child. That child's post-collapse topology
+    is then validated independently; an opposite pair is terminal only when
+    its finite segments coincide endpoint-to-endpoint.
+    """
+    split_events = [event for event in events if event.kind == EventKind.SPLIT_CANDIDATE]
+    collapse_events = [event for event in events if event.kind == EventKind.EDGE_COLLAPSE]
+    if len(split_events) != 1 or len(collapse_events) != 1 or len(events) != 2:
+        raise GeometryInputError(
+            "SIMULTANEOUS_SPLIT_COLLAPSE_UNRESOLVED",
+            "Поддерживается только один строгий split вместе с одним схлопыванием на том же контуре."
+        )
+
+    collapse_event = collapse_events[0]
+    if collapse_event.edge_id is None:
+        raise GeometryInputError(
+            "INCOMPLETE_COLLAPSE_BATCH",
+            "Смешанное split/collapse-событие не содержит ID схлопываемого ребра."
+        )
+
+    split_result = apply_split_event(
+        loop,
+        state.edges,
+        split_events[0],
+        next_edge_id=state.next_edge_id,
+        next_loop_id=state.next_loop_id,
+        eps=state.epsilon,
+        validate_children=False,
+    )
+    collapse_children = [
+        child for child in split_result.loops
+        if collapse_event.edge_id in child.edge_ids
+    ]
+    if len(collapse_children) != 1:
+        raise GeometryInputError(
+            "SPLIT_COLLAPSE_TOPOLOGY_UNRESOLVED",
+            "Схлопываемое ребро должно принадлежать ровно одному дочернему контуру после split."
+        )
+    collapse_child = collapse_children[0]
+
+    trial_state = WavefrontSimulationState(
+        current_time=state.current_time,
+        loops={child.loop_id: child for child in split_result.loops},
+        edges=dict(split_result.edges),
+        event_queue=WavefrontEventQueue(),
+        next_edge_id=split_result.next_edge_id,
+        next_loop_id=split_result.next_loop_id,
+        time_tolerance=state.time_tolerance,
+        epsilon=state.epsilon,
+        terminal_loops=dict(state.terminal_loops),
+        source_area=state.source_area,
+        input_winding=state.input_winding,
+    )
+
+    collapse_vertices = _loop_vertices(
+        collapse_child, trial_state.edges, trial_state.current_time, trial_state.epsilon
+    )
+    collapse_index = collapse_child.edge_ids.index(collapse_event.edge_id)
+    _, _, _, collapse_length = _edge_segment(
+        collapse_child, collapse_index, collapse_vertices,
+        trial_state.edges, trial_state.current_time,
+    )
+    if abs(collapse_length) > trial_state.time_tolerance * 10.0:
+        raise GeometryInputError(
+            "SPLIT_COLLAPSE_TIME_MISMATCH",
+            "После split заявленное схлопываемое ребро не имеет нулевой длины в момент общего события."
+        )
+
+    collapsed_child = _resolve_edge_collapse_group(
+        trial_state, collapse_child, (collapse_event,)
+    )
+    if collapsed_child is None:
+        trial_state.loops.pop(collapse_child.loop_id, None)
+    else:
+        trial_state.loops[collapse_child.loop_id] = collapsed_child
+
+    # Validate every surviving child after the zero-length edge has been
+    # removed. No degenerate intermediate contour is exposed to the caller.
+    for child in trial_state.loops.values():
+        vertices = _loop_vertices(
+            child, trial_state.edges, trial_state.current_time, trial_state.epsilon
+        )
+        polygon = [vertex.point for vertex in vertices]
+        scale = max(
+            1.0,
+            max(point[0] for point in polygon) - min(point[0] for point in polygon),
+            max(point[1] for point in polygon) - min(point[1] for point in polygon),
+        )
+        area = signed_area(polygon)
+        if abs(area) <= trial_state.epsilon * scale * scale * 100.0:
+            raise GeometryInputError(
+                "DEGENERATE_SPLIT_COLLAPSE_CHILD",
+                "Комбинированное событие создало активный контур нулевой площади."
+            )
+        if (1 if area > 0.0 else -1) != trial_state.input_winding:
+            raise GeometryInputError(
+                "SPLIT_COLLAPSE_WINDING_CHANGED",
+                "Комбинированное событие изменило ориентацию дочернего контура."
+            )
+        if validate_simple_polygon(polygon, trial_state.epsilon):
+            raise GeometryInputError(
+                "SPLIT_COLLAPSE_CHILD_NOT_SIMPLE",
+                "После split/collapse остался самопересекающийся дочерний контур."
+            )
+
+    # Commit the compound topology only after both resulting children pass.
+    state.loops.pop(loop.loop_id, None)
+    state.loops.update(trial_state.loops)
+    state.edges = trial_state.edges
+    state.next_edge_id = trial_state.next_edge_id
+    state.next_loop_id = trial_state.next_loop_id
+    state.terminal_loops = trial_state.terminal_loops
+    state.skeleton_arcs.extend(trial_state.skeleton_arcs)
+    return tuple(state.loops[key] for key in sorted(trial_state.loops))
+
+
 def advance_wavefront_state(
     state: WavefrontSimulationState,
 ) -> EventBatch | None:
@@ -1073,7 +1226,10 @@ def advance_wavefront_state(
         loop_events = events_by_loop[loop_id]
         kinds = {event.kind for event in loop_events}
 
-        if kinds == {EventKind.SPLIT_CANDIDATE}:
+        if kinds == {EventKind.SPLIT_CANDIDATE, EventKind.EDGE_COLLAPSE}:
+            changed_loops.extend(_resolve_split_collapse_batch(state, loop, loop_events))
+
+        elif kinds == {EventKind.SPLIT_CANDIDATE}:
             if len(loop_events) != 1:
                 raise GeometryInputError(
                     "SIMULTANEOUS_SPLIT_EVENTS_UNRESOLVED",
