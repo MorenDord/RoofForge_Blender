@@ -44,6 +44,66 @@ def radial_polygon(count: int, *, concave: bool) -> list[tuple[float, float, flo
     return points
 
 
+def wavy_outline(
+    outline: list[tuple[float, float]],
+    subdivisions: list[int],
+    amplitude: float,
+) -> list[tuple[float, float, float]]:
+    points = []
+    for edge_index, start in enumerate(outline):
+        end = outline[(edge_index + 1) % len(outline)]
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = math.hypot(dx, dy)
+        normal = (-dy / length, dx / length)
+        for step in range(subdivisions[edge_index]):
+            t = step / subdivisions[edge_index]
+            bend = amplitude * math.sin(math.pi * t)
+            points.append((
+                start[0] + dx * t + normal[0] * bend,
+                start[1] + dy * t + normal[1] * bend,
+                0.0,
+            ))
+    issues = validate_simple_polygon([(p[0], p[1]) for p in points])
+    if issues:
+        raise RuntimeError(f"Generated wavy outline is invalid: {issues[0].message}")
+    return points
+
+
+def wavy_l_fixture() -> list[tuple[float, float, float]]:
+    return wavy_outline(
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 3.0),
+         (4.0, 3.0), (4.0, 10.0), (0.0, 10.0)],
+        [11, 11, 10, 11, 10, 11],
+        0.015,
+    )
+
+
+def wavy_u_fixture() -> list[tuple[float, float, float]]:
+    return wavy_outline(
+        [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (3.0, 4.0),
+         (3.0, 1.0), (1.0, 1.0), (1.0, 4.0), (0.0, 4.0)],
+        [8] * 8,
+        0.008,
+    )
+
+
+def l_pitch_profile(count: int) -> list[float]:
+    return [
+        30.0 + 5.0 * math.sin(index * 0.817)
+        + 2.0 * math.cos(index * 0.613)
+        for index in range(count)
+    ]
+
+
+def u_pitch_profile(count: int) -> list[float]:
+    return [
+        31.0 + 4.5 * math.sin(index * 0.917)
+        + 2.5 * math.cos(index * 0.641)
+        for index in range(count)
+    ]
+
+
 def percentile_95(values: list[float]) -> float:
     ordered = sorted(values)
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
@@ -164,6 +224,25 @@ def main() -> int:
                 points, pitches, height_tolerance=1e-6, max_depth=2
             ),
             args.repeats,
+        ))
+
+    for label, points, pitches in (
+        ("wavy_l", wavy_l_fixture(), l_pitch_profile(64)),
+        ("wavy_u", wavy_u_fixture(), u_pitch_profile(64)),
+    ):
+        results.append(measure(
+            f"weighted_wavefront_trace_{label}_variable_pitch_n64",
+            points,
+            run_weighted_wavefront,
+            args.repeats,
+            pitches,
+        ))
+        results.append(measure(
+            f"weighted_wavefront_surface_{label}_variable_pitch_n64",
+            points,
+            build_wavefront_roof_surface,
+            args.repeats,
+            pitches,
         ))
 
     report = {
