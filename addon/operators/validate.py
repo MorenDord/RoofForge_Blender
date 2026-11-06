@@ -1,7 +1,7 @@
 """Validate the complete roof build before creating Blender datablocks."""
 import bpy
 
-from ..adapters.mesh_io import read_selected_boundary
+from ..adapters.mesh_io import read_object_boundary
 from ...core.geometry import GeometryInputError
 from ...core.mesh import build_roof_surface
 from ...core.shell import build_roof_shell
@@ -18,7 +18,7 @@ class ROOFFORGE_OT_validate_input(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            points = read_selected_boundary(context.object)
+            points = read_object_boundary(context.object)
         except ValueError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
