@@ -88,7 +88,7 @@ def main() -> int:
         raise SystemExit("--repeats must be between 1 and 20")
 
     results = []
-    for count in (8, 16, 32, 64, 128):
+    for count in (8, 16, 32, 64):
         convex = radial_polygon(count, concave=False)
         results.append(measure(
             f"convex_lower_envelope_n{count}",
