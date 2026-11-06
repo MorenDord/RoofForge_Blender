@@ -81,6 +81,16 @@ class EventBatch:
 
 
 @dataclass(frozen=True)
+class SplitResult:
+    """Topology replacement produced by one validated reflex split event."""
+    loops: tuple[WavefrontLoop, WavefrontLoop]
+    edges: dict[int, MovingLine]
+    event_position: Point2
+    next_edge_id: int
+    next_loop_id: int
+
+
+@dataclass(frozen=True)
 class FacetFragment:
     source_edge_id: int
     start_time: float
@@ -503,6 +513,172 @@ def collect_loop_events(
     split = find_split_candidates(loop, edges, time, eps)
     events = (*collapse, *split)
     return tuple(sorted(events, key=WavefrontEventQueue._event_key))
+
+
+
+def apply_split_event(
+    loop: WavefrontLoop,
+    edges: dict[int, MovingLine],
+    event: WavefrontEvent,
+    *,
+    next_edge_id: int | None = None,
+    next_loop_id: int | None = None,
+    eps: float = 1e-9,
+) -> SplitResult:
+    """Split one wavefront loop at a validated reflex-vertex/edge hit.
+
+    The target edge is replaced by two collinear moving-edge instances that
+    retain the same source-edge identity and weighted supporting line. The
+    old loop becomes two child loops. This operation is pure: it returns new
+    dictionaries and never mutates the caller's loop or edge map.
+
+    Only strict interior split events are supported. Endpoint hits, stale
+    generations, non-reflex vertices, and degenerate child loops are rejected.
+    """
+    if event.kind != EventKind.SPLIT_CANDIDATE:
+        raise GeometryInputError(
+            "NOT_A_SPLIT_EVENT",
+            "Для изменения топологии требуется подтверждённый SPLIT_CANDIDATE."
+        )
+    if event.loop_id != loop.loop_id or event.loop_generation != loop.generation:
+        raise GeometryInputError("STALE_SPLIT_EVENT", "Split-событие относится к устаревшей версии контура.")
+    if event.vertex_id is None or event.target_edge_id is None:
+        raise GeometryInputError("INCOMPLETE_SPLIT_EVENT", "Split-событие не содержит вершину или целевое ребро.")
+    count = len(loop.edge_ids)
+    if count < 4 or not (0 <= event.vertex_id < count):
+        raise GeometryInputError("INVALID_SPLIT_TOPOLOGY", "Для split требуется контур минимум из четырёх рёбер.")
+    if event.edge_id != loop.edge_ids[event.vertex_id]:
+        raise GeometryInputError("STALE_SPLIT_EVENT", "Активное ребро рефлексной вершины уже изменилось.")
+    if event.target_edge_id not in loop.edge_ids:
+        raise GeometryInputError("STALE_SPLIT_EVENT", "Целевое ребро больше не принадлежит волновому фронту.")
+
+    vertex_index = event.vertex_id
+    target_index = loop.edge_ids.index(event.target_edge_id)
+    adjacent_ids = {
+        loop.edge_ids[vertex_index - 1],
+        loop.edge_ids[vertex_index],
+    }
+    if event.target_edge_id in adjacent_ids:
+        raise GeometryInputError("ADJACENT_SPLIT_TARGET", "Рефлексная вершина не может расщеплять соседнее ребро.")
+
+    required_edge_ids = {
+        loop.edge_ids[vertex_index - 1],
+        loop.edge_ids[vertex_index],
+        event.target_edge_id,
+        loop.edge_ids[target_index - 1],
+        loop.edge_ids[(target_index + 1) % count],
+    }
+    for edge_id, generation in event.participant_generations:
+        if edge_id in required_edge_ids and (
+            edge_id not in edges or edges[edge_id].generation != generation
+        ):
+            raise GeometryInputError("STALE_SPLIT_EVENT", "Версия одного из рёбер-участников split-события изменилась.")
+
+    time_scale = max(1.0, abs(event.time))
+    tolerance = eps * time_scale * 100.0
+    vertices = _loop_vertices(loop, edges, event.time, eps)
+    current = vertices[vertex_index]
+    polygon_now = [vertex.point for vertex in vertices]
+    winding = 1 if signed_area(polygon_now) > 0.0 else -1
+    incoming = _sub(current.point, polygon_now[vertex_index - 1])
+    outgoing = _sub(polygon_now[(vertex_index + 1) % count], current.point)
+    turn = _cross2(incoming, outgoing)
+    if turn * winding >= -tolerance:
+        raise GeometryInputError("SPLIT_VERTEX_NOT_REFLEX", "В момент события вершина уже не является рефлексной.")
+
+    target = edges[event.target_edge_id]
+    line_distance = _dot(target.normal, current.point) - target.offset_at(event.time)
+    if abs(line_distance) > tolerance:
+        raise GeometryInputError("SPLIT_MISS", "Рефлексная вершина не лежит на целевой движущейся прямой в момент события.")
+
+    target_start = _line_intersection(
+        edges[loop.edge_ids[target_index - 1]], target, event.time, eps
+    ).point
+    target_end = _line_intersection(
+        target, edges[loop.edge_ids[(target_index + 1) % count]], event.time, eps
+    ).point
+    target_length = _dot(_sub(target_end, target_start), target.tangent)
+    coordinate = _dot(_sub(current.point, target_start), target.tangent)
+    segment_tolerance = eps * max(1.0, abs(target_length)) * 100.0
+    if target_length <= segment_tolerance:
+        raise GeometryInputError("SPLIT_TARGET_COLLAPSED", "Целевое ребро схлопнулось до split-события.")
+    if coordinate <= segment_tolerance or coordinate >= target_length - segment_tolerance:
+        raise GeometryInputError("SPLIT_ENDPOINT_HIT", "Попадание в конец ребра не является внутренним split-событием.")
+
+    if event.position is not None and hypot(
+        event.position[0] - current.point[0],
+        event.position[1] - current.point[1],
+    ) > tolerance * 10.0:
+        raise GeometryInputError("STALE_SPLIT_POSITION", "Позиция split-события не совпадает с текущей траекторией вершины.")
+
+    # Generate two new edge instances for the two finite portions of the same
+    # moving target line. Both preserve the authored source-edge identity.
+    first_new_edge = max(edges, default=-1) + 1 if next_edge_id is None else next_edge_id
+    second_new_edge = first_new_edge + 1
+    if first_new_edge in edges or second_new_edge in edges or first_new_edge == second_new_edge:
+        raise GeometryInputError("EDGE_ID_COLLISION", "Новые edge-instance ID уже используются.")
+    left_copy = MovingLine(
+        first_new_edge, target.source_edge_id, target.normal, target.offset,
+        target.speed, target.tangent, 0,
+    )
+    right_copy = MovingLine(
+        second_new_edge, target.source_edge_id, target.normal, target.offset,
+        target.speed, target.tangent, 0,
+    )
+
+    def cyclic_path(start_index: int, stop_index: int) -> tuple[int, ...]:
+        path = []
+        index = start_index
+        while index != stop_index:
+            path.append(loop.edge_ids[index])
+            index = (index + 1) % count
+            if len(path) > count:
+                raise GeometryInputError("INVALID_SPLIT_PATH", "Не удалось разделить последовательность рёбер.")
+        return tuple(path)
+
+    first_path = cyclic_path(vertex_index, target_index)
+    second_path = cyclic_path((target_index + 1) % count, vertex_index)
+    first_ids = first_path + (first_new_edge,)
+    second_ids = (second_new_edge,) + second_path
+    if len(first_ids) < 3 or len(second_ids) < 3:
+        raise GeometryInputError("DEGENERATE_SPLIT_LOOP", "Split-событие создало контур менее чем из трёх рёбер.")
+
+    first_loop_id = loop.loop_id
+    second_loop_id = max(loop.loop_id, next_loop_id - 1) + 1 if next_loop_id is not None else loop.loop_id + 1
+    if second_loop_id == first_loop_id:
+        raise GeometryInputError("LOOP_ID_COLLISION", "Новый loop ID совпадает с исходным.")
+
+    new_edges = dict(edges)
+    del new_edges[event.target_edge_id]
+    new_edges[first_new_edge] = left_copy
+    new_edges[second_new_edge] = right_copy
+    generation = loop.generation + 1
+    children = (
+        WavefrontLoop(first_loop_id, first_ids, generation),
+        WavefrontLoop(second_loop_id, second_ids, generation),
+    )
+
+    # The split point is shared by both child loops at the event instant. Each
+    # child must form a non-degenerate, consistently oriented polygon.
+    for child in children:
+        child_vertices = _loop_vertices(child, new_edges, event.time, eps)
+        child_polygon = [vertex.point for vertex in child_vertices]
+        child_area = signed_area(child_polygon)
+        if abs(child_area) <= tolerance * tolerance:
+            raise GeometryInputError("DEGENERATE_SPLIT_LOOP", "Split-событие создало контур нулевой площади.")
+        if (1 if child_area > 0.0 else -1) != winding:
+            raise GeometryInputError("SPLIT_WINDING_CHANGED", "После split изменилась ориентация одного из дочерних контуров.")
+        if validate_simple_polygon(child_polygon, eps):
+            raise GeometryInputError("SPLIT_LOOP_NOT_SIMPLE", "Split-событие создало самопересекающийся контур.")
+
+    next_loop = max(first_loop_id, second_loop_id) + 1
+    return SplitResult(
+        loops=children,
+        edges=new_edges,
+        event_position=current.point,
+        next_edge_id=second_new_edge + 1,
+        next_loop_id=next_loop,
+    )
 
 
 def _dedupe_polygon(points: Sequence[Point3], tolerance: float) -> tuple[Point3, ...]:
