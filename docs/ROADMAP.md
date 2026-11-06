@@ -1,13 +1,22 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a strict reflex split, tested L/U cross-needle terminals, and one constrained same-loop simultaneous split-plus-collapse topology. In that compound event, the split partitions the target front; a validated terminal partial segment becomes a skeleton arc while the surviving child loop continues. It validates finite needle segments and explicitly rejects unsupported partial-overlap terminal configurations. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures and two constrained asymmetric L split/collapse cases. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 61 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The Blender 0.1.0 alpha now ships a testable UI for one selected closed XY boundary loop, a single global pitch value, validation and creation of a separate closed shell. Blender 5.0.1 background smoke checks pass in Edit Mode and Object Mode, including idempotent registration/unregistration, source preservation and face attributes. The extension ZIP passes Blender's official package validator. GUI installation/visual QA by the user remains open. Separately, the experimental pure-Python weighted wavefront covers bounded rectangle, V-notch, L/U and constrained split/collapse fixtures; it is not connected to the Blender operator. Pure-Python CI passes 61 tests on Python 3.11 and 3.13.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
 - [x] CI workflow for syntax checks and pure Python tests
 - [x] Versioned specification, architecture and roadmap
-**Exit:** clean install/enable/disable in Blender 5.0; no registration leaks. Not yet verified.
+**Exit:** clean install/enable/disable through Blender Preferences and visual panel QA in Blender 5.0+. Background registration/unregistration has passed on 5.0.1; manual GUI installation remains unverified.
+
+## Milestone 0.5 — Testable alpha package
+- [x] Versioned extension manifest (0.1.0, Blender 5.0.0 minimum)
+- [x] Clean extension ZIP includes only manifest, entry point, addon/core sources and Russian test instructions
+- [x] Blender 5.0.1 background smoke: Object Mode and Edit Mode input, Validate, Create Roof Shell, source preservation and registration lifecycle
+- [x] Official Blender 5.0.1 extension ZIP validation
+- [x] SHA256 sidecar and GitHub Actions artifact upload
+- [ ] User's manual Install from Disk, viewport panel and visual geometry QA
+**Exit:** user confirms the test extension installs and the rectangle/convex-contour workflow behaves as expected in the interactive Blender UI.
 
 ## Milestone 1 — Geometry kernel alpha (Critical)
 - [x] Selected closed-loop acquisition in Edit/Object Mode (adapter implemented; Blender test pending)
@@ -86,4 +95,4 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Extend same-loop topology handling beyond the verified one-split/one-collapse batch. First support generic partial-overlap needle segments beyond the constrained one-split/one-collapse case, deriving all overlap endpoints and surviving tails. Then support multiple independent splits on one loop, nested split sequences and higher-order vertex events. Keep adversarial event-order tests on both sides of batching tolerance. Keep exact source-plane, coverage, boundary-chain, T-junction and closed-shell manifold checks. Treat sub-tolerance sliver faces as rejected geometry, not as a reason to weaken validation. Keep mixed-height eaves out of this solver and do not connect it to Blender until the broader event suite passes.
+Collect manual feedback on the 0.1.0 alpha in Blender 5.0+: install the extension from disk, test a rectangle in Edit Mode and Object Mode, then a convex trapezoid/pentagon. Resolve any install, panel, selection, transform or mesh-output issues reported by the user. Keep concave L/U marked unsupported in the UI while wavefront remains disconnected. After user QA, return to generic partial-overlap needle handling and multiple split events. Keep all exact plane, area, boundary-chain, T-junction, face-area and manifold checks unchanged.

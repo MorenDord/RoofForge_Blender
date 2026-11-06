@@ -91,6 +91,14 @@ Build a vertex registry keyed by 3D position with scale-aware tolerance. Never m
 ### E. Profile construction
 Generate profile strips from the shared boundary graph, not isolated per-edge solids. Each edge has a cross-section profile. At nodes, solve a junction patch that trims/joins incident strips; remove internal caps and weld compatible vertices. Default extrusion/rise vector is roof-local +Z. Profile generation is transactional and separate from roof generation.
 
+### G. Testable Blender Extension package and runtime smoke gate
+- The source checkout is also the Blender Extension root: `blender_manifest.toml`, root `__init__.py`, `addon/` and `core/`.
+- `tools/build_extension.py` deliberately stages only the extension manifest/entry point, Python modules under `addon/` and `core/`, and `INSTALL_TEST_RU.md`. It excludes unit tests, developer documentation and legacy `roof_forge_2.8.4` files from the installable ZIP.
+- The package version is 0.1.0 and manifest minimum is Blender 5.0.0. Package SHA256 is stored beside the ZIP.
+- CI runs `tests/blender_smoke.py` using Blender 5.0.1 background mode. It checks idempotent register/unregister, selected boundary reads in Object/Edit Mode, Validate, Create Roof Shell, generated face attributes and source object preservation.
+- CI runs Blender's official `extension validate` against the generated ZIP and uploads the resulting package/checksum as a 30-day GitHub Actions artifact.
+- This does not constitute manual Preferences → Install from Disk or viewport GUI QA. That interactive test remains a release gate before a wider beta.
+
 ### F. Live rebuild
 Property updates enqueue a dirty-set with a debounce interval. A per-roof token cancels stale queued work. Build into temporary mesh data, validate, then swap. Detach increments token, unregisters timers/handlers, clears pending work and freezes current objects. Rename or missing source invalidates link and transitions to FROZEN with reason.
 

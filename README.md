@@ -24,7 +24,7 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Pure-Python end-to-end geometry fixtures for rectangle, V-notch, constrained L/U shapes and selected asymmetric event cases.
 
 ## Test build installation
-Download the roof_forge-0.1.0.zip artifact from the latest successful **RoofForge tests** workflow, then install it using Preferences → Get Extensions → Install from Disk. Do not use the repository ZIP: it contains development files and legacy archives. Russian installation and QA steps are included in INSTALL_TEST_RU.md inside the extension package.
+Download the outer roof_forge-0.1.0-blender-5.0.1.zip artifact from the latest successful **RoofForge tests** workflow and extract it once. Install the inner roof_forge-0.1.0.zip (do not extract that inner ZIP) using Preferences → Get Extensions → Install from Disk. Do not use the repository ZIP: it contains development files and legacy archives. Russian installation and QA steps are included in INSTALL_TEST_RU.md inside the extension package.
 
 The generated object is separate from the source and inherits its world transform. The source mesh is not modified.
 
@@ -35,11 +35,9 @@ From the repository root:
     python -m unittest discover -s tests -v
 
 ## Not implemented yet
-- Per-slope pitch map and separate pitch values (the current test UI uses one global pitch).
-- Live Update and Detach currently remain future product goals, not implemented in this build.
+- Per-slope pitch map and independent pitch values (the current test UI uses one global pitch).
 - Eaves overhang, fascia and soffit.
-- Per-slope interactive pitch map and independent slope values.
-- Live update, detach, relink and lifecycle handlers.
+- Live Update, Detach, relink and lifecycle handlers.
 - Ridge, valley and hip profiles and junction patches.
 - Standing seams, UVs, material assignment, LOD and export automation.
 - Geometric self-intersection detection and its Blender UI diagnostics.

@@ -4,10 +4,14 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Working branch:** `develop`  
 **Do not modify:** `main`  
-**Latest full code/test snapshot:** `e5bf78df25a26f1acce04ce5e736cc27cf85e239`  
-**Latest documentation snapshot before this handoff:** `d9af89c9ed4ebb48fb06f5809180ea28408179dd`  
-**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42264904390  
-**CI result:** 61 pure-Python tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not been tested.
+**Latest full code/test/package snapshot:** `c0f2305883dfd315b7f5e18e53486330fc767e09`  
+**Latest verified CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42272132994  
+**CI result:** 61 pure-Python tests passed on Python 3.11 and 3.13; Blender 5.0.1 background smoke passed in Object Mode and Edit Mode; the official Blender extension ZIP validator passed. Manual GUI installation/visual QA remains pending.
+
+**Installable alpha build:** `roof_forge-0.1.0.zip`  
+**GitHub Actions artifact:** `roof_forge-0.1.0-blender-5.0.1` (artifact ID `13529896467`, expires 2026-12-06)  
+**Package SHA256:** `5c45681f4f8dc0d90e9440c097d0b5e38ce11f19cc2ae423e7a130b6485ff620`  
+The package contains 22 files: manifest, extension entry point, addon/core Python modules and the Russian installation guide. It excludes tests, developer docs and legacy 2.8.4 archives.
 
 ## Start here after reconnect
 
@@ -29,6 +33,8 @@
 - `core/shell.py`: closed shell with thickness extruded along roof-local global `-Z`.
 - `core/validation.py`: edge incidence, face winding, connected components and cyclic vertex-link validation.
 - Blender operator still creates a closed shell using the existing plane/envelope path. It does **not** call the wavefront alpha yet.
+- Blender 5.0.1 background smoke passed from the checkout: idempotent register/unregister; selected-boundary acquisition in Object Mode and Edit Mode; Validate and Create Roof Shell; output face attributes; source geometry and world transform remain unchanged. The extension ZIP also passes Blender's official manifest/package validation.
+- No interactive Preferences → Install from Disk GUI session or artist visual QA has yet been performed. The user-facing alpha package is ready for that check.
 
 ### Experimental distance-field comparator
 - `core/distance_field.py` creates continuous closed L/U comparison meshes.
@@ -72,18 +78,22 @@ Implemented:
 - The surface assembler retains narrow fragments, but the final shell validator rejects any face below its scale-aware area threshold. Very narrow sliver fixtures are therefore explicitly rejected rather than silently simplified.
 - Multiple independent split events on one loop, nested split sequences and higher-order vertex collisions are not generally resolved.
 - Geometric self-intersection checking is not implemented yet.
-- The wavefront alpha is **not connected to the Blender operator** and has not been runtime-tested inside Blender 5.0. Do not route user-facing roof creation through it yet.
+- The wavefront alpha is **not connected to the Blender operator**. Its pure-Python event fixtures do not enable concave generation in the UI. Do not route user-facing roof creation through it yet.
+- Per-edge pitch fields, numbered pitch map, overhang, live update, detach/relink, ridge/valley/hip profiles, seams, UV, LOD and export tools are not part of the 0.1.0 alpha. The Blender UI applies one pitch to all selected boundary edges.
+- The 0.1.0 alpha is smoke-tested on Blender 5.0.1 Linux background only. It has not yet been visually QA-tested in the user's Blender installation or tested on Windows/macOS.
 
 ## Exact next development task
 
-Extend beyond the **constrained one-split/one-collapse batch** without broadening support claims prematurely.
+**Get manual feedback on the 0.1.0 alpha before expanding the solver.**
 
-1. Implement generic partial-overlap opposing-front events beyond the constrained one-split/one-collapse case: calculate overlap endpoints, handle multiple intervals and preserve/reconstruct surviving tails. Until a topology is fully derived, reject it with a stable diagnostic.
-2. Add multiple independent splits on one loop and verify disjoint split chords, stable edge/source IDs, child-loop winding and no event loss.
-3. Expand simultaneous-event coverage to additional collapse participants and higher-order vertex collisions; stale queue entries must never mutate new topology.
-4. Broaden adversarial fixtures: narrow necks, multiple notches, acute corners, nearly parallel edges and seeded randomized simple polygons.
-5. Keep the face-area validator unchanged; report sub-tolerance slivers as unsupported geometry.
-6. Keep mixed-Z eaves out of this 2D solver. Do not connect the alpha to the Blender generator until the broader geometry gate passes.
+1. Ask the user to install the inner `roof_forge-0.1.0.zip` from the GitHub Actions artifact in Blender 5.0+ (extract the downloaded outer artifact ZIP once; do not extract the inner extension ZIP).
+2. First test a simple rectangle in Edit Mode: Validate → Create Roof Shell. Confirm the RoofForge N-panel appears, a separate object is created, the source remains unchanged and shell thickness points along local -Z.
+3. Repeat boundary selection in Object Mode. Then test one convex trapezoid/pentagon.
+4. Collect Blender exact version, OS, contour geometry, settings, screenshots and any Console errors. Reproduce failures in `tests/blender_smoke.py` or a new fixture before changing geometry.
+5. Do not present L/U as a supported Blender feature: the weighted wavefront is still disconnected from the generator. Do not implement more arbitrary event classes until the user validates the actual UI workflow or identifies geometry priorities.
+6. After feedback, fix installation/UI/operator issues, add regression tests, issue a new test package version and rerun Blender 5.0.1 smoke + extension validation.
+
+The 0.1.0 alpha is deliberately limited: one selected closed XY contour, one global pitch value, validation, and separate closed shell.
 
 ## Main project documents
 
