@@ -29,6 +29,16 @@ fn radial_polygon(count: usize, concave: bool) -> Vec<[f64; 2]> {
         .collect()
 }
 
+fn symmetric_tooth_polygon(count: usize) -> Vec<[f64; 2]> {
+    (0..count)
+        .map(|index| {
+            let angle = 2.0 * PI * index as f64 / count as f64;
+            let radius = if index % 2 == 0 { 10.0 } else { 8.6 };
+            [radius * angle.cos(), radius * angle.sin()]
+        })
+        .collect()
+}
+
 fn signed_area(points: &[[f64; 2]]) -> f64 {
     0.5 * points.iter().enumerate().map(|(i, p)| {
         let q = points[(i + 1) % points.len()];
@@ -89,7 +99,9 @@ fn extract_and_validate_roof(
         return Err(format!("expected {} source facets, got {}", points.len(), top_faces.len()));
     }
 
-    let footprint_area = signed_area(points).abs();
+    let signed_footprint = signed_area(points);
+    let footprint_area = signed_footprint.abs();
+    let winding = if signed_footprint >= 0.0 { 1.0 } else { -1.0 };
     let mut projected_area = 0.0;
     let mut edge_uses: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
     let mut boundary_source_edges = BTreeMap::<usize, usize>::new();
@@ -108,8 +120,8 @@ fn extract_and_validate_roof(
         if length <= 1.0e-12 {
             return Err(format!("zero-length source edge {source}"));
         }
-        let nx = -dy / length;
-        let ny = dx / length;
+        let nx = -dy / length * winding;
+        let ny = dx / length * winding;
         let speed = speeds[*source];
         for p in face {
             let distance = nx * (p.x - a[0]) + ny * (p.y - a[1]);
@@ -132,7 +144,8 @@ fn extract_and_validate_roof(
                 let dot_q = bp[0] * dx + bp[1] * dy;
                 let tol = length * 1.0e-7 + 1.0e-9;
                 if cross_p.abs() <= tol && cross_q.abs() <= tol
-                    && dot_p >= -tol && dot_q <= length * length + tol
+                    && dot_p >= -tol && dot_p <= length * length + tol
+                    && dot_q >= -tol && dot_q <= length * length + tol
                 {
                     boundary_source_edges.insert(*source, 1);
                     boundary_directed.push((p.node_id, q.node_id));
@@ -156,7 +169,7 @@ fn extract_and_validate_roof(
     for (edge, uses) in &edge_uses {
         if uses.len() == 1 {
             let (a, b) = uses[0];
-            if !boundary_directed.contains(&(a, b)) {
+            if !boundary_directed.contains(&(a, b)) && !boundary_directed.contains(&(b, a)) {
                 return Err(format!("open internal roof edge {}-{}", edge.0, edge.1));
             }
         } else if uses.len() == 2 {
@@ -192,7 +205,7 @@ fn extract_and_validate_roof(
 
     for (_source, face) in &top_faces {
         let ids: Vec<usize> = face.iter().map(|p| used_nodes[&p.node_id]).collect();
-        if signed_area(&face.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>()) >= 0.0 {
+        if signed_area(&face.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>()) * winding >= 0.0 {
             add_face(&ids);
             let mut bottom: Vec<usize> = ids.iter().map(|id| id + count).collect();
             bottom.reverse();
@@ -218,27 +231,35 @@ fn extract_and_validate_roof(
     Ok((top_faces.len(), used_nodes.len(), max_plane_residual))
 }
 
-fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
-    let points = radial_polygon(count, concave);
+fn run_points_case(
+    label: &str,
+    points: &[[f64; 2]],
+    pitches_degrees: &[f64],
+    repeats: usize,
+) {
+    let count = points.len();
+    let variable_pitch = pitches_degrees.iter().any(|value| {
+        (*value - pitches_degrees[0]).abs() > 1.0e-9
+    });
+    let concave = (0..count).any(|i| {
+        let a = points[i];
+        let b = points[(i + 1) % count];
+        let c = points[(i + 2) % count];
+        let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        cross * signed_area(points).signum() < -1.0e-9
+    });
     let edges: Vec<[usize; 2]> = (0..count)
         .map(|index| [index, (index + 1) % count])
         .collect();
-    let weights: Vec<f64> = (0..count)
-        .map(|index| {
-            let pitch_deg = if variable_pitch {
-                28.0 + ((index * 17 % 19) as f64)
-            } else {
-                35.0
-            };
-            1.0 / pitch_deg.to_radians().tan()
-        })
+    let weights: Vec<f64> = pitches_degrees.iter()
+        .map(|pitch| 1.0 / pitch.to_radians().tan())
         .collect();
 
-    let label = if concave { "concave" } else { "convex" };
-    // Equal weights are a global time rescaling, so run the canonical
-    // polygon API for that case. Per-edge pitches use the weighted PSLG path.
+    let label_is_cw = signed_area(points) < 0.0;
+    // Equal weights can be scaled globally, so use the canonical polygon API
+    // for equal pitch. Per-edge pitches use the weighted PSLG path.
     let (input_pslg, input_polygon) = if variable_pitch {
-        match Pslg::from_flat(&points, &edges, Some(&weights)) {
+        match Pslg::from_flat(points, &edges, Some(&weights)) {
             Ok(value) => (Some(value), None),
             Err(error) => {
                 println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
@@ -246,7 +267,7 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
             }
         }
     } else {
-        match Polygon::from_flat(&points, &[0]) {
+        match Polygon::from_flat(points, &[0]) {
             Ok(value) => (None, Some(value)),
             Err(error) => {
                 println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
@@ -254,17 +275,12 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
             }
         }
     };
-    let options = Options { components: ComponentMode::Index(0) };
-    let z_scale = if variable_pitch {
-        1.0
-    } else {
-        weights[0]
+
+    let options = Options {
+        components: ComponentMode::Index(if label_is_cw { 1 } else { 0 }),
     };
-    let speeds = if variable_pitch {
-        weights.clone()
-    } else {
-        vec![1.0; count]
-    };
+    let z_scale = if variable_pitch { 1.0 } else { weights[0] };
+    let speeds = if variable_pitch { weights.clone() } else { vec![1.0; count] };
 
     let mut times_ms = Vec::new();
     let mut segment_count = 0usize;
@@ -280,9 +296,10 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
         } else {
             interior_straight_skeleton(input_polygon.as_ref().unwrap())
         };
+
         match result {
             Ok(skeleton) => {
-                match extract_and_validate_roof(&skeleton, &points, &speeds, z_scale) {
+                match extract_and_validate_roof(&skeleton, points, &speeds, z_scale) {
                     Ok((faces, vertices, residual)) => {
                         times_ms.push(start.elapsed().as_secs_f64() * 1000.0);
                         segment_count = skeleton.finite_segments().count();
@@ -306,7 +323,7 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
 
     if let Some(error) = last_error {
         let compact = error.chars().take(180).collect::<String>().replace(',', ";");
-        println!("{label},{count},{concave},{variable_pitch},error,,,0,0,\"{compact}\"");
+        println!("{label},{count},{concave},{variable_pitch},error,,,0,0,0,\"{compact}\"");
         return;
     }
 
@@ -318,15 +335,61 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
     );
 }
 
+fn run_radial_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
+    let points = radial_polygon(count, concave);
+    let pitches: Vec<f64> = (0..count).map(|index| {
+        if variable_pitch { 28.0 + ((index * 17 % 19) as f64) } else { 35.0 }
+    }).collect();
+    let label = if concave { "radial_concave" } else { "radial_convex" };
+    run_points_case(label, &points, &pitches, repeats);
+}
+
+fn run_symmetric_adversarial(count: usize, repeats: usize) {
+    let points = symmetric_tooth_polygon(count);
+    let pitches = vec![35.0; count];
+    run_points_case("symmetric_concave_adversarial", &points, &pitches, repeats);
+}
+
 fn main() {
     let repeats = 3;
     println!("case,n,concave,variable_pitch,status,median_ms,p95_ms,skeleton_segments,roof_facets,roof_vertices,max_plane_residual");
     for count in [8, 16, 32, 64, 128] {
-        run_case(count, false, false, repeats);
-        run_case(count, false, true, repeats);
+        run_radial_case(count, false, false, repeats);
+        run_radial_case(count, false, true, repeats);
     }
     for count in [8, 16, 32, 64, 128] {
-        run_case(count, true, false, repeats);
-        run_case(count, true, true, repeats);
+        run_radial_case(count, true, false, repeats);
+        run_radial_case(count, true, true, repeats);
     }
+    for count in [8, 16] {
+        run_symmetric_adversarial(count, repeats);
+    }
+
+    let l_shape = [
+        [0.0, 0.0], [8.0, 0.0], [8.0, 4.0],
+        [4.0, 4.0], [4.0, 8.0], [0.0, 8.0],
+    ];
+    run_points_case("concave_L_equal_pitch", &l_shape, &[35.0; 6], repeats);
+    run_points_case("concave_L_variable_pitch", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats);
+
+    let u_shape = [
+        [0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [7.0, 8.0],
+        [7.0, 3.0], [3.0, 3.0], [3.0, 8.0], [0.0, 8.0],
+    ];
+    run_points_case("concave_U_equal_pitch", &u_shape, &[35.0; 8], repeats);
+    run_points_case("concave_U_variable_pitch", &u_shape, &[32.0, 35.0, 38.0, 40.0, 34.0, 37.0, 31.0, 36.0], repeats);
+
+    let multi_notch = [
+        [0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [10.0, 8.0],
+        [9.0, 4.0], [8.0, 4.0], [7.0, 7.0], [5.0, 7.0],
+        [4.0, 4.0], [3.0, 4.0], [2.0, 8.0], [0.0, 8.0],
+    ];
+    run_points_case("concave_multi_notch_equal_pitch", &multi_notch, &[35.0; 12], repeats);
+    run_points_case("concave_multi_notch_variable_pitch", &multi_notch, &[34.0, 35.0, 36.0, 37.0, 34.0, 38.0, 33.0, 36.0, 35.0, 37.0, 34.0, 36.0], repeats);
+
+    let mut reversed_l = l_shape.to_vec();
+    reversed_l.reverse();
+    let mut reversed_l_pitch = vec![35.0; 6];
+    reversed_l_pitch.reverse();
+    run_points_case("concave_L_reversed_winding_equal_pitch", &reversed_l, &reversed_l_pitch, repeats);
 }
