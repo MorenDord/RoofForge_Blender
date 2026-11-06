@@ -13,7 +13,6 @@ from __future__ import annotations
 import heapq
 import math
 from collections import defaultdict
-from bisect import bisect_left, bisect_right
 
 _EPS = 1.0e-9
 
@@ -789,6 +788,58 @@ def _simplify_loop(loop, tolerance):
     return points
 
 
+def _segment_candidate_point_ids(start, end, point_grid, cell_size):
+    """Find canonical points close enough to a segment using a 3D voxel walk.
+
+    The neighbour-cell stencil is conservative: the voxel size is kept at
+    least ten times the point-to-segment tolerance used by the caller.
+    Exact projection and Euclidean-distance checks remain in the caller.
+    """
+    direction = tuple(end[axis] - start[axis] for axis in range(3))
+    cell = [int(math.floor(value / cell_size)) for value in start]
+    final_cell = tuple(int(math.floor(value / cell_size)) for value in end)
+    step = [0, 0, 0]
+    t_max = [float("inf")] * 3
+    t_delta = [float("inf")] * 3
+
+    for axis, delta in enumerate(direction):
+        if delta > 0.0:
+            step[axis] = 1
+            boundary = (cell[axis] + 1) * cell_size
+            t_max[axis] = (boundary - start[axis]) / delta
+            t_delta[axis] = cell_size / delta
+        elif delta < 0.0:
+            step[axis] = -1
+            boundary = cell[axis] * cell_size
+            t_max[axis] = (boundary - start[axis]) / delta
+            t_delta[axis] = -cell_size / delta
+
+    candidates = set()
+    while True:
+        # Include adjacent cells so points within the accepted geometric
+        # tolerance are not lost at voxel faces, edges or corners.
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    key = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
+                    candidates.update(point_grid.get(key, ()))
+
+        if tuple(cell) == final_cell:
+            break
+
+        next_t = min(t_max)
+        if next_t > 1.0 + 1.0e-12:
+            break
+        # Advance every axis crossing at this same parameter to avoid
+        # depending on an arbitrary axis order at exact voxel corners.
+        for axis in range(3):
+            if t_max[axis] <= next_t + 1.0e-12:
+                cell[axis] += step[axis]
+                t_max[axis] += t_delta[axis]
+
+    return sorted(candidates)
+
+
 def _merge_face_patches(patches, scale):
     """Union coplanar swept quads into planar roof-face boundary loops.
 
@@ -843,17 +894,14 @@ def _merge_face_patches(patches, scale):
     point_keys = {point: index for index, point in unique_points.items()}
     all_points = list(unique_points.values())
 
-    # Candidate vertices are only relevant when their dominant-axis coordinate
-    # lies inside the tested segment's interval. Sorting each axis once avoids
-    # scanning every canonical vertex for every patch edge.
-    sorted_point_ids = [
-        sorted(range(len(all_points)), key=lambda index: all_points[index][axis])
-        for axis in range(3)
-    ]
-    sorted_axis_values = [
-        [all_points[index][axis] for index in sorted_point_ids[axis]]
-        for axis in range(3)
-    ]
+    # Index canonical points in 3D bins. Segment queries walk only crossed
+    # voxels and their neighbours instead of scanning the full point cloud.
+    # Voxel width is conservative relative to the accepted 5*tolerance radius.
+    cell_size = max(tolerance * 10.0, scale / 12.0)
+    point_grid = defaultdict(list)
+    for point_id, point in enumerate(all_points):
+        cell = tuple(int(math.floor(value / cell_size)) for value in point)
+        point_grid[cell].append(point_id)
 
     # Signed incidence of every split, undirected edge. Adjacent consistently
     # oriented patches contribute opposite signs and cancel exactly.
@@ -883,19 +931,10 @@ def _merge_face_patches(patches, scale):
             if denominator <= tolerance * tolerance:
                 continue
 
-            dominant_axis = max(range(3), key=lambda axis: abs(ab[axis]))
-            axis_length = abs(ab[dominant_axis])
-            axis_margin = axis_length * 1.0e-8 + tolerance * 5.0
-            axis_low = min(a[dominant_axis], b[dominant_axis]) - axis_margin
-            axis_high = max(a[dominant_axis], b[dominant_axis]) + axis_margin
-            axis_values = sorted_axis_values[dominant_axis]
-            axis_ids = sorted_point_ids[dominant_axis]
-            first_candidate = bisect_left(axis_values, axis_low)
-            after_candidate = bisect_right(axis_values, axis_high)
-
             on_edge = []
-            for candidate_position in range(first_candidate, after_candidate):
-                point = all_points[axis_ids[candidate_position]]
+            candidate_ids = _segment_candidate_point_ids(a, b, point_grid, cell_size)
+            for candidate_id in candidate_ids:
+                point = all_points[candidate_id]
                 ap = _sub3(point, a)
                 t = _dot3(ap, ab) / denominator
                 if t < -1.0e-8 or t > 1.0 + 1.0e-8:
