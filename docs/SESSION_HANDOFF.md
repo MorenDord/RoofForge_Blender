@@ -4,9 +4,9 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated baseline:** develop at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Current branch head:** see [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6); latest code-tested commit: `603a7b5d0fa696af801cf55154a05549aecc1317`  
+**Current branch head:** see [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6); latest code-tested commit: `2a65724cd3df7cd7566a06295b7a3e38246c4e38`  
 **Current PR:** [#6 — WIP: RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; do not merge)  
-**Latest full code CI:** [Run 42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) and [Run 42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR), both successful on code commit `603a7b5d0fa696af801cf55154a05549aecc1317`. The run includes Python 3.11/3.13, variable per-edge pitch wavy L/U regressions at 64 edges, asymmetric radial cases, local face-degeneracy checks, optimized T-junction assembly and Blender 5.0.1 smoke/package validation.  
+**Latest full code CI:** [Run 42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302884369) (push) and [Run 42302896037](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302896037) (PR), both successful on code commit `2a65724cd3df7cd7566a06295b7a3e38246c4e38`. The run includes Python 3.11/3.13, variable per-edge pitch wavy L/U regressions at 64 edges, their separate geometry benchmarks, asymmetric radial cases, local face-degeneracy checks, optimized T-junction assembly and Blender 5.0.1 smoke/package validation.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## Confirmed 0.2.0 product scope
@@ -65,7 +65,7 @@ Regression coverage:
 - local face-area validation distinguishes small well-shaped faces from facets whose altitude is below coordinate tolerance.
 All pass on Python 3.11 and 3.13.
 
-Latest CI: [42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) and [42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR), both successful on code commit `603a7b5d0fa696af801cf55154a05549aecc1317`.
+Latest CI: [42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302884369) (push) and [42302896037](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302896037) (PR), both successful on code commit `2a65724cd3df7cd7566a06295b7a3e38246c4e38`.
 
 All timings below are medians of three runs on the Actions Linux runner, comparison only:
 
@@ -76,6 +76,14 @@ All timings below are medians of three runs on the Actions Linux runner, compari
 | 32 | 7.77 ms | 17.09 ms | 35.13 ms | 74.13 ms | 525 / 526 |
 | 64 | 21.34 ms | 32.19 ms | 212.63 ms | 474.54 ms | 2089 / 2091 |
 
+Separate 64-edge wavy concave outlines with variable per-edge pitch (medians of three CI runs):
+
+| Fixture | Trace | Surface assembly | Facets / vertices |
+|---|---:|---:|---:|
+| Wavy L | 159.66 ms | 352.61 ms | 2038 / 2041 |
+| Wavy U | 149.17 ms | 360.82 ms | 2085 / 2086 |
+
+Both pass full projected-area coverage and closed-shell manifold validation.
 The 64-edge variable-pitch surface initially took 28.50 seconds to assemble. `_split_face_edges_at_shared_vertices()` was scanning every mesh vertex for every facet edge. It now builds sorted coordinate indexes on all three axes, queries the narrowest coordinate interval, then performs the same exact 3D projection and distance checks. The measured assembly time fell to 474.54 ms (roughly 60×). This is substantially better, but around half a second at the 64-edge variable-pitch limit is still a borderline live-preview latency.
 
 ### Face-area tolerance
