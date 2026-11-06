@@ -1,4 +1,4 @@
-"""Profile the test-only legacy solver's largest representative concave cases."""
+"""Profile the test-only legacy solver's largest target-range concave cases."""
 from __future__ import annotations
 
 import cProfile
@@ -17,7 +17,7 @@ from spatial_roof_2_9_0 import build_spatial_roof_mesh
 
 
 def profile_case(label: str, variable_pitch: bool) -> None:
-    points = radial_polygon(128, concave=True)
+    points = radial_polygon(64, concave=True)
     if variable_pitch:
         angles = [math.radians(35.0 + ((i * 17 % 19) if (i % 2 == 1) else 0.0))
                   for i in range(len(points))]
@@ -37,8 +37,8 @@ def profile_case(label: str, variable_pitch: bool) -> None:
 
 
 def main() -> None:
-    profile_case("concave_128_equal_pitch", variable_pitch=False)
-    profile_case("concave_128_variable_pitch", variable_pitch=True)
+    profile_case("concave_64_equal_pitch", variable_pitch=False)
+    profile_case("concave_64_variable_pitch", variable_pitch=True)
 
 
 if __name__ == "__main__":
