@@ -718,54 +718,71 @@ def _simplify_loop(loop, tolerance):
     return points
 
 
+_SEGMENT_CELL_NEIGHBORS_2D = (
+    (-1, -1), (0, -1), (1, -1),
+    (-1, 0),  (0, 0),  (1, 0),
+    (-1, 1),  (0, 1),  (1, 1),
+)
+
+
 def _segment_candidate_point_ids(start, end, point_grid, cell_size):
-    """Find canonical points close enough to a segment using a 3D voxel walk.
+    """Find nearby canonical vertices with a 2D voxel walk in roof XY.
 
-    The neighbour-cell stencil is conservative: the voxel size is kept at
-    least ten times the point-to-segment tolerance used by the caller.
-    Exact projection and Euclidean-distance checks remain in the caller.
+    The 2D cell width is at least ten times the full XYZ point tolerance.
+    The final projection and distance checks remain three-dimensional.
     """
-    direction = tuple(end[axis] - start[axis] for axis in range(3))
-    cell = [int(math.floor(value / cell_size)) for value in start]
-    final_cell = tuple(int(math.floor(value / cell_size)) for value in end)
-    step = [0, 0, 0]
-    t_max = [float("inf")] * 3
-    t_delta = [float("inf")] * 3
+    direction_x = end[0] - start[0]
+    direction_y = end[1] - start[1]
+    cell_x = int(math.floor(start[0] / cell_size))
+    cell_y = int(math.floor(start[1] / cell_size))
+    final_x = int(math.floor(end[0] / cell_size))
+    final_y = int(math.floor(end[1] / cell_size))
 
-    for axis, delta in enumerate(direction):
-        if delta > 0.0:
-            step[axis] = 1
-            boundary = (cell[axis] + 1) * cell_size
-            t_max[axis] = (boundary - start[axis]) / delta
-            t_delta[axis] = cell_size / delta
-        elif delta < 0.0:
-            step[axis] = -1
-            boundary = cell[axis] * cell_size
-            t_max[axis] = (boundary - start[axis]) / delta
-            t_delta[axis] = -cell_size / delta
+    if direction_x > 0.0:
+        step_x = 1
+        t_max_x = ((cell_x + 1) * cell_size - start[0]) / direction_x
+        t_delta_x = cell_size / direction_x
+    elif direction_x < 0.0:
+        step_x = -1
+        t_max_x = (cell_x * cell_size - start[0]) / direction_x
+        t_delta_x = -cell_size / direction_x
+    else:
+        step_x = 0
+        t_max_x = float("inf")
+        t_delta_x = float("inf")
+
+    if direction_y > 0.0:
+        step_y = 1
+        t_max_y = ((cell_y + 1) * cell_size - start[1]) / direction_y
+        t_delta_y = cell_size / direction_y
+    elif direction_y < 0.0:
+        step_y = -1
+        t_max_y = (cell_y * cell_size - start[1]) / direction_y
+        t_delta_y = -cell_size / direction_y
+    else:
+        step_y = 0
+        t_max_y = float("inf")
+        t_delta_y = float("inf")
 
     candidates = set()
     while True:
-        # Include adjacent cells so points within the accepted geometric
-        # tolerance are not lost at voxel faces, edges or corners.
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    key = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
-                    candidates.update(point_grid.get(key, ()))
+        for dx, dy in _SEGMENT_CELL_NEIGHBORS_2D:
+            candidates.update(point_grid.get((cell_x + dx, cell_y + dy), ()))
 
-        if tuple(cell) == final_cell:
+        if cell_x == final_x and cell_y == final_y:
             break
 
-        next_t = min(t_max)
+        next_t = min(t_max_x, t_max_y)
         if next_t > 1.0 + 1.0e-12:
             break
-        # Advance every axis crossing at this same parameter to avoid
-        # depending on an arbitrary axis order at exact voxel corners.
-        for axis in range(3):
-            if t_max[axis] <= next_t + 1.0e-12:
-                cell[axis] += step[axis]
-                t_max[axis] += t_delta[axis]
+        # Step both axes at exact corner crossings; the 3x3 stencil around
+        # each visited cell covers all adjacent cells touched at that corner.
+        if t_max_x <= next_t + 1.0e-12:
+            cell_x += step_x
+            t_max_x += t_delta_x
+        if t_max_y <= next_t + 1.0e-12:
+            cell_y += step_y
+            t_max_y += t_delta_y
 
     return sorted(candidates)
 
@@ -824,13 +841,13 @@ def _merge_face_patches(patches, scale):
     point_keys = {point: index for index, point in unique_points.items()}
     all_points = list(unique_points.values())
 
-    # Index canonical points in 3D bins. Segment queries walk only crossed
-    # voxels and their neighbours instead of scanning the full point cloud.
-    # Voxel width is conservative relative to the accepted 5*tolerance radius.
+    # Index projected XY positions; all final segment-distance checks
+    # still use XYZ. The 2D grid cuts per-cell lookup from 27 neighbours to 9.
     cell_size = max(tolerance * 10.0, scale / 12.0)
     point_grid = defaultdict(list)
     for point_id, point in enumerate(all_points):
-        cell = tuple(int(math.floor(value / cell_size)) for value in point)
+        cell = (int(math.floor(point[0] / cell_size)),
+                int(math.floor(point[1] / cell_size)))
         point_grid[cell].append(point_id)
 
     # Signed incidence of every split, undirected edge. Adjacent consistently
