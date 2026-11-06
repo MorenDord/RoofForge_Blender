@@ -1030,6 +1030,48 @@ class PolygonTests(unittest.TestCase):
                 shell = build_roof_shell(surface, 0.10)
                 self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
+    def test_wavefront_handles_asymmetric_reflex_radial_contours_through_64_edges(self):
+        # Break the exact alternating-radius symmetry while retaining a
+        # simple star-shaped contour with many reflex vertices.
+        for count in (16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                pitches = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    base_radius = 10.0 if index % 2 == 0 else 8.6
+                    radius = (
+                        base_radius
+                        + 0.23 * math.sin(index * 0.793)
+                        + 0.17 * math.cos(index * 1.317)
+                    )
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                    pitches.append(
+                        30.0 + 5.0 * math.sin(index * 1.173)
+                        + 2.0 * math.cos(index * 0.537)
+                    )
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
     def test_wavefront_keeps_small_resolvable_split_collapse_sliver_in_shell(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
