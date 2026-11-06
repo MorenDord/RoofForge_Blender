@@ -1,0 +1,8 @@
+[package]
+name = "roof_forge_skeleton_bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+surfer2 = "=0.1.0"
