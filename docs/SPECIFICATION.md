@@ -49,7 +49,8 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - For concave polygons, restrict each edge plane to the inward halfspace of its source edge. Subdivide the domain by edge supporting lines, determine the active plane set per convex cell, then compute the lower envelope within that cell.
 - Produce deterministic vertex/face output and weld numerically coincident 3D vertices using scale-aware tolerance.
 - Verify XY coverage against the source polygon area.
-- Reject unsupported or ambiguous cases instead of silently generating corrupt geometry.
+- Verify that all internal surface edges are shared; single-use edges must lie on the source perimeter and fully cover each perimeter segment.
+- Reject unsupported or ambiguous cases instead of silently generating corrupt geometry. The current concave arrangement is experimental; L/U inputs that create discontinuities must be rejected until the finite-region solver is complete.
 
 ### FR-03 — Per-slope pitch UI
 - Display a top-view roof diagram with a thin white outline and a number at each slope region.
@@ -78,6 +79,8 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - Thickness direction and meaning must be explicit. 1.0 supports vertical thickness offset; normal offset is a later optional mode.
 - Eaves overhang must be geometrically stable at concave and acute corners; invalid offset results must be reported.
 - Top and bottom surfaces and boundary walls must form a closed shell when solid output is requested.
+- Thickness is applied as a constant translation along roof-local -Z, not along face normals.
+- Side walls may be created only along validated source-perimeter edges; internal cracks must not be capped as walls.
 - No silent self-intersections or zero-area faces.
 
 ### FR-07 — Ridges, valleys and hips
@@ -159,7 +162,7 @@ See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-d
 
 ## 8. Risk register
 - **R1 — Lower-envelope degeneracies:** coincident/near-parallel planes and multi-plane junctions. Mitigation: robust predicates, scale-aware tolerances, deterministic tie-breaking, adversarial fixtures.
-- **R2 — Concave polygon partition:** arrangement cell count and tiny sliver regions can grow rapidly. Mitigation: area thresholds, diagnostics, performance benchmarks, and later spatial acceleration.
+- **R2 — Concave roof continuity:** local active-plane sets can switch across artificial lines and produce discontinuities even when projected area coverage is correct. Mitigation: reject internal open edges; develop finite face domains and multi-plane junction solving before enabling L/U solid generation. Arrangement cell count and tiny slivers also require benchmarks.
 - **R3 — Shared topology:** tolerance welding can still merge or miss points near degeneracies. Mitigation: plane-membership checks, multi-plane node solving, adversarial tests.
 - **R4 — Profile junction topology:** independently swept segments create internal caps and non-manifold junctions. Mitigation: shared junction graph and separate node-patch solver.
 - **R5 — Live update lifecycle:** stale callbacks/timers can mutate detached objects. Mitigation: per-roof UUID, generation token, explicit unregister, validity checks before every callback.
@@ -167,7 +170,7 @@ See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-d
 - **R7 — UV/LOD scope:** secondary features can delay core stability. Mitigation: gate behind core geometry release criteria.
 
 ## 9. Delivery gates
-- **Alpha:** modular extension loads; boundary validation; deterministic roof surface kernel; core tests.
+- **Alpha:** modular extension loads; boundary validation; deterministic convex roof surface; validated vertical-Z shell; pure geometry tests. Concave roofs that fail continuity are explicitly rejected.
 - **Beta:** interactive pitch map; safe live rebuild/detach; solid shell; validation overlays.
 - **RC:** ridge/valley/hip profiles; seams; manual roof analysis; Blender integration QA.
 - **1.0:** UV, material assignment, optimization/export baseline; documentation; clean install/upgrade; all release gates pass.
