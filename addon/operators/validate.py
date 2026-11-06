@@ -2,12 +2,8 @@
 import bpy
 
 from ..adapters.mesh_io import read_selected_boundary
-from ...core.geometry import (
-    GeometryInputError,
-    boundary_envelope_conflicts,
-    build_boundary_planes,
-    validate_simple_polygon,
-)
+from ...core.geometry import GeometryInputError, build_boundary_planes, validate_simple_polygon
+from ...core.planes import boundary_envelope_conflicts
 
 
 class ROOFFORGE_OT_validate_input(bpy.types.Operator):
