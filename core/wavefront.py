@@ -1113,6 +1113,8 @@ def _split_face_edges_at_shared_vertices(
             if not expanded:
                 expanded.append(start_id)
             expanded.extend(candidate_id for _, candidate_id in points_on_edge)
+            if expanded[-1] != end_id:
+                expanded.append(end_id)
         compact: list[int] = []
         for vertex_id in expanded:
             if not compact or compact[-1] != vertex_id:
