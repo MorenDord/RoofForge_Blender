@@ -75,3 +75,41 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 ## Current known mathematical risk
 
 The current weighted-wavefront alpha assumes constant-Z eaves and has only constrained support for simultaneous split/collapse and needle events. "All arbitrary 3D contours" is not a safe claim until a generalized formulation for mixed-height eaves is derived and tested. Preserve XYZ in the input model, keep convex cases on the verified existing path where possible, and explicitly reject mixed-height concave cases until the generalized solver is proven. Do not flatten or silently modify user geometry.
+
+## Результаты первых сравнительных замеров (6 ноября 2026)
+
+Все цифры ниже получены на одном Linux CI runner и не являются обещанием времени на машине пользователя.
+
+### Быстрый Rust-кандидат (surfer2 0.1.0, skeleton + DCEL extraction + проверки + проверка топологии shell)
+
+- Выпуклый и асимметричный вогнутый радиальный контур, равные и индивидуальные углы, 128 рёбер: примерно 1.0–1.2 мс.
+- Выпуклые/вогнутые радиальные тесты 8–128 рёбер проходят проверку площади, исходных support planes и замкнутой оболочки.
+- Многозубчатый 12-рёберный контур проходит с равными и индивидуальными углами.
+- L/U при равных углах проходят; L/U при индивидуальных углах пока дают несовпадающую площадь / неполную разметку граней.
+- Симметричный зубчатый adversarial-контур остаётся отказным: неверная площадь или ребро с четырьмя использованиями.
+- Обратный порядок обхода L при равных углах прошёл после нормализации winding.
+
+Это benchmark-прототип, не код расширения: native Rust solver ещё не встроен в Blender и не собран под Windows/macOS.
+
+### Исторический Python spatial solver 2.9
+
+- Плоские L/U с равными и индивидуальными углами: примерно 1.5–2.8 мс.
+- Плоский 12-рёберный multi-notch: примерно 6.8–7.5 мс.
+- Выпуклый 128-рёберный контур: примерно 2.2 с.
+- Вогнутый асимметричный контур: примерно 0.5 с при 64 рёбрах и 4.5 с при 128 рёбрах с разными углами; равные углы на 128 рёбрах — около 43 с.
+- Два текущих неплоских L/U fixture не прошли arrangement source-adjacency validation.
+
+Вывод: legacy solver может служить ограниченным fallback для малых плоских L/U, но не годится как универсальное live-ядро. Rust-кандидат значительно быстрее, однако L/U per-edge pitch и симметричные одновременные события — обязательные блокеры до интеграции.
+
+## Точный статус готовности 0.2.0 на сейчас
+
+- [x] Автоопределение единственного замкнутого контура объекта без выделения рёбер/вершин; smoke для wire/face в Object/Edit Mode.
+- [x] Повторяемые benchmark-запуски и отдельный Rust-кандидат extraction/validation.
+- [ ] Один production solver проходит выпуклые, L/U, multi-notch, симметричные одновременные события, равные и индивидуальные углы.
+- [ ] Перенос Rust-кандидата внутрь addon/runtime без установки компилятора пользователем; сборки и smoke на Windows, macOS и Linux.
+- [ ] UI со стабильным соответствием «ребро → угол ската».
+- [ ] Debounced live rebuild: сохранение последней валидной крыши при ошибке, объединение быстрых изменений и отсутствие тяжёлой геометрии в draw callback.
+- [ ] Удаление пользовательских настроек свеса/карнизного выноса из интерфейса 0.2.0; оставить лишь конструктивное закрытие толщины по периметру.
+- [ ] Полный Blender smoke, чистая установка ZIP и визуальная ручная проверка в viewport.
+
+Следовательно, текущий PR остаётся draft/WIP. Не собирать и не маркировать его как 0.2.0 release, пока не закрыты пункты production solver, UI и live rebuild. Допускается отдельный внутренний alpha build только при явном сужении списка поддерживаемых форм и честном описании ограничений.
