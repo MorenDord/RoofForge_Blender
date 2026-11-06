@@ -1767,7 +1767,7 @@ def _segment_pair_parameters(a,b,c,d,eps):
     ]
 
 
-def _build_planar_support_arrangement(\n    points, planes, eps, allowed_pairs=None, label_by_minimum=False\n):
+def _build_planar_support_arrangement(points, planes, eps, allowed_pairs=None, label_by_minimum=False):
     """Exact planar arrangement with boundary-owned roof cells."""
     xy=[(float(p[0]),float(p[1])) for p in points]
     raw_segments=[]
