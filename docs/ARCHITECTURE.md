@@ -19,7 +19,7 @@
 - core/planes.py — boundary-edge plane generation and active-halfspace checks
 - core/envelope.py — convex lower-envelope partition and experimental concave arrangement
 - core/distance_field.py — experimental finite-segment distance field with approximated endpoint transitions
-- core/wavefront.py — weighted moving-line kinematics, convex collapse simulation, split candidates, deterministic event queue with stale-generation filtering, and validated single-loop split mutation (full multi-loop solver still planned)
+- core/wavefront.py — weighted moving-line kinematics, global multi-loop event queue, reflex split, L/U cross-needle resolver, swept facet collection, T-junction conformance and welded RoofSurface assembly (concave alpha path)
 - core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
 - core/shell.py — closed shell construction by global roof-local -Z extrusion
 - core/validation.py — edge incidence, face winding, connected-component and vertex-link validation
@@ -32,7 +32,7 @@
 2. Validate: polygon simplicity, edge lengths, winding, projected vertical edges and pitch compatibility.
 3. Build planes: one plane per boundary edge, identified by a stable slope index/UUID at the model layer.
 4. Convex partition: clip the domain by pairwise plane equality halfplanes.
-5. Concave production partition (in progress): weighted moving-line kinematics are implemented; a deterministic queue batches same-time events and discards stale edge/loop generations; a validated split operation replaces one target edge with two source-preserving edge instances and produces two child loops. The full multi-loop event state machine, needle resolution and facet collection remain open. The inward-halfspace arrangement remains a rejecting experimental path only.
+5. Concave wavefront (alpha): a global event queue advances all live loops to the earliest event; edge collapse and single reflex split are handled; a restricted multi-endpoint cross-needle resolver handles tested L/U terminal nodes. Swept source-edge facets and skeleton arcs are collected. The inward-halfspace arrangement remains a rejecting experimental path only.
 6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
 7. Validate surface: compare projected face area with the source polygon, then require every single-use edge to lie on one source boundary segment and require complete edge-chain coverage. Internal open edges are blocking errors.
 8. Shell: duplicate the upper-surface vertices at z-thickness, reverse bottom face winding, create side walls only along validated source-boundary edges, and require every final undirected edge to have exactly two incident faces.
@@ -46,15 +46,20 @@
 
 
 ### E. Weighted wavefront implementation status
-`core/wavefront.py` currently provides:
-- one inward moving line per source edge, with speed `cot(pitch)` and a constant-Z eave requirement;
-- 2x2 line intersection and constant vertex velocity;
-- edge-collapse candidate computation;
-- reflex split-candidate computation with finite live-segment checks and endpoint-hit distinction;
-- an event priority queue that batches near-simultaneous events and lazily drops stale events using edge and loop generation stamps;
-- a pure `apply_split_event` operation that revalidates a split event, duplicates the target edge as two edge instances retaining the same source-edge ID, and returns two validated child loops.
+`core/wavefront.py` now provides an end-to-end **pure-Python alpha path**:
+- one inward moving line per source edge, with speed `cot(pitch)` and an explicit absolute base-eave height;
+- moving-line intersections, constant vertex velocity, edge-collapse and finite-segment reflex split candidates;
+- deterministic shared priority queue with same-time batching and lazy invalidation by edge/loop generations;
+- `apply_split_event` for one strict interior split, with stable source-edge identity on the two replacement edge instances;
+- a global multi-loop state machine that advances every active loop to the globally earliest event;
+- swept edge fragments lifted into 3D source-edge planes, plus skeleton vertex trajectories;
+- a restricted cross-needle resolver for simultaneous reflex endpoint hits and edge collapses when all remaining fronts pair as opposite, coincident finite segments with matching speeds;
+- a T-junction conformance pass that subdivides earlier facet edges at later split vertices;
+- `build_wavefront_roof_surface`, which welds facets, checks source-plane membership, projected area and outer-boundary continuity, and returns the shared `RoofSurface` payload.
 
-This is not yet a complete concave solver. The current convex simulator is separate; no general loop collection scheduler currently advances multiple child loops together, collects all facet fragments, resolves every needle/simultaneous event, or emits a complete manifold roof mesh. The Blender operator must not call this path yet.
+Pure-Python regression fixtures currently produce closed manifold shells for a rectangle, a V-notch (including one asymmetric per-edge pitch set), an L contour and a U contour. L/U fixtures currently exercise equal-speed cross-needle cases. A clockwise L contour and a nonzero constant eave height are also tested.
+
+**Remaining limitations:** the first wavefront path requires constant-Z eaves; arbitrary simultaneous split batches, higher-order vertex events and opposing needle pairs with unequal speeds are not fully resolved. Full geometric self-intersection detection is not implemented. The Blender generator operator still uses the existing plane/envelope path; this wavefront alpha has not been runtime-tested inside Blender 5.0 and must not be advertised as general arbitrary-polygon support.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
