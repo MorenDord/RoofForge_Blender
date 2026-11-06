@@ -20,6 +20,8 @@
 - core/envelope.py — convex and concave lower-envelope partition
 - core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
 - core/shell.py — closed shell construction by global roof-local -Z extrusion and manifold edge validation
+- core/validation.py — pure-Python edge incidence, face winding, connected-component and vertex-link validation
+- core/shell.py — closed shell construction by global roof-local -Z extrusion and manifold edge validation
 - core/model.py, ids.py, validation.py, shell.py, adjacency.py, classification.py, profiles.py, seams.py, uv.py, optimization.py, lod.py
 - tests/ — pure Python fixtures and Blender background integration tests
 
@@ -33,9 +35,10 @@
 6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
 7. Validate surface: compare projected face area with the source polygon, then require every single-use edge to lie on one source boundary segment and require complete edge-chain coverage. Internal open edges are blocking errors.
 8. Shell: duplicate the upper-surface vertices at z-thickness, reverse bottom face winding, create side walls only along validated source-boundary edges, and require every final undirected edge to have exactly two incident faces.
-9. Features: derive adjacency graph from roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
-10. Validate output and commit temporary datablocks only after success.
-11. Lifecycle: attach metadata UUIDs and generation tokens; detach removes all callbacks and invalidates tokens.
+9. Closed-mesh validation: verify valid face indices, non-zero face area, duplicate faces, opposite edge use, one connected component and a single cyclic link around every vertex. The cyclic-link check detects bow-tie vertices that edge counts miss.
+10. Features: derive adjacency graph from roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
+11. Validate output and commit temporary datablocks only after success.
+12. Lifecycle: attach metadata UUIDs and generation tokens; detach removes all callbacks and invalidates tokens.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
