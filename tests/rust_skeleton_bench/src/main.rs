@@ -454,7 +454,7 @@ fn main() {
         run_radial_case(count, false, false, repeats);
         run_radial_case(count, false, true, repeats);
     }
-    for count in [8, 16, 32, 64, 128] {
+    for count in [8, 16, 32, 64] {
         run_radial_case(count, true, false, repeats);
         run_radial_case(count, true, true, repeats);
     }
