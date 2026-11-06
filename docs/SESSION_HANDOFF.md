@@ -4,7 +4,7 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Working branch:** `develop`  
 **Do not modify:** `main`  
-**Latest branch commit:** `1f82d1b9ca58c7a1ea08b963ce3436bf33227b1d`  
+**Last full CI-verified source/documentation snapshot:** `1f82d1b9ca58c7a1ea08b963ce3436bf33227b1d` (the following handoff-only update does not change code)  
 **Latest CI:** https://github.com/MorenDord/RoofForge_Blender/actions/runs/42235288329  
 **CI result:** 24 tests passed on Python 3.11 and 3.13. Blender 5.0 runtime has not yet been tested.
 
