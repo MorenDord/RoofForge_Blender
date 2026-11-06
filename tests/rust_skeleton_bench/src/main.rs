@@ -512,4 +512,34 @@ fn main() {
     let mut reversed_l_pitch = vec![35.0; 6];
     reversed_l_pitch.reverse();
     run_points_case("concave_L_reversed_winding_equal_pitch", &reversed_l, &reversed_l_pitch, repeats);
+
+    // Cross-check the smaller, event-focused L/U contours already covered by
+    // the independent pure-Python wavefront fixtures in tests/test_geometry.py.
+    let event_l_shape = [
+        [0.0, 0.0], [4.0, 0.0], [4.0, 1.0],
+        [1.0, 1.0], [1.0, 4.0], [0.0, 4.0],
+    ];
+    for (case, speeds) in [
+        ("event_L_unequal_needle", [0.8, 1.0, 1.2, 1.3, 1.0, 0.7]),
+        ("event_L_split_collapse_right_first", [0.8, 1.0, 1.2, 1.32, 1.0, 0.7]),
+        ("event_L_split_collapse_bottom_first", [0.8, 1.0, 1.2, 1.28, 1.0, 0.7]),
+        ("event_L_near_equal", [0.999999, 1.0, 1.000001, 1.000001, 1.0, 0.999999]),
+    ] {
+        let pitches: Vec<f64> = speeds
+            .iter()
+            .map(|speed| (1.0 / speed).atan().to_degrees())
+            .collect();
+        run_points_case(case, &event_l_shape, &pitches, repeats);
+    }
+
+    let event_u_shape = [
+        [0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [3.0, 4.0],
+        [3.0, 1.0], [1.0, 1.0], [1.0, 4.0], [0.0, 4.0],
+    ];
+    let event_u_speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6];
+    let event_u_pitches: Vec<f64> = event_u_speeds
+        .iter()
+        .map(|speed| (1.0 / speed).atan().to_degrees())
+        .collect();
+    run_points_case("event_U_three_needles", &event_u_shape, &event_u_pitches, repeats);
 }
