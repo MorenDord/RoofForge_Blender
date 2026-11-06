@@ -1,9 +1,9 @@
 """Event-driven weighted inward wavefront kinematics.
 
-This first slice deliberately handles strictly convex contours end-to-end.
-For concave contours it provides validated split-event candidate detection,
-but does not yet mutate wavefront topology at split events. It is pure Python
-and does not depend on bpy.
+The solver supports flat-eave contours with per-edge pitch, including strict
+reflex splits and a deliberately limited set of simultaneous topology events.
+Unsupported event combinations and mixed-height eaves are rejected explicitly;
+this module does not depend on bpy.
 
 Line convention:
     n . x = c + speed * t
@@ -959,6 +959,76 @@ def _record_wavefront_interval(
 
 
 
+def _resolve_simultaneous_point_termination(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> bool:
+    """Resolve a mixed endpoint/collapse batch only when the whole loop dies at one point.
+
+    Some symmetric concave contours make every active front collapse at the
+    same node. Their event queue contains many endpoint hits as well as edge
+    collapses, which is not a cross-needle. Revalidate the complete geometry
+    at the batch time before accepting this terminal case.
+    """
+    if not events or len(loop.edge_ids) < 3:
+        return False
+    if any(
+        event.kind not in {EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT}
+        or event.loop_id != loop.loop_id
+        or event.loop_generation != loop.generation
+        or event.position is None
+        for event in events
+    ):
+        return False
+
+    edge_ids = set(loop.edge_ids)
+    for event in events:
+        if event.kind == EventKind.EDGE_COLLAPSE:
+            if event.edge_id not in edge_ids:
+                return False
+        else:
+            if (
+                event.edge_id not in edge_ids
+                or event.target_edge_id not in edge_ids
+                or event.vertex_id is None
+                or not 0 <= event.vertex_id < len(loop.edge_ids)
+                or event.edge_id != loop.edge_ids[event.vertex_id]
+            ):
+                return False
+
+    # The event-time tolerance is based on the original contour scale. A
+    # slightly wider spatial tolerance accommodates the time-batch grouping,
+    # but does not allow a finite surviving edge or multiple terminal nodes.
+    tolerance = state.time_tolerance * 10.0
+    vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
+    anchor = vertices[0].point
+    if any(
+        hypot(vertex.point[0] - anchor[0], vertex.point[1] - anchor[1]) > tolerance
+        for vertex in vertices[1:]
+    ):
+        return False
+
+    if any(
+        hypot(event.position[0] - anchor[0], event.position[1] - anchor[1]) > tolerance
+        for event in events
+    ):
+        return False
+
+    for index in range(len(loop.edge_ids)):
+        _, _, _, length = _edge_segment(
+            loop, index, vertices, state.edges, state.current_time
+        )
+        if abs(length) > tolerance:
+            return False
+
+    state.terminal_loops[loop.loop_id] = "POINT"
+    state.loops.pop(loop.loop_id, None)
+    for edge_id in loop.edge_ids:
+        state.edges.pop(edge_id, None)
+    return True
+
+
 def _resolve_cross_needle_vertex_hit(
     state: WavefrontSimulationState,
     loop: WavefrontLoop,
@@ -1317,9 +1387,14 @@ def advance_wavefront_state(
                 changed_loops.append(child)
 
         elif EventKind.VERTEX_HIT in kinds:
-            if not kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT}) or not _resolve_cross_needle_vertex_hit(
-                state, loop, loop_events
-            ):
+            resolved = (
+                _resolve_simultaneous_point_termination(state, loop, loop_events)
+                or (
+                    kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT})
+                    and _resolve_cross_needle_vertex_hit(state, loop, loop_events)
+                )
+            )
+            if not resolved:
                 details = [
                     (event.kind.value, event.edge_id, event.vertex_id,
                      event.target_edge_id, event.position, event.time)
@@ -1327,7 +1402,8 @@ def advance_wavefront_state(
                 ]
                 raise GeometryInputError(
                     "SIMULTANEOUS_EVENT_BATCH_UNRESOLVED",
-                    "Смешанный endpoint/edge event не соответствует проверенному cross-needle узлу. "
+                    "Смешанный endpoint/edge event не является ни подтверждённым общим point-termination, "
+                    "ни проверенным cross-needle узлом. "
                     f"Контур {loop_id}, события: {details}."
                 )
         else:
