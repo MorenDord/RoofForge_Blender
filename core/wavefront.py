@@ -1563,16 +1563,12 @@ def _resolve_multiple_split_batch(
             eps=state.epsilon,
             validate_children=False,
         )
-        working_loops = [
-            child
-            for candidate in working_loops
-            if candidate.loop_id != candidate_loop.loop_id
-            for child in result.loops
-        ] + [
+        remaining_loops = [
             candidate
             for candidate in working_loops
             if candidate.loop_id != candidate_loop.loop_id
         ]
+        working_loops = remaining_loops + list(result.loops)
         working_edges = result.edges
         next_edge_id = result.next_edge_id
         next_loop_id = result.next_loop_id
