@@ -2,45 +2,54 @@
 
 **Status:** Draft for implementation  
 **Target:** Blender 5.0+  
-**Extension ID:** `roof_forge`  
-**Repository:** `MorenDord/RoofForge_Blender`  
+**Extension ID:** roof_forge  
+**Repository:** MorenDord/RoofForge_Blender  
 **Primary users:** 3D environment artists, environment/prop teams, architectural visualization artists
 
 ## 1. Product goal
 
 RoofForge generates, edits, validates and prepares production-ready roof meshes from a closed boundary loop. The tool must minimize manual roof construction while preserving predictable topology, non-destructive editing, and explicit artist control.
 
-The 1.0 release prioritizes robust roof geometry, interactive per-slope pitch control, safe live updates/detach, ridge/valley/hip profiles, standing-seam generation, and game-ready output. Dormers, gutters, automatic material authoring and advanced modularization are post-1.0 unless they are required to validate the core architecture.
+The 1.0 release prioritizes robust roof geometry, interactive per-slope pitch control, safe live updates/detach, ridge/valley/hip profiles, standing-seam generation, and game-ready output. Dormers, gutters, automatic material authoring and advanced modularization are post-1.0 unless required to validate the core architecture.
 
 ## 2. Supported input and coordinate model
 
 ### 2.1 Input contract
-- One mesh object containing exactly one closed, ordered boundary edge loop for the initial MVP.
-- Boundary vertices may have different world-space Z values.
-- Boundary must be simple in XY projection: no self-intersections, duplicate consecutive vertices, zero-length edges, or zero-area regions.
-- Input transforms must be evaluated consistently. All calculations use a documented local/world-space policy; the initial implementation should convert input vertices into roof-local coordinates and preserve the source transform.
-- Multiple loops, holes and disconnected islands are explicitly out of scope for the first stable 1.0 milestone, but data structures must not make them impossible later.
+- One mesh object containing exactly one selected closed edge loop for the initial MVP.
+- Boundary vertices may have different local-space Z values.
+- Boundary must be simple in XY projection: no self-intersections, duplicate consecutive vertices, zero-length projected edges, or zero-area regions.
+- Calculations use source-object local coordinates; the generated object inherits the source world transform.
+- A boundary edge with effectively zero XY projection is rejected because a single-valued surface z=f(x,y) cannot contain a vertical projected edge.
+- Holes, multiple loops and disconnected islands are out of scope for the first stable 1.0 milestone.
 
-### 2.2 Pitch convention
-Each boundary edge owns a stable slope ID. Its pitch is the angle above horizontal, expressed in degrees. The corresponding roof plane passes through both endpoints of that edge and rises toward the interior according to the edge's inward horizontal direction. Pitch range must be validated; vertical/degenerate and numerically unstable cases are rejected with actionable messages.
+### 2.2 Pitch convention and 3D edge planes
+Each ordered boundary edge owns a stable slope ID. Pitch is the total plane inclination above horizontal, in degrees. For edge endpoints P0 and P1:
+- L is the length of the edge's XY projection.
+- t is the unit tangent of the edge in XY.
+- n_in is the unit horizontal inward normal determined from polygon winding.
+- g_t = (z1-z0)/L is the slope already present along the eave.
+- g_n = sqrt(tan(pitch)^2 - g_t^2) is the remaining inward gradient.
+
+The plane gradient is g = g_t*t + g_n*n_in and the plane is z=ax+by+c. This preserves both endpoint heights and the requested total inclination. If tan(pitch)^2 is smaller than g_t^2, the requested pitch is mathematically incompatible with the eave grade and generation must stop with a clear diagnostic. The tool must never silently clamp the requested pitch.
 
 ### 2.3 Units
-All stored dimensions use Blender scene units. UI labels must display the active unit system. Internal calculations use meters only after a single explicit conversion boundary; avoid mixing raw Blender units and meters.
+All stored dimensions use Blender scene units. UI labels must display the active unit system. Core geometry is unit-agnostic; conversion to meters belongs at the Blender adapter boundary only.
 
 ## 3. Functional requirements
 
 ### FR-01 — Boundary acquisition
-- Detect and validate one closed edge loop.
+- Detect and validate exactly one selected closed edge loop in Edit Mode or Object Mode.
 - Preserve source object and never destructively modify it.
 - Report invalid loop conditions with a specific reason and offending edge/vertex highlight where possible.
-- Support different Z heights at boundary vertices.
+- Preserve XYZ coordinates, not only XY.
 
 ### FR-02 — Roof surface generation
 - Generate a piecewise-planar upper surface from per-edge planes.
-- Compute the lower envelope of the plane set clipped to the polygon domain.
-- Produce deterministic vertex/face output independent of selection order.
-- Preserve planar slope regions and split only where required by intersections or triangulation.
-- Reject or explicitly report unsupported/ambiguous cases instead of silently generating corrupt geometry.
+- For convex polygons, compute the lower envelope over the polygon domain.
+- For concave polygons, restrict each edge plane to the inward halfspace of its source edge. Subdivide the domain by edge supporting lines, determine the active plane set per convex cell, then compute the lower envelope within that cell.
+- Produce deterministic vertex/face output and weld numerically coincident 3D vertices using scale-aware tolerance.
+- Verify XY coverage against the source polygon area.
+- Reject unsupported or ambiguous cases instead of silently generating corrupt geometry.
 
 ### FR-03 — Per-slope pitch UI
 - Display a top-view roof diagram with a thin white outline and a number at each slope region.
@@ -110,7 +119,6 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - Re-run analysis after source topology changes only on explicit user request.
 
 ## 4. Non-functional requirements
-
 - Blender 5.0+ Python API compatibility; no reliance on undocumented APIs.
 - Deterministic output for identical input/settings.
 - No destructive edits to source mesh.
@@ -118,20 +126,18 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - Undo/Redo-compatible operators and clear datablock ownership.
 - No persistent modal operator or unbounded timer polling.
 - UI draw code must not perform geometry generation or filesystem work.
-- Performance target: simple roofs (<= 16 boundary edges) preview update under 250 ms on a representative workstation; final build target under 1 s excluding high-detail seams. These are targets to benchmark, not guaranteed values.
+- Performance targets must be benchmarked on representative hardware; they are not release guarantees until measured.
 - Test geometry kernel independently of bpy where possible.
 - No external Python dependencies in the installed extension for core functionality.
 
-## 5. Architecture and modules
-
-See [ARCHITECTURE.md](ARCHITECTURE.md). Keep geometry kernel as pure Python/mathutils functions with explicit input/output structures. Blender adapters own datablocks, UI, handlers and operators.
+## 5. Architecture and algorithms
+See ARCHITECTURE.md. The core is independent of bpy. Plane generation, concave-domain partitioning, face assembly and Blender datablock creation are separate stages.
 
 ## 6. Acceptance criteria for 1.0
-
-1. Rectangle, convex polygon, L and U test fixtures build without holes or unintended overlaps.
+1. Rectangle, convex polygon, L and U fixtures build without holes or unintended overlaps.
 2. Mixed boundary heights and per-edge pitches produce expected plane equations within a documented floating-point tolerance.
-3. Concave contours are either correctly supported or rejected with a clear diagnostic; never silently corrupt.
-4. All generated regions pass boundary/manifold/degenerate-face validation for supported solid-shell cases.
+3. Concave contours are correctly supported or rejected with a clear diagnostic; never silently corrupted.
+4. Generated closed shells pass manifold and degenerate-face validation.
 5. Pitch map labels and fields stay correctly mapped after rebuilds and save/load.
 6. Failed preview/final rebuild leaves the last valid roof untouched.
 7. Detach stops all automatic changes and preserves user-edited objects.
@@ -153,15 +159,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md). Keep geometry kernel as pure Python/math
 
 ## 8. Risk register
 - **R1 — Lower-envelope degeneracies:** coincident/near-parallel planes and multi-plane junctions. Mitigation: robust predicates, scale-aware tolerances, deterministic tie-breaking, adversarial fixtures.
-- **R2 — Concave polygon handling:** triangulation and clipping can create invalid cells. Mitigation: validate simple polygons, use robust constrained triangulation or reject unsupported conditions.
-- **R3 — Profile junction topology:** independently swept segments create internal caps and non-manifold junctions. Mitigation: build a shared junction graph and solve node patches as a separate stage.
-- **R4 — Live update lifecycle:** stale callbacks/timers can mutate detached objects. Mitigation: per-roof UUID, generation token, explicit unregister, validity checks before every callback.
-- **R5 — Blender API drift:** property/UI/mesh API changes. Mitigation: compatibility layer and automated smoke tests per supported Blender version.
-- **R6 — Performance:** full rebuilds on every field edit. Mitigation: debounce, preview quality, dependency graph and caching with strict invalidation.
-- **R7 — UV/LOD scope:** too much secondary functionality before core stability. Mitigation: gate behind core geometry release criteria.
+- **R2 — Concave polygon partition:** arrangement cell count and tiny sliver regions can grow rapidly. Mitigation: area thresholds, diagnostics, performance benchmarks, and later spatial acceleration.
+- **R3 — Shared topology:** tolerance welding can still merge or miss points near degeneracies. Mitigation: plane-membership checks, multi-plane node solving, adversarial tests.
+- **R4 — Profile junction topology:** independently swept segments create internal caps and non-manifold junctions. Mitigation: shared junction graph and separate node-patch solver.
+- **R5 — Live update lifecycle:** stale callbacks/timers can mutate detached objects. Mitigation: per-roof UUID, generation token, explicit unregister, validity checks before every callback.
+- **R6 — Blender API drift:** property/UI/mesh API changes. Mitigation: compatibility layer and automated smoke tests per supported Blender version.
+- **R7 — UV/LOD scope:** secondary features can delay core stability. Mitigation: gate behind core geometry release criteria.
 
 ## 9. Delivery gates
-- **Alpha:** modular extension loads; boundary validation; deterministic roof kernel; core tests.
+- **Alpha:** modular extension loads; boundary validation; deterministic roof surface kernel; core tests.
 - **Beta:** interactive pitch map; safe live rebuild/detach; solid shell; validation overlays.
 - **RC:** ridge/valley/hip profiles; seams; manual roof analysis; Blender integration QA.
 - **1.0:** UV, material assignment, optimization/export baseline; documentation; clean install/upgrade; all release gates pass.
