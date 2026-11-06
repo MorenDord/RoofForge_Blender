@@ -4,8 +4,8 @@ import bpy
 
 class RoofForgeSettings(bpy.types.PropertyGroup):
     pitch_default: bpy.props.FloatProperty(
-        name="Default Pitch", description="Default slope angle",
-        default=35.0, min=1.0, max=85.0, subtype="ANGLE", unit="ROTATION"
+        name="Default Pitch", description="Default slope angle in degrees",
+        default=35.0, min=1.0, max=85.0, precision=1
     )
     overhang: bpy.props.FloatProperty(
         name="Overhang", default=0.30, min=0.0, soft_max=2.0, unit="LENGTH"
