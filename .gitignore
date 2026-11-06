@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.blender/
+build/
+dist/
+*.zip
+.pytest_cache/
+.coverage
