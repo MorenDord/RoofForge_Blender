@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed solid shell for a verified rectangular fixture. The weighted wavefront slice now includes moving-line kinematics, convex edge-collapse simulation, a deterministic stale-aware event queue, finite-segment split candidates, and a validated single-loop split operation. A separate experimental finite-segment distance field builds closed L/U comparison meshes with approximated endpoint transitions; it is not the production planar-facet solution. Pure-Python CI passes 37 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested L/U cross-needle terminal events, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 54 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -21,20 +21,26 @@ The initial geometry vertical slice builds a closed solid shell for a verified r
 - [x] Reflex split-candidate detection against finite active edge segments
 - [x] Deterministic event queue with same-time batching and stale edge/loop generation filtering
 - [x] Pure single-loop split operation: duplicate target edge identity and create two validated child loops
-- [ ] Full multi-loop event scheduler and event-driven split/collapse processing
-- [ ] Complete weighted straight-skeleton solver for concave contours with per-edge pitch
+- [x] Global multi-loop event scheduler and earliest-event stepping
+- [x] Swept facet-fragment and skeleton-arc collection
+- [x] Single reflex split with child-loop replacement and stale event invalidation
+- [x] Tested L/U cross-needle terminal event resolver for equal-speed opposing fronts
+- [x] T-junction conformance and welded facet assembly into RoofSurface
+- [ ] Complete weighted straight-skeleton solver for arbitrary concave contours and all simultaneous/parallel event classes
+- [ ] Unequal-speed needle and higher-order vertex-event resolution
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
 - [x] Closed solid shell for the verified rectangle fixture; thickness extrudes along roof-local -Z
-- [ ] Exact planar concave L/U solver with edge-collapse, split, parallel-edge and simultaneous-event handling
+- [x] Planar L/U alpha fixtures with equal pitch pass closed-shell manifold tests
+- [ ] General L/U support for arbitrary per-edge pitch assignments and degenerate event ordering
 - [ ] Generalized concave solver for mixed-height eaves
 - [x] Closed-mesh edge/vertex-link validator (boundary edges, edge incidence, winding, connected components, bow-tie vertices)
 - [ ] Geometric self-intersection detection and zero-area diagnostics integrated into the Blender UI
 - [ ] Robust handling of collinear and near-degenerate contour vertices
 - [ ] Multi-plane node solver and adversarial precision suite
 - [ ] Eaves overhang, fascia and soffit
-**Exit:** verified rectangle fixture passes pure-Python tests and closed-shell edge/vertex manifold checks. Broader convex fixtures, Blender integration tests and continuous concave support remain open.
+**Exit:** verified rectangle, V-notch, equal-pitch L/U alpha fixtures pass pure-Python area, boundary and edge/vertex manifold checks. Arbitrary concave event coverage, self-intersection checks and Blender integration tests remain open.
 
 ## Milestone 2 — Artist workflow (Critical)
 - [ ] Numbered top-view pitch map
