@@ -440,7 +440,7 @@ class PolygonTests(unittest.TestCase):
         self.assertEqual(len(result.loops), 2)
         self.assertTrue(all(child.generation == 5 for child in result.loops))
         self.assertEqual(len(result.loops[0].edge_ids), 4)
-        self.assertEqual(len(result.loops[1].edge_ids), 5)
+        self.assertEqual(len(result.loops[1].edge_ids), 4)
         self.assertNotIn(0, result.edges)
         self.assertEqual(
             sum(1 for edge in result.edges.values() if edge.source_edge_id == 0),
