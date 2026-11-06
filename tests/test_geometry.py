@@ -14,7 +14,7 @@ from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
 from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
-    build_moving_lines, collect_loop_events, find_split_candidates,
+    apply_split_event, build_moving_lines, collect_loop_events, find_split_candidates,
     simulate_convex_wavefront, _line_intersection,
 )
 
@@ -413,6 +413,52 @@ class PolygonTests(unittest.TestCase):
         events = collect_loop_events(loop, edges)
         self.assertTrue(events)
         self.assertTrue(all(event.loop_generation == 12 for event in events))
+
+
+
+    def test_wavefront_split_event_splits_concave_loop_into_two_valid_loops(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        pitches = [45.0, 45.0, 45.0, 78.6900675, 45.0, 78.6900675]
+        moving = build_moving_lines(points, pitches)
+        edges = {edge.edge_id: edge for edge in moving}
+        loop = WavefrontLoop(0, tuple(range(len(moving))), generation=4)
+        candidates = find_split_candidates(loop, edges)
+        event = next(
+            item for item in candidates
+            if item.kind == EventKind.SPLIT_CANDIDATE and item.target_edge_id == 0
+        )
+        result = apply_split_event(loop, edges, event)
+        self.assertEqual(len(result.loops), 2)
+        self.assertTrue(all(child.generation == 5 for child in result.loops))
+        self.assertEqual(len(result.loops[0].edge_ids), 4)
+        self.assertEqual(len(result.loops[1].edge_ids), 3)
+        self.assertNotIn(0, result.edges)
+        self.assertEqual(
+            sum(1 for edge in result.edges.values() if edge.source_edge_id == 0),
+            2,
+        )
+        self.assertEqual(result.event_position, event.position)
+
+    def test_wavefront_split_rejects_stale_loop_generation(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        pitches = [45.0, 45.0, 45.0, 78.6900675, 45.0, 78.6900675]
+        moving = build_moving_lines(points, pitches)
+        edges = {edge.edge_id: edge for edge in moving}
+        loop = WavefrontLoop(0, tuple(range(len(moving))), generation=4)
+        event = next(
+            item for item in find_split_candidates(loop, edges)
+            if item.kind == EventKind.SPLIT_CANDIDATE
+        )
+        changed_loop = WavefrontLoop(loop.loop_id, loop.edge_ids, generation=5)
+        with self.assertRaises(GeometryInputError) as ctx:
+            apply_split_event(changed_loop, edges, event)
+        self.assertEqual(ctx.exception.code, "STALE_SPLIT_EVENT")
 
 
 
