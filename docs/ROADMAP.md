@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed solid shell for a verified rectangular fixture. A separate experimental finite-segment distance field also creates closed L/U shells with per-edge pitches, but its endpoint transition patches are approximated and it is not the production planar-facet solution. Pure-Python CI now passes 24 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice builds a closed solid shell for a verified rectangular fixture. The weighted wavefront slice now includes moving-line kinematics, convex edge-collapse simulation, a deterministic stale-aware event queue, finite-segment split candidates, and a validated single-loop split operation. A separate experimental finite-segment distance field builds closed L/U comparison meshes with approximated endpoint transitions; it is not the production planar-facet solution. Pure-Python CI passes 37 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -16,7 +16,13 @@ The initial geometry vertical slice builds a closed solid shell for a verified r
 - [x] Deterministic ear-clipping for simple concave contours without collinear vertices
 - [x] Experimental concave arrangement partition (rejected for production due internal discontinuities)
 - [x] Experimental finite-segment distance field builds continuous closed L/U comparison meshes (corner transitions approximated; not a production roof solver)
-- [ ] Weighted straight-skeleton solver for concave contours with per-edge pitch
+- [x] Weighted moving-line kinematics with per-edge pitch speeds for constant-Z eaves
+- [x] Convex edge-collapse simulation, rectangle needle and simultaneous point fixtures
+- [x] Reflex split-candidate detection against finite active edge segments
+- [x] Deterministic event queue with same-time batching and stale edge/loop generation filtering
+- [x] Pure single-loop split operation: duplicate target edge identity and create two validated child loops
+- [ ] Full multi-loop event scheduler and event-driven split/collapse processing
+- [ ] Complete weighted straight-skeleton solver for concave contours with per-edge pitch
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected
@@ -70,4 +76,4 @@ The initial geometry vertical slice builds a closed solid shell for a verified r
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Implement the weighted straight-skeleton wavefront solver for constant-Z concave contours. Keep the finite-segment distance field as a comparator, not a production substitute. After exact planar L/U support, generalize to mixed-height eaves, then add overhang/eaves and self-intersection validation.
+Integrate the event queue, edge-collapse update and split-loop operation into a multi-loop simulation state machine. Advance every live loop to the globally earliest event, collect source-edge facet fragments, invalidate stale events after every topology change, and explicitly resolve or reject needle/simultaneous cases. Keep the finite-segment distance field as a comparator, not a production substitute. Do not connect to Blender until exact facet and manifold tests pass.
