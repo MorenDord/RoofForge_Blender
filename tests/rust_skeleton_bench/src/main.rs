@@ -257,6 +257,16 @@ fn run_points_case(
     pitches_degrees: &[f64],
     repeats: usize,
 ) {
+    run_points_case_mode(label, points, pitches_degrees, repeats, None);
+}
+
+fn run_points_case_mode(
+    label: &str,
+    points: &[[f64; 2]],
+    pitches_degrees: &[f64],
+    repeats: usize,
+    force_pslg: Option<bool>,
+) {
     let mut points = points.to_vec();
     let mut pitches_degrees = pitches_degrees.to_vec();
     let count = points.len();
@@ -284,9 +294,12 @@ fn run_points_case(
         .map(|pitch| 1.0 / pitch.to_radians().tan())
         .collect();
 
-    // Inputs are normalized to CCW above. Equal weights can be scaled
-    // globally; per-edge pitches use the weighted PSLG path.
-    let (input_pslg, input_polygon) = if variable_pitch {
+    // Inputs are normalized to CCW above. The ordinary polygon API uses
+    // unit-speed wavefronts; the PSLG API applies multiplicative edge weights.
+    // Force both APIs on the same equal-pitch fixtures to separate weighted
+    // propagation defects from DCEL extraction / component-selection defects.
+    let use_pslg = force_pslg.unwrap_or(variable_pitch);
+    let (input_pslg, input_polygon) = if use_pslg {
         match Pslg::from_flat(&points, &edges, Some(&weights)) {
             Ok(value) => (Some(value), None),
             Err(error) => {
@@ -305,8 +318,8 @@ fn run_points_case(
     };
 
     let options = Options { components: ComponentMode::Index(0) };
-    let z_scale = if variable_pitch { 1.0 } else { weights[0] };
-    let speeds = if variable_pitch { weights.clone() } else { vec![1.0; count] };
+    let z_scale = if use_pslg { 1.0 } else { weights[0] };
+    let speeds = if use_pslg { weights.clone() } else { vec![1.0; count] };
 
     let mut times_ms = Vec::new();
     let mut segment_count = 0usize;
@@ -396,6 +409,7 @@ fn main() {
         [4.0, 4.0], [4.0, 8.0], [0.0, 8.0],
     ];
     run_points_case("concave_L_equal_pitch", &l_shape, &[35.0; 6], repeats);
+    run_points_case_mode("concave_L_equal_pitch_pslg", &l_shape, &[35.0; 6], repeats, Some(true));
     run_points_case("concave_L_variable_pitch", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats);
 
     let u_shape = [
@@ -403,6 +417,7 @@ fn main() {
         [7.0, 3.0], [3.0, 3.0], [3.0, 8.0], [0.0, 8.0],
     ];
     run_points_case("concave_U_equal_pitch", &u_shape, &[35.0; 8], repeats);
+    run_points_case_mode("concave_U_equal_pitch_pslg", &u_shape, &[35.0; 8], repeats, Some(true));
     run_points_case("concave_U_variable_pitch", &u_shape, &[32.0, 35.0, 38.0, 40.0, 34.0, 37.0, 31.0, 36.0], repeats);
 
     let multi_notch = [
