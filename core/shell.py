@@ -101,7 +101,7 @@ def build_roof_shell(surface: RoofSurface, thickness: float,
         if len(matching_segments) != 1:
             raise GeometryInputError(
                 "INTERNAL_OPEN_EDGE",
-                "Обнаружено незамкнутое внутреннее ребро или неоднозначный участок границы."
+                f"Открытое ребро ({p[0]:.9g}, {p[1]:.9g}) → ({q[0]:.9g}, {q[1]:.9g}) не сопоставлено с единственным сегментом контура (совпадений: {len(matching_segments)})."
             )
         segment_index = matching_segments[0]
         covered_lengths[segment_index] += hypot(q[0] - p[0], q[1] - p[1])
