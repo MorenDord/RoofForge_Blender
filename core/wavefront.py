@@ -766,6 +766,8 @@ def _resolve_edge_collapse_group(
     state: WavefrontSimulationState,
     loop: WavefrontLoop,
     events: Sequence[WavefrontEvent],
+    *,
+    needle_endpoints: tuple[Point2, Point2] | None = None,
 ) -> WavefrontLoop | None:
     """Apply one same-loop edge-collapse batch; return a child loop or terminate it."""
     collapsed = {event.edge_id for event in events}
@@ -786,41 +788,78 @@ def _resolve_edge_collapse_group(
         first_offset = first.offset_at(state.current_time)
         second_offset = second.offset_at(state.current_time)
         gap = first_offset + second_offset
-        vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
-        first_index = loop.edge_ids.index(remaining[0])
-        second_index = loop.edge_ids.index(remaining[1])
-        first_segment = _edge_segment(
-            loop, first_index, vertices, state.edges, state.current_time
-        )
-        second_segment = _edge_segment(
-            loop, second_index, vertices, state.edges, state.current_time
-        )
-        tolerance = state.epsilon * max(
-            1.0, abs(first_offset), abs(second_offset),
-            first_segment[3], second_segment[3],
-        ) * 100.0
-        if alignment > -1.0 + state.epsilon * 100.0 or abs(gap) > tolerance:
+        if alignment > -1.0 + state.epsilon * 100.0 or abs(gap) > (
+            state.epsilon * max(1.0, abs(first_offset), abs(second_offset)) * 100.0
+        ):
             raise GeometryInputError(
                 "TWO_EDGE_TERMINATION_UNRESOLVED",
                 "После схлопывания остались два фронта, но их опорные прямые не образуют needle-пару."
             )
-        endpoints_match = (
-            hypot(first_segment[0][0] - second_segment[1][0],
-                  first_segment[0][1] - second_segment[1][1]) <= tolerance
-            and hypot(first_segment[1][0] - second_segment[0][0],
-                      first_segment[1][1] - second_segment[0][1]) <= tolerance
-        )
-        if (
-            first_segment[3] <= tolerance
-            or second_segment[3] <= tolerance
-            or not endpoints_match
-        ):
-            raise GeometryInputError(
-                "PARTIAL_OVERLAP_NEEDLE_UNRESOLVED",
-                "Оставшиеся противоположные фронты совпадают не полными конечными отрезками; "
-                "частичное перекрытие требует отдельного split/overlap-разрешителя."
+
+        if needle_endpoints is not None:
+            # In a compound split/collapse event the two fronts can already be
+            # coincident and adjacent in the child loop. Their intersection is
+            # undefined, so use the independently revalidated split and
+            # collapse event points as the finite overlap endpoints.
+            scale = max(
+                1.0,
+                abs(first_offset),
+                abs(second_offset),
+                hypot(
+                    needle_endpoints[1][0] - needle_endpoints[0][0],
+                    needle_endpoints[1][1] - needle_endpoints[0][1],
+                ),
             )
-        needle_arc = (first_segment[0], first_segment[1])
+            tolerance = state.epsilon * scale * 100.0
+            if any(
+                abs(_dot(line.normal, point) - line.offset_at(state.current_time)) > tolerance
+                for line in (first, second)
+                for point in needle_endpoints
+            ):
+                raise GeometryInputError(
+                    "SPLIT_COLLAPSE_NEEDLE_ENDPOINT_MISMATCH",
+                    "Точки split/collapse не лежат на обеих совпавших конечных линиях."
+                )
+            if hypot(
+                needle_endpoints[1][0] - needle_endpoints[0][0],
+                needle_endpoints[1][1] - needle_endpoints[0][1],
+            ) <= tolerance:
+                raise GeometryInputError(
+                    "DEGENERATE_SPLIT_COLLAPSE_NEEDLE",
+                    "Общая конечная часть фронтов выродилась в точку."
+                )
+            needle_arc = needle_endpoints
+        else:
+            vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
+            first_index = loop.edge_ids.index(remaining[0])
+            second_index = loop.edge_ids.index(remaining[1])
+            first_segment = _edge_segment(
+                loop, first_index, vertices, state.edges, state.current_time
+            )
+            second_segment = _edge_segment(
+                loop, second_index, vertices, state.edges, state.current_time
+            )
+            tolerance = state.epsilon * max(
+                1.0, abs(first_offset), abs(second_offset),
+                first_segment[3], second_segment[3],
+            ) * 100.0
+            endpoints_match = (
+                hypot(first_segment[0][0] - second_segment[1][0],
+                      first_segment[0][1] - second_segment[1][1]) <= tolerance
+                and hypot(first_segment[1][0] - second_segment[0][0],
+                          first_segment[1][1] - second_segment[0][1]) <= tolerance
+            )
+            if (
+                first_segment[3] <= tolerance
+                or second_segment[3] <= tolerance
+                or not endpoints_match
+            ):
+                raise GeometryInputError(
+                    "PARTIAL_OVERLAP_NEEDLE_UNRESOLVED",
+                    "Оставшиеся противоположные фронты совпадают не полными конечными отрезками; "
+                    "частичное перекрытие требует отдельного split/overlap-разрешителя."
+                )
+            needle_arc = (first_segment[0], first_segment[1])
 
     for edge_id in collapsed:
         state.edges.pop(edge_id, None)
@@ -1121,22 +1160,41 @@ def _resolve_split_collapse_batch(
         input_winding=state.input_winding,
     )
 
-    collapse_vertices = _loop_vertices(
-        collapse_child, trial_state.edges, trial_state.current_time, trial_state.epsilon
-    )
     collapse_index = collapse_child.edge_ids.index(collapse_event.edge_id)
-    _, _, _, collapse_length = _edge_segment(
-        collapse_child, collapse_index, collapse_vertices,
-        trial_state.edges, trial_state.current_time,
+    previous_edge = trial_state.edges[
+        collapse_child.edge_ids[collapse_index - 1]
+    ]
+    collapsing_edge = trial_state.edges[collapse_event.edge_id]
+    next_edge = trial_state.edges[
+        collapse_child.edge_ids[(collapse_index + 1) % len(collapse_child.edge_ids)]
+    ]
+    collapse_start = _line_intersection(
+        previous_edge, collapsing_edge,
+        trial_state.current_time, trial_state.epsilon,
+    ).point
+    collapse_end = _line_intersection(
+        collapsing_edge, next_edge,
+        trial_state.current_time, trial_state.epsilon,
+    ).point
+    collapse_length = _dot(
+        _sub(collapse_end, collapse_start), collapsing_edge.tangent
     )
-    if abs(collapse_length) > trial_state.time_tolerance * 10.0:
+    if (
+        abs(collapse_length) > trial_state.time_tolerance * 10.0
+        or collapse_event.position is None
+        or hypot(
+            (collapse_start[0] + collapse_end[0]) * 0.5 - collapse_event.position[0],
+            (collapse_start[1] + collapse_end[1]) * 0.5 - collapse_event.position[1],
+        ) > trial_state.time_tolerance * 10.0
+    ):
         raise GeometryInputError(
             "SPLIT_COLLAPSE_TIME_MISMATCH",
-            "После split заявленное схлопываемое ребро не имеет нулевой длины в момент общего события."
+            "После split заявленное схлопываемое ребро не имеет подтверждённой нулевой длины в момент общего события."
         )
 
     collapsed_child = _resolve_edge_collapse_group(
-        trial_state, collapse_child, (collapse_event,)
+        trial_state, collapse_child, (collapse_event,),
+        needle_endpoints=(split_result.event_position, collapse_event.position),
     )
     if collapsed_child is None:
         trial_state.loops.pop(collapse_child.loop_id, None)
