@@ -37,10 +37,6 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
     let input = match Pslg::from_flat(&points, &edges, Some(&weights)) {
         Ok(value) => value,
         Err(error) => {
-            println!(
-                "case,n,concave,variable_pitch,status,median_ms,p95_ms,segments,error",
-                "case" = "case",
-            );
             eprintln!("INPUT_ERROR n={count}: {error}");
             return;
         }
