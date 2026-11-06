@@ -4,9 +4,9 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated baseline:** develop at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Current branch head:** see [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6); latest code-tested commit: `4f970e15e97bc563db52a86d0cd2ef5cc6c1f6b2`  
+**Current branch head:** see [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6); latest code-tested commit: `603a7b5d0fa696af801cf55154a05549aecc1317`  
 **Current PR:** [#6 — WIP: RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; do not merge)  
-**Latest full code CI:** [Run 42301390659](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301390659) (push) and [Run 42301399106](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301399106) (PR), both successful on code commit `4f970e15e97bc563db52a86d0cd2ef5cc6c1f6b2`. The run includes Python 3.11/3.13, variable per-edge pitch concave regression through 64 edges, local face-degeneracy checks, optimized T-junction assembly and Blender 5.0.1 smoke/package validation.  
+**Latest full code CI:** [Run 42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) and [Run 42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR), both successful on code commit `603a7b5d0fa696af801cf55154a05549aecc1317`. The run includes Python 3.11/3.13, variable per-edge pitch wavy L/U regressions at 64 edges, asymmetric radial cases, local face-degeneracy checks, optimized T-junction assembly and Blender 5.0.1 smoke/package validation.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## Confirmed 0.2.0 product scope
@@ -57,11 +57,15 @@ The global event-driven state machine supports flat-Z contours with one pitch pe
 
 Regression coverage:
 - `test_wavefront_resolves_symmetric_concave_point_terminations_through_64_edges`: equal pitch, 8/16/32/64;
-- `test_wavefront_resolves_variable_pitch_concave_contours_through_64_edges`: deterministic variable pitch, 8/16/32/64; checks projected coverage, facet slope metadata and closed thickness shell;
+- `test_wavefront_resolves_variable_pitch_concave_contours_through_64_edges`: deterministic variable pitch, 8/16/32/64;
+- `test_wavefront_handles_asymmetric_reflex_radial_contours_through_64_edges`: asymmetric star-shaped concave family with per-edge pitch, 16/32/64;
+- `test_wavefront_handles_64_edge_wavy_l_contour_with_variable_pitch`: 64-edge L outline with slightly wavy sides and a per-edge pitch profile;
+- `test_wavefront_handles_64_edge_wavy_u_contour_with_variable_pitch`: 64-edge U outline with two reflex corners and per-edge pitch;
+- all contour regressions verify projected coverage, facet-slope metadata, surface assembly and a closed thickness shell;
 - local face-area validation distinguishes small well-shaped faces from facets whose altitude is below coordinate tolerance.
 All pass on Python 3.11 and 3.13.
 
-Latest CI: [42301390659](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301390659) (push) and [42301399106](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301399106) (PR), both successful on code commit `4f970e15e97bc563db52a86d0cd2ef5cc6c1f6b2`.
+Latest CI: [42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) and [42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR), both successful on code commit `603a7b5d0fa696af801cf55154a05549aecc1317`.
 
 All timings below are medians of three runs on the Actions Linux runner, comparison only:
 
