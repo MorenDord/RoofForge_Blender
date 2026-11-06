@@ -663,7 +663,9 @@ class PolygonTests(unittest.TestCase):
 
 
 
-    def test_wavefront_surface_assembles_l_shape(self):
+
+
+    def test_wavefront_surface_resolves_l_shape_cross_needle_node(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
             (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
@@ -671,6 +673,9 @@ class PolygonTests(unittest.TestCase):
         surface = build_wavefront_roof_surface(points, [45.0] * len(points))
         self.assertAlmostEqual(surface.source_area_xy, 7.0, places=7)
         self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
+        trace = run_weighted_wavefront(points, [45.0] * len(points))
+        self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
+        self.assertEqual(len(trace.skeleton_arcs), 5)
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
