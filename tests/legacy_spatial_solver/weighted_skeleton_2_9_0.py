@@ -834,10 +834,10 @@ def _segment_candidate_point_ids(start, end, point_grid, cell_size):
         t_max_y = float("inf")
         t_delta_y = float("inf")
 
-    candidates = set()
+    candidate_cells = set()
     while True:
         for dx, dy in _SEGMENT_CELL_NEIGHBORS_2D:
-            candidates.update(point_grid.get((cell_x + dx, cell_y + dy), ()))
+            candidate_cells.add((cell_x + dx, cell_y + dy))
 
         if cell_x == final_x and cell_y == final_y:
             break
@@ -854,7 +854,13 @@ def _segment_candidate_point_ids(start, end, point_grid, cell_size):
             cell_y += step_y
             t_max_y += t_delta_y
 
-    return sorted(candidates)
+    # A point belongs to exactly one grid cell, and each neighbouring cell is
+    # read once, so candidate IDs are already unique.
+    return sorted(
+        point_id
+        for cell in candidate_cells
+        for point_id in point_grid.get(cell, ())
+    )
 
 
 def _merge_face_patches(patches, scale):
