@@ -4,10 +4,10 @@ from .addon.registration import register, unregister
 bl_info = {
     "name": "RoofForge",
     "author": "MorenDord",
-    "version": (1, 0, 0),
+    "version": (0, 1, 0),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > RoofForge",
-    "description": "Procedural roof generation and game-ready preparation",
+    "description": "Procedural roof shell generator",
     "category": "Add Mesh",
 }
 

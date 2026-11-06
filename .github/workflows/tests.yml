@@ -16,8 +16,40 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: \${{ matrix.python-version }}
       - name: Compile Python sources
         run: python -m compileall -q core addon __init__.py
       - name: Run geometry tests
         run: python -m unittest discover -s tests -v
+
+  blender-5-smoke-package:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-6 libxext6 libxi6 libxrender1 libxfixes3 libxxf86vm1 libxkbcommon0 libsm6 libgl1
+      - name: Download Blender 5.0.1
+        run: |
+          set -euo pipefail
+          archive="blender-5.0.1-linux-x64.tar.xz"
+          curl -fL "https://download.blender.org/release/Blender5.0/$archive" -o "$RUNNER_TEMP/$archive"
+          tar -xf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/blender-5.0.1-linux-x64" >> "$GITHUB_PATH"
+      - name: Run Blender background smoke tests
+        run: blender --background --factory-startup --python tests/blender_smoke.py
+      - name: Build clean Blender Extension ZIP
+        run: python3 tools/build_extension.py --output-dir dist
+      - name: Validate Extension ZIP with Blender 5.0.1
+        run: blender --command extension validate dist/roof_forge-0.1.0.zip
+      - name: Upload installable test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof_forge-0.1.0-blender-5.0.1
+          path: |
+            dist/roof_forge-0.1.0.zip
+            dist/roof_forge-0.1.0.zip.sha256
+          if-no-files-found: error
+          retention-days: 30

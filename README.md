@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, designed for environment artists and game-ready asset workflows.
 
-> **Development status:** early 1.0 alpha. The current code generates a closed shell from one selected closed edge loop. It is not yet a complete parametric roof editor and has not yet been runtime-tested in Blender 5.0.
+> **Test build:** 0.1.0 alpha. The current Blender UI supports one selected closed edge loop, one pitch value shared by all edges, validation, and a separate closed shell. It is not yet a parametric roof editor. A Blender 5.0.1 background smoke test is included in CI; interactive GUI behavior still needs user verification.
 
 ## Project documents
 - Technical specification: docs/SPECIFICATION.md
@@ -20,16 +20,11 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
 - Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
 - Closed-mesh validator for edge incidence, face winding, connected components and vertex links.
-- Weighted wavefront alpha for constant-height eaves: global multi-loop event stepping, split/collapse events, tested L/U cross-needle nodes, swept roof facets, T-junction conformance and welded RoofSurface assembly.
-- Pure-Python end-to-end shell fixtures for rectangle, V-notch (including asymmetric pitches), L and U; CW winding and nonzero eave height.
+- Weighted wavefront alpha for constant-height eaves: global multi-loop event stepping, tested split/collapse fixtures, L/U cross-needle nodes and welded RoofSurface assembly. This is not connected to the Blender UI.
+- Pure-Python end-to-end geometry fixtures for rectangle, V-notch, constrained L/U shapes and selected asymmetric event cases.
 
-## Development install
-1. Clone or download this repository.
-2. Install the package as a Blender Extension using Blender's Extension workflow.
-3. Enable RoofForge.
-4. In the 3D View, open the N-panel and choose RoofForge.
-5. In Edit Mode, select exactly one closed edge loop; set pitch and thickness.
-6. Run Validate Roof Boundary, then Create Roof Shell.
+## Test build installation
+Download the roof_forge-0.1.0.zip artifact from the latest successful **RoofForge tests** workflow, then install it using Preferences → Get Extensions → Install from Disk. Do not use the repository ZIP: it contains development files and legacy archives. Russian installation and QA steps are included in INSTALL_TEST_RU.md inside the extension package.
 
 The generated object is separate from the source and inherits its world transform. The source mesh is not modified.
 
@@ -40,6 +35,8 @@ From the repository root:
     python -m unittest discover -s tests -v
 
 ## Not implemented yet
+- Per-slope pitch map and separate pitch values (the current test UI uses one global pitch).
+- Live Update and Detach currently remain future product goals, not implemented in this build.
 - Eaves overhang, fascia and soffit.
 - Per-slope interactive pitch map and independent slope values.
 - Live update, detach, relink and lifecycle handlers.
@@ -50,10 +47,9 @@ From the repository root:
 ## Known geometry limitations
 - Input must be one simple closed loop in XY.
 - Collinear contour vertices and projected-vertical edges are rejected.
-- The production Blender operator still uses the existing plane/envelope path. The weighted wavefront path is a separate pure-Python alpha and has not yet been connected to the UI.
-- Weighted wavefront fixtures currently pass for a rectangle, one V-notch split (including one asymmetric pitch assignment), an equal-pitch L contour and an equal-pitch U contour. Arbitrary simultaneous split batches and unequal-speed needle events are still unresolved; do not assume every concave contour is supported.
+- The production Blender operator still uses the existing plane/envelope path. The weighted wavefront path is a separate pure-Python alpha and has not been connected to the UI. Do not treat L/U solver tests as proof of concave Blender generation.
 - The current 2D wavefront path requires a constant-Z eave loop. Mixed-height eaves require another formulation. `docs/CONCAVE_GEOMETRY.md` records the algorithm state and remaining event classes.
-- The geometry kernel has unit coverage, but Blender runtime behavior, mesh attributes and Edit Mode workflow have not yet been verified in Blender 5.0.
+- Pure geometry has unit coverage. Blender 5.0.1 background checks cover registration, Object Mode/Edit Mode boundary reads, validation and shell creation; manual interactive GUI QA is still required.
 - Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
 
 ## Development principles
