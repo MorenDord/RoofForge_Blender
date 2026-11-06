@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial surface-generation vertical slice is on branch develop. Pure-Python tests cover plane construction and open-surface generation for rectangle, L and U fixtures. The Blender operator and UI entry point are scaffolded but still need runtime validation in Blender 5.0.
+The initial geometry vertical slice now builds a closed solid shell for verified continuous/convex roof surfaces. Pure-Python CI covers plane construction, rectangle surface winding and manifold shell generation. L/U arrangements are still experimental: if they create an internal open edge, RoofForge rejects the surface before creating an object. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -17,11 +17,14 @@ The initial surface-generation vertical slice is on branch develop. Pure-Python 
 - [x] Restricted lower-envelope partition for concave contours
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
+- [x] Surface boundary-chain check: internal open edges are rejected
+- [x] Closed solid shell for continuous convex fixtures; thickness extrudes along roof-local -Z
+- [ ] Continuous concave L/U surface solver; current invalid outputs are rejected safely
 - [ ] Full boundary-loop and non-manifold vertex validator
 - [ ] Robust handling of collinear and near-degenerate contour vertices
 - [ ] Multi-plane node solver and adversarial precision suite
-- [ ] Closed solid shell with thickness and eaves
-**Exit:** supported fixtures pass unit and Blender integration tests; closed-shell output is manifold.
+- [ ] Eaves overhang, fascia and soffit
+**Exit:** supported convex fixtures pass pure-Python tests and closed-shell edge-manifold checks. Blender integration tests and full concave support remain open.
 
 ## Milestone 2 — Artist workflow (Critical)
 - [ ] Numbered top-view pitch map
@@ -63,4 +66,4 @@ The initial surface-generation vertical slice is on branch develop. Pure-Python 
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Close the geometry alpha gate by adding a boundary/manifold validator, stress tests for near-degenerate intersections and a watertight thickness/eaves builder. Do not begin the pitch-map UI until the geometry core can produce a closed shell reliably.
+Implement continuous finite roof-face regions for concave contours and solve multi-plane junctions. Preserve the new rejection guard. Then add overhang/eaves and complete vertex-manifold, degeneracy and self-intersection validation before starting pitch-map UI.
