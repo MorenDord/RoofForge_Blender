@@ -49,8 +49,25 @@ def percentile_95(values: list[float]) -> float:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
-def measure(label: str, points, builder, repeats: int) -> dict:
-    pitches = [35.0] * len(points)
+def variable_pitch_profile(count: int) -> list[float]:
+    """Deterministic asymmetric pitch profile; values stay within valid limits."""
+    return [
+        32.0 + 4.0 * math.sin(index * 1.371)
+        + 2.5 * math.cos(index * 0.613)
+        for index in range(count)
+    ]
+
+
+def measure(
+    label: str,
+    points,
+    builder,
+    repeats: int,
+    pitches_degrees: list[float] | None = None,
+) -> dict:
+    pitches = [35.0] * len(points) if pitches_degrees is None else list(pitches_degrees)
+    if len(pitches) != len(points):
+        raise ValueError("Benchmark pitch count must match the contour edge count.")
     durations = []
     output = None
     try:
@@ -73,7 +90,8 @@ def measure(label: str, points, builder, repeats: int) -> dict:
             "case": label,
             "status": "error",
             "vertices_in": len(points),
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": f"{type(exc).__name__}: {exc}"[:1200],
+            "error_truncated": len(f"{type(exc).__name__}: {exc}") > 1200,
             "median_ms": None,
             "p95_ms": None,
         }
@@ -102,6 +120,13 @@ def main() -> int:
             run_weighted_wavefront,
             args.repeats,
         ))
+        results.append(measure(
+            f"weighted_wavefront_convex_variable_pitch_n{count}",
+            convex,
+            run_weighted_wavefront,
+            args.repeats,
+            variable_pitch_profile(count),
+        ))
 
     for count in (8, 16, 32, 64):
         concave = radial_polygon(count, concave=True)
@@ -116,6 +141,21 @@ def main() -> int:
             concave,
             build_wavefront_roof_surface,
             args.repeats,
+        ))
+        variable_pitches = variable_pitch_profile(count)
+        results.append(measure(
+            f"weighted_wavefront_trace_concave_variable_pitch_n{count}",
+            concave,
+            run_weighted_wavefront,
+            args.repeats,
+            variable_pitches,
+        ))
+        results.append(measure(
+            f"weighted_wavefront_surface_concave_variable_pitch_n{count}",
+            concave,
+            build_wavefront_roof_surface,
+            args.repeats,
+            variable_pitches,
         ))
         results.append(measure(
             f"distance_field_uniform_refine_depth2_concave_n{count}",
