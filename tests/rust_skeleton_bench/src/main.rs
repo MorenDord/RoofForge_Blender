@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use surfer2::{straight_skeleton, ComponentMode, Options, Pslg, Skeleton};
+use surfer2::{interior_straight_skeleton, straight_skeleton, ComponentMode, Options, Polygon, Pslg, Skeleton};
 
 #[derive(Clone, Copy)]
 struct RoofPoint {
@@ -36,7 +36,8 @@ fn signed_area(points: &[[f64; 2]]) -> f64 {
 fn extract_and_validate_roof(
     skeleton: &Skeleton,
     points: &[[f64; 2]],
-    weights: &[f64],
+    speeds: &[f64],
+    time_to_z: f64,
 ) -> Result<(usize, usize, f64), String> {
     let mut top_faces: Vec<(usize, Vec<RoofPoint>)> = Vec::new();
     let halfedges = skeleton.halfedges();
@@ -68,7 +69,7 @@ fn extract_and_validate_roof(
                 node_id: he.origin.0 as usize,
                 x: point.x,
                 y: point.y,
-                z: node.time,
+                z: node.time * time_to_z,
             });
             current = he.next;
             if current == start {
@@ -106,10 +107,10 @@ fn extract_and_validate_roof(
         }
         let nx = -dy / length;
         let ny = dx / length;
-        let speed = weights[*source];
+        let speed = speeds[*source];
         for p in face {
             let distance = nx * (p.x - a[0]) + ny * (p.y - a[1]);
-            let residual = (distance - speed * p.z).abs();
+            let residual = (distance - speed * (p.z / time_to_z)).abs();
             max_plane_residual = max_plane_residual.max(residual);
         }
 
@@ -231,14 +232,36 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
         .collect();
 
     let label = if concave { "concave" } else { "convex" };
-    let input = match Pslg::from_flat(&points, &edges, Some(&weights)) {
-        Ok(value) => value,
-        Err(error) => {
-            println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
-            return;
+    // Equal weights are a global time rescaling, so run the canonical
+    // polygon API for that case. Per-edge pitches use the weighted PSLG path.
+    let (input_pslg, input_polygon) = if variable_pitch {
+        match Pslg::from_flat(&points, &edges, Some(&weights)) {
+            Ok(value) => (Some(value), None),
+            Err(error) => {
+                println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
+                return;
+            }
+        }
+    } else {
+        match Polygon::from_flat(&points, &[0]) {
+            Ok(value) => (None, Some(value)),
+            Err(error) => {
+                println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
+                return;
+            }
         }
     };
     let options = Options { components: ComponentMode::Index(0) };
+    let z_scale = if variable_pitch {
+        1.0
+    } else {
+        weights[0]
+    };
+    let speeds = if variable_pitch {
+        weights.clone()
+    } else {
+        vec![1.0; count]
+    };
 
     let mut times_ms = Vec::new();
     let mut segment_count = 0usize;
@@ -249,9 +272,14 @@ fn run_case(count: usize, concave: bool, variable_pitch: bool, repeats: usize) {
 
     for _ in 0..repeats {
         let start = Instant::now();
-        match straight_skeleton(&input, &options) {
+        let result = if let Some(input) = &input_pslg {
+            straight_skeleton(input, &options)
+        } else {
+            interior_straight_skeleton(input_polygon.as_ref().unwrap())
+        };
+        match result {
             Ok(skeleton) => {
-                match extract_and_validate_roof(&skeleton, &points, &weights) {
+                match extract_and_validate_roof(&skeleton, &points, &speeds, z_scale) {
                     Ok((faces, vertices, residual)) => {
                         times_ms.push(start.elapsed().as_secs_f64() * 1000.0);
                         segment_count = skeleton.finite_segments().count();
