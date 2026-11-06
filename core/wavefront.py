@@ -1553,6 +1553,12 @@ def advance_wavefront_state(
                     "ни проверенным cross-needle узлом. "
                     f"Контур {loop_id}, события: {details}."
                 )
+            # The collapse-endpoint resolver can replace the loop in-place.
+            # Its new generation must be rescheduled just like other topology
+            # mutations, otherwise the simulation would run out of events.
+            child_loop = state.loops.get(loop_id)
+            if child_loop is not None and child_loop.generation != loop.generation:
+                changed_loops.append(child_loop)
         else:
             details = [
                 (
