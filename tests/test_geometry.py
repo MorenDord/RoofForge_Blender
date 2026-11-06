@@ -535,5 +535,48 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_global_wavefront_collects_planar_facets_and_skeleton_arcs(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        state = create_wavefront_state(points, [45.0] * 4)
+        while not state.is_complete:
+            advance_wavefront_state(state)
+        self.assertEqual(len(state.facets), 4)
+        projected_area = sum(
+            abs(signed_area([(p[0], p[1]) for p in facet.vertices]))
+            for facet in state.facets
+        )
+        self.assertAlmostEqual(projected_area, 8.0, places=7)
+        self.assertGreaterEqual(len(state.skeleton_arcs), 5)
+        for facet in state.facets:
+            self.assertGreaterEqual(facet.end_time, facet.start_time)
+            line = next(
+                item for item in build_moving_lines(points, [45.0] * 4)
+                if item.source_edge_id == facet.source_edge_id
+            )
+            for x, y, z in facet.vertices:
+                expected = line.base_height + (
+                    line.normal[0] * x + line.normal[1] * y - line.offset
+                ) / line.speed
+                self.assertAlmostEqual(z, expected, places=7)
+
+    def test_wavefront_respects_nonzero_constant_eave_height(self):
+        base_z = 2.5
+        points = [(0.0, 0.0, base_z), (4.0, 0.0, base_z),
+                  (4.0, 2.0, base_z), (0.0, 2.0, base_z)]
+        state = create_wavefront_state(points, [45.0] * 4)
+        self.assertAlmostEqual(state.current_time, base_z)
+        while not state.is_complete:
+            advance_wavefront_state(state)
+        self.assertAlmostEqual(state.current_time, base_z + 1.0, places=7)
+        self.assertTrue(all(
+            abs(vertex[2] - base_z) < 1e-7
+            for facet in state.facets
+            for vertex in facet.vertices
+            if abs(vertex[2] - base_z) < 1e-7
+        ))
+
+
+
 if __name__ == "__main__":
     unittest.main()
