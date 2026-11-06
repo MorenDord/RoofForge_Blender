@@ -1536,6 +1536,10 @@ def build_wavefront_roof_surface(
     )
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = max(eps * scale * scale * 100.0, source_area * 1e-7)
+    # Coverage tolerance is intentionally much looser than the threshold for
+    # discarding a face. Real event ordering can create very small but valid
+    # sliver facets; dropping them opens an otherwise conforming surface.
+    min_fragment_area = max(1e-24, weld_tolerance * weld_tolerance * 10.0)
     planes = build_boundary_planes(points, pitches_degrees, eps)
 
     registry = _VertexRegistry(weld_tolerance)
@@ -1561,7 +1565,7 @@ def build_wavefront_roof_surface(
 
         projected = [(registry.vertices[index][0], registry.vertices[index][1]) for index in compact]
         signed = signed_area(projected)
-        if abs(signed) <= area_tolerance:
+        if abs(signed) <= min_fragment_area:
             continue
         if signed < 0.0:
             compact.reverse()
