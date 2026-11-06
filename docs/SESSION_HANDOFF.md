@@ -6,8 +6,8 @@
 **Active development branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Current PR:** [#6 — WIP: RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; do not merge yet)  
 **Latest tested code snapshot:** `aa04e163428348b8a3637bcc99449656a3257baf`  
-**Current PR head at handoff start:** `084dd5042825595a42862bf021e63da4581ceaa8` (the difference after tested code is documentation-only).  
-**Latest full CI:** [Run 42286264952](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42286264952) — all six jobs succeeded.  
+**Latest docs/plan snapshot before this handoff refresh:** `4dbb835ff471b98b0fd6e086fef5283279e29041` (all commits after tested code `aa04e...` are documentation-only).  
+**Latest full CI for code snapshot `aa04e...`:** [Run 42286264952](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42286264952) — all six jobs succeeded. Later commits only corrected/expanded documentation and PR notes.  
 **Important:** `main` and `develop` were not changed. Continue on the 0.2 feature branch only.
 
 ## User-confirmed product direction
