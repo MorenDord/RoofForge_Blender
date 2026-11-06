@@ -16,6 +16,7 @@ from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
     advance_wavefront_state, apply_split_event, build_moving_lines,
     collect_loop_events, create_wavefront_state, find_split_candidates,
+    run_weighted_wavefront,
     simulate_convex_wavefront, _line_intersection,
 )
 
@@ -574,6 +575,43 @@ class PolygonTests(unittest.TestCase):
             for facet in state.facets
             for vertex in facet.vertices
             if abs(vertex[2] - base_z) < 1e-7
+        ))
+
+
+
+    def test_run_weighted_wavefront_returns_complete_rectangle_trace(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        trace = run_weighted_wavefront(points, [45.0] * 4)
+        self.assertTrue(trace.is_complete)
+        self.assertEqual(trace.terminal_kind, "NEEDLE")
+        self.assertAlmostEqual(trace.projected_facet_area, 8.0, places=7)
+        self.assertEqual(len(trace.facets), 4)
+        self.assertGreaterEqual(len(trace.skeleton_arcs), 5)
+
+    def test_run_weighted_wavefront_returns_complete_v_notch_trace(self):
+        points = [
+            (0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 4.0, 0.0),
+            (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
+            (0.0, 4.0, 0.0),
+        ]
+        trace = run_weighted_wavefront(points, [45.0] * len(points))
+        self.assertTrue(trace.is_complete)
+        self.assertGreaterEqual(len(trace.facets), len(points))
+        self.assertAlmostEqual(trace.projected_facet_area, abs(signed_area(
+            [(point[0], point[1]) for point in points]
+        )), places=6)
+        self.assertTrue(any(event.kind == EventKind.SPLIT_CANDIDATE for event in trace.events))
+
+    def test_run_weighted_wavefront_preserves_absolute_eave_height(self):
+        base_z = 3.25
+        points = [(0.0, 0.0, base_z), (4.0, 0.0, base_z),
+                  (4.0, 2.0, base_z), (0.0, 2.0, base_z)]
+        trace = run_weighted_wavefront(points, [45.0] * 4)
+        self.assertAlmostEqual(trace.terminal_time, base_z + 1.0, places=7)
+        self.assertTrue(all(
+            vertex[2] >= base_z - 1e-8
+            for facet in trace.facets for vertex in facet.vertices
         ))
 
 
