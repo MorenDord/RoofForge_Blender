@@ -27,16 +27,17 @@ def clear_scene() -> None:
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def create_square_object(name: str):
+def create_square_object(name: str, with_face: bool = False):
     mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
     mesh.from_pydata(
         [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
          (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
         [(0, 1), (1, 2), (2, 3), (3, 0)],
-        [],
+        [(0, 1, 2, 3)] if with_face else [],
     )
     mesh.update()
-    mesh.edges.foreach_set("select", [True] * len(mesh.edges))
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     for selected in list(bpy.context.selected_objects):
@@ -71,9 +72,9 @@ def check_generated_shell(source, source_coordinates) -> None:
     ensure(matrices_close(roof.matrix_world, source.matrix_world), "generated transform differs from source")
 
 
-def run_case(name: str, edit_mode: bool) -> None:
+def run_case(name: str, edit_mode: bool, with_face: bool = False) -> None:
     clear_scene()
-    source = create_square_object(name)
+    source = create_square_object(name, with_face=with_face)
     source_coordinates = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     settings = bpy.context.scene.roof_forge
     settings.pitch_default = 35.0
@@ -88,7 +89,7 @@ def run_case(name: str, edit_mode: bool) -> None:
         for vertex in bm.verts:
             vertex.select_set(False)
         for edge in bm.edges:
-            edge.select_set(True)
+            edge.select_set(False)
         bm.select_flush_mode()
         bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
 
@@ -108,13 +109,20 @@ def main() -> None:
     extension.register()  # Registration must be safe to call twice.
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
 
-    run_case("RoofForge_Smoke_ObjectMode", edit_mode=False)
-    run_case("RoofForge_Smoke_EditMode", edit_mode=True)
+    # No mesh elements are selected: the add-on must find the contour itself.
+    run_case("RoofForge_Smoke_ObjectMode_Wire", edit_mode=False)
+    run_case("RoofForge_Smoke_EditMode_Wire", edit_mode=True)
+    # Also exercise boundary extraction from an actual surface mesh face.
+    run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
+    run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
 
     extension.unregister()
     extension.unregister()  # Unregistration must be safe to call twice.
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
-    print(f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: Object Mode + Edit Mode")
+    print(
+        f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
+        "automatic boundary detection, Object/Edit Mode, wire/surface meshes"
+    )
 
 
 if __name__ == "__main__":
