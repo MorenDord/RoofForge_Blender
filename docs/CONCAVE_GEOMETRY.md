@@ -76,21 +76,27 @@ Therefore:
 4. **Topology changes:** a strict interior split creates two child loops and two edge instances that preserve the target's source-slope identity. The global state machine advances all active loops to the earliest queued event.
 5. **L/U terminal nodes:** a restricted cross-needle resolver handles one or more reflex vertices hitting adjacent target-edge endpoints in the same event batch, provided every remaining finite wavefront segment pairs with an opposite coincident segment at the event height. The finite segments must match endpoint-to-endpoint, but their speeds may differ; the supporting lines only need to coincide at that instant. Those segment pairs become skeleton arcs.
 6. **Facet collection and assembly:** every active source edge produces swept planar fragments between event heights; moving vertices produce skeleton arcs. The assembler welds 3D points, checks each fragment against its original plane, inserts intermediate vertices along T-junction edges, validates projected coverage and requires every open upper-surface edge to match the original perimeter.
-7. **Solid shell:** the resulting `RoofSurface` passes through the existing roof-shell builder and edge/vertex manifold validator.
+7. **Solid shell:** the resulting `RoofSurface` passes through the existing roof-shell builder and edge/vertex manifold validator for fixtures whose smallest faces exceed the validator's scale-aware area tolerance.
+8. **Constrained compound event:** one strict interior split coincident with one edge collapse on the same loop is applied transactionally. The split target is divided first; the collapse is revalidated from adjacent support lines. If the collapsing child reduces to two opposite coincident fronts, the finite terminal arc is defined by independently revalidated split and collapse event points, and the other child is rescheduled.
+9. **Finite needle validation:** an ordinary two-front terminal state must match finite segment endpoints in reverse order. Coincident infinite support lines alone are insufficient; unhandled partial overlaps raise `PARTIAL_OVERLAP_NEEDLE_UNRESOLVED`.
 
 ### Verified fixtures
 - Rectangle: point and needle terminal events.
 - V-notch: one reflex split; both equal pitches and one asymmetric per-edge pitch set.
 - L contour: one cross-needle terminal node with equal pitches and with deliberately unequal opposing speeds; also tested with reversed contour winding.
+- Two constrained asymmetric L cases: one strict split and one edge collapse in the same event batch, with opposite split targets for the two speed configurations; both continue the surviving child and assemble into manifold shells.
+- A sub-tolerance sliver regression: the upper surface retains the narrow facet, while closed-shell validation rejects the resulting below-tolerance face rather than suppressing geometry or relaxing the validator.
 - U contour: two endpoint-hit groups and three terminal needle arcs, with equal pitches and with three deliberately unequal-speed opposing pairs.
 - Nonzero constant eave elevation (the split edge copies must preserve their base height).
 - Closed shell with roof-local global `-Z` thickness.
 
-Latest pure-Python CI: **58 tests passed on Python 3.11 and 3.13**. See the latest run linked from `SESSION_HANDOFF.md`.
+Latest pure-Python CI: **61 tests passed on Python 3.11 and 3.13**: https://github.com/MorenDord/RoofForge_Blender/actions/runs/42264904390.
 
 ### Known limitations
-- This is not a general solution for every simple concave polygon. Arbitrary simultaneous split batches, higher-order vertex collisions, partial-overlap unequal-speed needle pairs, and split/collapse events whose times differ still require dedicated resolvers.
-- L/U support is now verified for the listed symmetric and specifically constrained asymmetric pitch fixtures. This does not imply general mixed-pitch L/U support: a small change in opposing speed sums can move the first split and collapse apart, and that event ordering is currently detected but not yet resolved by the global state machine.
+- This is not a general solution for every simple concave polygon. The same-loop compound resolver currently accepts exactly one strict split plus one edge collapse in the same event batch; it is not a generic resolver for arbitrary mixed event sets.
+- The two verified asymmetric L compound fixtures cover a constrained partial terminal overlap: the split and collapse event positions define a terminal segment shared by the two coincident opposing fronts, while the remaining child continues. Generic partial overlaps with arbitrary endpoints, multiple overlap intervals or surviving tails are still unsupported and must be rejected.
+- When event times are distinct, the global queue advances to the earlier candidate and schedules new candidates after topology mutation; however, the broader family of near-simultaneous event orderings is not yet covered by end-to-end adversarial fixtures. Candidate-order diagnostics alone are not proof of general support.
+- A geometrically nonzero but sub-tolerance sliver may fail the closed-shell face-area gate. The solver retains the source facet; the shell validator intentionally rejects such output. No validator tolerance has been relaxed.
 - Mixed-height eaves are not supported by this 2D wavefront formulation.
 - The code is not connected to the Blender generation operator and has not been runtime-tested inside Blender 5.0.
 
