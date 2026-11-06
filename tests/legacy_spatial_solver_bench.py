@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests" / "legacy_spatial_solver"))
 
+import spatial_roof_2_9_0 as spatial_module
 from spatial_roof_2_9_0 import build_spatial_roof_mesh, SpatialRoofError
 
 
@@ -75,6 +76,43 @@ def run_case(label, points, pitch_degrees, repeats=2):
         print(f"{label},{len(points)},error,,,,,,,," + repr(message))
 
 
+def run_all_pairs_nonplanar(label, points, pitch_degrees):
+    """Exercise the unconstrained all-pairs lower-envelope alternative."""
+    started = time.perf_counter()
+    try:
+        count = len(points)
+        scale = max(
+            max(point[0] for point in points) - min(point[0] for point in points),
+            max(point[1] for point in points) - min(point[1] for point in points),
+            1.0,
+        )
+        eps = max(scale * 1.0e-9, 1.0e-9)
+        pitches = [math.radians(value) for value in pitch_degrees]
+        planes = [
+            spatial_module._edge_plane(
+                points[index], points[(index + 1) % count], pitches[index], 0.0
+            )
+            for index in range(count)
+        ]
+        vertices, faces, sources = spatial_module._build_nonplanar_lower_envelope(
+            points, planes, eps
+        )
+        spatial_module._validate_lifted_mesh(
+            vertices, faces, sources, points, planes, eps, scale
+        )
+        shell_vertices, shell_faces = check_shell(vertices, faces)
+        elapsed = (time.perf_counter() - started) * 1000.0
+        print(
+            f"{label},{count},ok,{elapsed:.3f},{elapsed:.3f},"
+            f"{len(vertices)},{len(faces)},{len(set(sources))},"
+            f"{shell_vertices},{shell_faces},"
+        )
+    except Exception as exc:
+        elapsed = (time.perf_counter() - started) * 1000.0
+        message = str(exc).replace(",", ";").replace("\\n", " ")[:220]
+        print(f"{label},{len(points)},error,{elapsed:.3f},{elapsed:.3f},,,,,," + repr(message))
+
+
 def main():
     print("case,n,status,median_ms,p95_ms,top_vertices,top_faces,source_ids,shell_vertices,shell_faces,error")
     for n in (8, 16, 32, 64, 128):
@@ -102,6 +140,11 @@ def main():
     nonplanar_u = [(0,0,0.0),(10,0,0.08),(10,8,0.14),(7,8,0.20),(7,3,0.12),(3,3,0.18),(3,8,0.24),(0,8,0.10)]
     run_case("nonplanar_U_equal_pitch", nonplanar_u, [35.0]*8)
     run_case("nonplanar_U_variable_pitch", nonplanar_u, [33,35,37,38,34,36,32,37])
+
+    run_all_pairs_nonplanar("all_pairs_nonplanar_L_equal_pitch", nonplanar_l, [35.0]*6)
+    run_all_pairs_nonplanar("all_pairs_nonplanar_L_variable_pitch", nonplanar_l, [33,35,37,36,38,34])
+    run_all_pairs_nonplanar("all_pairs_nonplanar_U_equal_pitch", nonplanar_u, [35.0]*8)
+    run_all_pairs_nonplanar("all_pairs_nonplanar_U_variable_pitch", nonplanar_u, [33,35,37,38,34,36,32,37])
 
 
 if __name__ == "__main__":
