@@ -15,9 +15,12 @@ struct RoofPoint {
 fn radial_polygon(count: usize, concave: bool) -> Vec<[f64; 2]> {
     (0..count)
         .map(|index| {
-            let angle = 2.0 * PI * index as f64 / count as f64;
+            let phase = index as f64;
+            let angle = 2.0 * PI * phase / count as f64
+                + if concave { 0.045 * (0.7 * phase).sin() } else { 0.0 };
             let radius = if concave {
-                if index % 2 == 0 { 10.0 } else { 8.6 }
+                8.6 + 1.05 * (1.73 * phase + 0.2).sin()
+                    + 0.55 * (2.41 * phase).cos()
             } else {
                 10.0 * (1.0 + 0.0015 * (7.0 * angle).sin() + 0.0008 * (11.0 * angle).cos())
             };
