@@ -17,7 +17,9 @@
 - addon/adapters/mesh_io.py, object_registry.py, collections.py, units.py
 - core/geometry.py — predicates, clipping, plane primitives and shared math
 - core/planes.py — boundary-edge plane generation and active-halfspace checks
-- core/envelope.py — convex and concave lower-envelope partition
+- core/envelope.py — convex lower-envelope partition and experimental concave arrangement
+- core/distance_field.py — experimental finite-segment distance field with approximated endpoint transitions
+- core/wavefront.py (planned) — weighted straight-skeleton event simulation and lifted roof-face graph
 - core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
 - core/shell.py — closed shell construction by global roof-local -Z extrusion
 - core/validation.py — edge incidence, face winding, connected-component and vertex-link validation
@@ -30,7 +32,7 @@
 2. Validate: polygon simplicity, edge lengths, winding, projected vertical edges and pitch compatibility.
 3. Build planes: one plane per boundary edge, identified by a stable slope index/UUID at the model layer.
 4. Convex partition: clip the domain by pairwise plane equality halfplanes.
-5. Concave partition: ear-clip the simple polygon; split each triangle by all source-edge supporting lines; determine the active inward-halfspace planes per convex arrangement cell; calculate a lower envelope only among active planes.
+5. Concave production partition (planned): simulate a weighted inward wavefront; process edge-collapse, split, parallel-edge and simultaneous events; lift each source-edge wavefront fragment into its planar roof face. The current inward-halfspace arrangement remains a rejecting experimental path only.
 6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
 7. Validate surface: compare projected face area with the source polygon, then require every single-use edge to lie on one source boundary segment and require complete edge-chain coverage. Internal open edges are blocking errors.
 8. Shell: duplicate the upper-surface vertices at z-thickness, reverse bottom face winding, create side walls only along validated source-boundary edges, and require every final undirected edge to have exactly two incident faces.
@@ -38,6 +40,9 @@
 10. Features: derive adjacency graph from roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
 11. Validate output and commit temporary datablocks only after success.
 12. Lifecycle: attach metadata UUIDs and generation tokens; detach removes all callbacks and invalidates tokens.
+
+### D. Experimental finite-segment field
+`core/distance_field.py` evaluates a continuous lower envelope of finite edge-segment distance features and uniformly refines corner transitions. It is a comparison prototype only: corner patches are approximated, so it is not the production planar-facet solver.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
