@@ -74,7 +74,7 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 
 ## Current known mathematical risk
 
-The current weighted-wavefront alpha assumes constant-Z eaves and has only constrained support for simultaneous split/collapse and needle events. "All arbitrary 3D contours" is not a safe claim until a generalized formulation for mixed-height eaves is derived and tested. Preserve XYZ in the input model, keep convex cases on the verified existing path where possible, and explicitly reject mixed-height concave cases until the generalized solver is proven. Do not flatten or silently modify user geometry.
+The custom Python weighted-wavefront candidate currently assumes constant-Z eaves. It now has a global multi-loop event state machine, validated reflex splits, one-split/one-collapse batches, selected endpoint/cross-needle cases, and a strict resolver for a complete simultaneous point termination. This is still not a generic simultaneous-event solver: multiple split events on the same loop/time and unsupported mixed event groups are rejected. The current Blender generator still calls the old envelope path; the wavefront surface builder is not yet wired into the operator. "All arbitrary 3D contours" is not a safe claim until mixed-height eaves are handled mathematically. Preserve XYZ in the input model and explicitly reject unsupported mixed-height concave cases. Do not flatten or silently modify user geometry.
 
 ## Результаты сравнительных замеров (CI, 6–7 ноября 2026)
 
@@ -89,7 +89,33 @@ The current weighted-wavefront alpha assumes constant-Z eaves and has only const
 - Малые событийные L/U fixtures, включая несколько порядков split/collapse и U с тремя needle-событиями, проходят.
 - Основной L-контур 8×8 с индивидуальными углами всё ещё теряет два ската; симметричные одновременные события остаются отказными (неверная площадь / ребро с четырьмя использованиями).
 
+Исходный код `surfer2 0.1.0` также подтверждает конкретный пробел: после weighted-событий Rust-версия очищает очередь локального refinement, не выполняя её, тогда как исходный C++-движок обрабатывает эту очередь. Это объясняет часть потери фасетов и не исправляется подбором коэффициентов скоростей. См. [weighted refinement в surfer2-rs](https://github.com/atsyplenkov/surfer2-rs/blob/master/src/triangulation/refine.rs).
+
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
+
+### Собственный Python weighted wavefront (кандидат; пока не подключён к Blender)
+
+CI run [42298606023](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42298606023) подтвердил следующий результат после добавления строгого `POINT`-resolver для случая, когда весь активный контур одновременно схлопывается в один узел.
+
+Детерминированный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° прошёл на всех целевых размерах:
+
+| Рёбер | Trace, median | Сборка поверхности, median | Вершины / фасеты |
+|---:|---:|---:|---:|
+| 8 | 0.40 мс | 1.12 мс | 9 / 8 |
+| 16 | 1.99 мс | 4.16 мс | 17 / 16 |
+| 32 | 6.29 мс | 13.86 мс | 33 / 32 |
+| 64 | 21.83 мс | 48.62 мс | 65 / 64 |
+
+Регрессионный тест дополнительно проверяет покрытие исходной площади и замкнутость thickness-shell на 8/16/32/64 рёбрах. Для сравнения, выпуклый wavefront trace на 64 рёбрах занимает около 54.31 мс.
+
+Границы результата:
+- это один специально построенный симметричный concave family, а не доказательство для всех контуров;
+- замеры используют одинаковый pitch 35°, переменные per-edge pitch на этом семействе ещё надо проверить;
+- `build_moving_lines()` пока отвергает разные Z карнизов;
+- generic multi-split и часть одновременных событий всё ещё завершаются диагностической ошибкой;
+- `addon/operators/generate.py` всё ещё использует `core.mesh.build_roof_surface()`. Новый `build_wavefront_roof_surface()` не подключён к пользовательскому оператору.
+
+Поэтому это теперь перспективный Python-кандидат, а не production solver и не основание переключать генератор.
 
 ### Исторический Python spatial solver 2.9 (только тестовая копия)
 
