@@ -13,6 +13,7 @@ obeys t = (n . x - c) / speed and has gradient magnitude tan(theta).
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 from heapq import heappop, heappush
@@ -1683,6 +1684,19 @@ def _split_face_edges_at_shared_vertices(
     tolerance_sq = tolerance * tolerance
     output: list[tuple[int, ...]] = []
 
+    # Build one deterministic coordinate index per axis. For each face edge,
+    # query the axis with the narrowest AABB interval, then apply exact 3D
+    # projection/distance checks to this conservative candidate subset.
+    axis_orders: list[list[int]] = []
+    axis_values: list[list[float]] = []
+    for axis in range(3):
+        order = sorted(
+            range(len(vertices)),
+            key=lambda vertex_id: (vertices[vertex_id][axis], vertex_id),
+        )
+        axis_orders.append(order)
+        axis_values.append([vertices[vertex_id][axis] for vertex_id in order])
+
     for face in faces:
         expanded: list[int] = []
         for edge_index, start_id in enumerate(face):
@@ -1698,8 +1712,25 @@ def _split_face_edges_at_shared_vertices(
                 )
 
             points_on_edge: list[tuple[float, int]] = []
-            for candidate_id, candidate in enumerate(vertices):
+            search_axis = min(range(3), key=lambda axis: abs(direction[axis]))
+            lower_value = min(start[search_axis], end[search_axis]) - tolerance
+            upper_value = max(start[search_axis], end[search_axis]) + tolerance
+            axis_values_for_edge = axis_values[search_axis]
+            axis_order_for_edge = axis_orders[search_axis]
+            candidate_start = bisect_left(axis_values_for_edge, lower_value)
+            candidate_end = bisect_right(axis_values_for_edge, upper_value)
+
+            for candidate_position in range(candidate_start, candidate_end):
+                candidate_id = axis_order_for_edge[candidate_position]
                 if candidate_id == start_id or candidate_id == end_id:
+                    continue
+                candidate = vertices[candidate_id]
+                if any(
+                    candidate[axis] < min(start[axis], end[axis]) - tolerance
+                    or candidate[axis] > max(start[axis], end[axis]) + tolerance
+                    for axis in range(3)
+                    if axis != search_axis
+                ):
                     continue
                 relative = tuple(candidate[axis] - start[axis] for axis in range(3))
                 parameter = sum(relative[axis] * direction[axis] for axis in range(3)) / length_sq
