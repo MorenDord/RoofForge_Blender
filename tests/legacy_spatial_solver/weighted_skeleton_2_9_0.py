@@ -13,6 +13,7 @@ from __future__ import annotations
 import heapq
 import math
 from collections import defaultdict
+from bisect import bisect_left, bisect_right
 
 _EPS = 1.0e-9
 
@@ -842,6 +843,18 @@ def _merge_face_patches(patches, scale):
     point_keys = {point: index for index, point in unique_points.items()}
     all_points = list(unique_points.values())
 
+    # Candidate vertices are only relevant when their dominant-axis coordinate
+    # lies inside the tested segment's interval. Sorting each axis once avoids
+    # scanning every canonical vertex for every patch edge.
+    sorted_point_ids = [
+        sorted(range(len(all_points)), key=lambda index: all_points[index][axis])
+        for axis in range(3)
+    ]
+    sorted_axis_values = [
+        [all_points[index][axis] for index in sorted_point_ids[axis]]
+        for axis in range(3)
+    ]
+
     # Signed incidence of every split, undirected edge. Adjacent consistently
     # oriented patches contribute opposite signs and cancel exactly.
     signed_uses = defaultdict(int)
@@ -870,8 +883,19 @@ def _merge_face_patches(patches, scale):
             if denominator <= tolerance * tolerance:
                 continue
 
+            dominant_axis = max(range(3), key=lambda axis: abs(ab[axis]))
+            axis_length = abs(ab[dominant_axis])
+            axis_margin = axis_length * 1.0e-8 + tolerance * 5.0
+            axis_low = min(a[dominant_axis], b[dominant_axis]) - axis_margin
+            axis_high = max(a[dominant_axis], b[dominant_axis]) + axis_margin
+            axis_values = sorted_axis_values[dominant_axis]
+            axis_ids = sorted_point_ids[dominant_axis]
+            first_candidate = bisect_left(axis_values, axis_low)
+            after_candidate = bisect_right(axis_values, axis_high)
+
             on_edge = []
-            for point in all_points:
+            for candidate_position in range(first_candidate, after_candidate):
+                point = all_points[axis_ids[candidate_position]]
                 ap = _sub3(point, a)
                 t = _dot3(ap, ab) / denominator
                 if t < -1.0e-8 or t > 1.0 + 1.0e-8:
