@@ -18,6 +18,7 @@ Procedural roof generation for Blender 5.0+, designed for environment artists an
 - Lower-envelope roof surface assembly, 3D vertex welding and projected domain-coverage validation.
 - Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
 - Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
+- Closed-mesh validator for edge incidence, face winding, connected components and vertex links.
 - Unit tests for rectangle, L/U contours, plane constraints, winding and closed-shell topology.
 
 ## Development install
@@ -42,7 +43,7 @@ From the repository root:
 - Live update, detach, relink and lifecycle handlers.
 - Ridge, valley and hip profiles and junction patches.
 - Standing seams, UVs, material assignment, LOD and export automation.
-- Full self-intersection and connected-vertex manifold validator.
+- Geometric self-intersection detection and its Blender UI diagnostics.
 
 ## Known geometry limitations
 - Input must be one simple closed loop in XY.
