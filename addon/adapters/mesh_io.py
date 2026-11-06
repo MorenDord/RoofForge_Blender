@@ -5,9 +5,14 @@ def read_selected_boundary(obj):
     """Read exactly one selected closed edge loop in object-local XYZ space."""
     import bmesh
 
-    bm = bmesh.new()
-    try:
+    owns_bmesh = obj.mode != "EDIT"
+    if owns_bmesh:
+        bm = bmesh.new()
         bm.from_mesh(obj.data)
+    else:
+        bm = bmesh.from_edit_mesh(obj.data)
+
+    try:
         edges = [edge for edge in bm.edges if edge.select]
         if len(edges) < 3:
             raise ValueError("Выбери замкнутую петлю минимум из трёх рёбер.")
@@ -45,4 +50,5 @@ def read_selected_boundary(obj):
 
         return [tuple(float(value) for value in vert.co) for vert in ordered]
     finally:
-        bm.free()
+        if owns_bmesh:
+            bm.free()
