@@ -6,7 +6,8 @@ from math import isfinite
 from typing import Sequence
 
 from .geometry import GeometryInputError
-from .mesh import RoofSurface, _mesh_edge_usage, validate_surface_boundary_edges
+from .mesh import RoofSurface, validate_surface_boundary_edges
+from .validation import validate_closed_mesh
 
 Point3 = tuple[float, float, float]
 Face = tuple[int, ...]
@@ -68,13 +69,10 @@ def build_roof_shell(surface: RoofSurface, thickness: float,
     ]
     faces = tuple(top_faces + bottom_faces + side_faces)
 
-    final_usage = _mesh_edge_usage(faces)
-    invalid_edges = [edge for edge, count in final_usage.items() if count != 2]
-    if invalid_edges:
-        raise GeometryInputError(
-            "SHELL_NOT_MANIFOLD",
-            f"После создания оболочки найдено рёбер с числом смежных граней не равным двум: {len(invalid_edges)}."
-        )
+    diagnostics = validate_closed_mesh(vertices, faces, eps)
+    if diagnostics:
+        first = diagnostics[0]
+        raise GeometryInputError(first.code, first.message)
 
     return RoofShell(
         vertices=vertices,
