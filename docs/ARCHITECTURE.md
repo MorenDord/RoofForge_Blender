@@ -18,7 +18,8 @@
 - core/geometry.py — predicates, clipping, plane primitives and shared math
 - core/planes.py — boundary-edge plane generation and active-halfspace checks
 - core/envelope.py — convex and concave lower-envelope partition
-- core/mesh.py — welded mesh payload assembly and coverage checks
+- core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
+- core/shell.py — closed shell construction by global roof-local -Z extrusion and manifold edge validation
 - core/model.py, ids.py, validation.py, shell.py, adjacency.py, classification.py, profiles.py, seams.py, uv.py, optimization.py, lod.py
 - tests/ — pure Python fixtures and Blender background integration tests
 
@@ -30,8 +31,8 @@
 4. Convex partition: clip the domain by pairwise plane equality halfplanes.
 5. Concave partition: ear-clip the simple polygon; split each triangle by all source-edge supporting lines; determine the active inward-halfspace planes per convex arrangement cell; calculate a lower envelope only among active planes.
 6. Assemble surface: evaluate Z from the owning plane, weld numerically coincident XYZ vertices with a scale-aware spatial hash, and store the slope index as face metadata.
-7. Validate coverage: sum projected face areas and compare against the input polygon; reject missing/overlapping coverage and edges shared by more than two faces.
-8. Shell: create bottom surface and boundary walls in a later stage.
+7. Validate surface: compare projected face area with the source polygon, then require every single-use edge to lie on one source boundary segment and require complete edge-chain coverage. Internal open edges are blocking errors.
+8. Shell: duplicate the upper-surface vertices at z-thickness, reverse bottom face winding, create side walls only along validated source-boundary edges, and require every final undirected edge to have exactly two incident faces.
 9. Features: derive adjacency graph from roof regions; classify shared edges; generate ridge/valley/hip profiles and seams as dependent feature meshes.
 10. Validate output and commit temporary datablocks only after success.
 11. Lifecycle: attach metadata UUIDs and generation tokens; detach removes all callbacks and invalidates tokens.
@@ -40,7 +41,8 @@
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
 - SlopeSpec: slope UUID, boundary edge UUID, pitch degrees, plane coefficients.
 - RoofRegion: slope UUID, ordered 3D boundary vertices, 2D polygon, adjacency references.
-- RoofSurface: welded XYZ vertex list, polygon index lists, face-to-slope indices, source/surface projected areas.
+- RoofSurface: welded XYZ vertex list, polygon index lists, face-to-slope indices, source/surface projected areas and source XY boundary.
+- RoofShell: top/bottom/side face payload, component counts and vertical thickness.
 - RoofBuildSettings: overhang, thickness, quality, tolerance policy.
 - FeatureGraph: nodes and shared region boundaries with semantic type.
 - GeneratedPart: stable part UUID, type, source UUID, mesh payload, dependency signature.
@@ -55,10 +57,10 @@ Given edge endpoints P0 and P1, projected XY edge length L, unit tangent t, inwa
 Represent each plane as z_i(x,y)=a_i*x+b_i*y+c_i. For candidate plane i, clip the domain by every inequality z_i<=z_j. Coincident planes are assigned to the earliest stable input index so they do not duplicate the same region.
 
 ### C. Concave contours and finite plane domains
-An infinite extension of a concave edge plane may cut across a remote part of the polygon. Treat each plane as valid only on the interior halfspace of its source edge. Ear-clip the source polygon, split each triangle by all edge supporting lines, classify each resulting convex cell by its active plane set, and compute a lower envelope inside that active set. This arrangement method is deterministic but can produce many small cells; sliver-area filtering and performance benchmarking remain required.
+An infinite extension of a concave edge plane may cut across remote parts of the polygon. The current experimental approach ear-clips the contour, splits triangles by source-edge supporting lines, and computes a lower envelope among locally active planes. This can create discontinuities along artificial arrangement boundaries. The mesh validator therefore rejects any resulting internal open edge instead of capping it. Continuous L/U support requires a stronger finite-face-domain and junction solver; do not mark concave roofs supported merely because their projected cell areas sum correctly.
 
 ### D. Shared topology
-Build a vertex registry keyed by 3D position with scale-aware tolerance and plane-membership metadata. Never merge solely by XY. At multi-plane intersections, solve/verify all participating plane equations and choose a canonical coordinate. Record any merge that exceeds tolerance as an error. The initial implementation uses a 3D spatial hash and coverage checks; a full multi-plane constraint solver is still required for release quality.
+Build a vertex registry keyed by 3D position with scale-aware tolerance. Never merge solely by XY. The current registry uses a 3D spatial hash; face area and boundary-chain continuity checks guard the result. A full multi-plane node solver and plane-membership constraints are still required for release quality.
 
 ### E. Profile construction
 Generate profile strips from the shared boundary graph, not isolated per-edge solids. Each edge has a cross-section profile. At nodes, solve a junction patch that trims/joins incident strips; remove internal caps and weld compatible vertices. Default extrusion/rise vector is roof-local +Z. Profile generation is transactional and separate from roof generation.
