@@ -54,12 +54,14 @@
 - a global multi-loop state machine that advances every active loop to the globally earliest event;
 - swept edge fragments lifted into 3D source-edge planes, plus skeleton vertex trajectories;
 - a restricted cross-needle resolver for simultaneous reflex endpoint hits and edge collapses when all remaining fronts pair as opposite, coincident finite segments at the event height (opposing speeds need not be equal);
+- a transactional resolver for exactly one strict reflex split plus one edge collapse on the same loop and at the same event time; it splits the target front, validates the collapsing edge from its two adjacent support-line intersections, closes the terminal child using independently checked split/collapse points on both coincident lines, and reschedules the surviving child;
+- ordinary two-edge needle termination checks finite segment endpoints, and rejects partial overlap instead of treating coincident infinite support lines as a complete finite needle;
 - a T-junction conformance pass that subdivides earlier facet edges at later split vertices;
 - `build_wavefront_roof_surface`, which welds facets, checks source-plane membership, projected area and outer-boundary continuity, and returns the shared `RoofSurface` payload.
 
 Pure-Python regression fixtures currently produce closed manifold shells for a rectangle, a V-notch (including one asymmetric per-edge pitch set), an L contour and a U contour. L/U fixtures now include both equal-speed and deliberately asymmetric pitch cases whose opposing finite segments coincide completely at the terminal event. A clockwise L contour and a nonzero constant eave height are also tested.
 
-**Remaining limitations:** the first wavefront path requires constant-Z eaves; partial-overlap unequal-speed needle events, split/collapse event-order changes and higher-order vertex events are not fully resolved. Full geometric self-intersection detection is not implemented. The Blender generator operator still uses the existing plane/envelope path; this wavefront alpha has not been runtime-tested inside Blender 5.0 and must not be advertised as general arbitrary-polygon support.
+**Remaining limitations:** the wavefront path requires constant-Z eaves. The compound resolver is limited to exactly one strict split plus one collapse at the same event time, with one resulting terminal child; distinct-time event sequences, multiple splits on one loop, generic partial-overlap intervals and higher-order vertex events are not generally resolved. Sub-tolerance sliver faces can be assembled on the upper surface but are rejected by the closed-shell area validator. Full geometric self-intersection detection is not implemented. The Blender generator operator still uses the existing plane/envelope path; this wavefront alpha has not been runtime-tested inside Blender 5.0 and must not be advertised as general arbitrary-polygon support.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.
