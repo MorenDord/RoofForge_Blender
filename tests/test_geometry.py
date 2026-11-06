@@ -718,5 +718,33 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_surface_handles_clockwise_l_shape(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        points.reverse()
+        surface = build_wavefront_roof_surface(points, [45.0] * len(points))
+        self.assertAlmostEqual(surface.source_area_xy, 7.0, places=7)
+        self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_surface_preserves_nonzero_eave_elevation(self):
+        base_z = 2.75
+        points = [
+            (0.0, 0.0, base_z), (6.0, 0.0, base_z),
+            (6.0, 4.0, base_z), (4.0, 4.0, base_z),
+            (3.0, 2.0, base_z), (2.0, 4.0, base_z),
+            (0.0, 4.0, base_z),
+        ]
+        surface = build_wavefront_roof_surface(points, [45.0] * len(points))
+        self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
+        self.assertTrue(all(vertex[2] >= base_z - 1e-8 for vertex in surface.vertices))
+        shell = build_roof_shell(surface, 0.12)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
