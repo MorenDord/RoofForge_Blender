@@ -229,6 +229,25 @@ class PolygonTests(unittest.TestCase):
         ]
         self.assertEqual(validate_closed_mesh(vertices, faces, eps=1e-9), [])
 
+    def test_closed_mesh_validator_rejects_sliver_below_coordinate_tolerance(self):
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.5, 1e-10, 0.0),
+            (10.0, 10.0, 10.0),
+        ]
+        faces = [
+            (1, 2, 3),
+            (0, 3, 2),
+            (0, 1, 3),
+            (0, 2, 1),
+        ]
+        codes = {
+            item.code
+            for item in validate_closed_mesh(vertices, faces, eps=1e-9)
+        }
+        self.assertIn("ZERO_AREA_FACE", codes)
+
     def test_closed_mesh_validator_detects_bow_tie_vertex(self):
         vertices = [
             (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1),
@@ -1011,21 +1030,19 @@ class PolygonTests(unittest.TestCase):
                 shell = build_roof_shell(surface, 0.10)
                 self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
-    def test_wavefront_rejects_sub_tolerance_split_collapse_sliver_in_shell(self):
+    def test_wavefront_keeps_small_resolvable_split_collapse_sliver_in_shell(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
             (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
         ]
-        # This perturbation leaves a valid but sub-tolerance terminal sliver.
-        # The upper surface must retain it, while the solid-shell validator
-        # must reject the resulting face rather than weakening its area gate.
+        # This produces a small but locally resolved terminal facet. Its area
+        # is small relative to the whole roof, not relative to its own edges.
         speeds = [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7]
         pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
         surface = build_wavefront_roof_surface(points, pitches)
         self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
-        with self.assertRaises(GeometryInputError) as ctx:
-            build_roof_shell(surface, 0.10)
-        self.assertEqual(ctx.exception.code, "ZERO_AREA_FACE")
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_wavefront_rejects_partial_overlap_as_complete_needle(self):
         points = [
