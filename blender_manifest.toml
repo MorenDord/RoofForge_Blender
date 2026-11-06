@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "roof_forge"
+version = "1.0.0"
+name = "RoofForge"
+tagline = "Procedural, game-ready roof generation"
+maintainer = "MorenDord"
+type = "add-on"
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]
+website = "https://github.com/MorenDord/RoofForge_Blender"
+tags = ["Modeling", "Mesh", "Architecture"]
