@@ -857,11 +857,12 @@ class PolygonTests(unittest.TestCase):
         ]
         scenarios = (
             # The right-side cross-needle is first: split 3 -> edge 5,
-            # simultaneous with collapse of edge 4.
-            [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7],
+            # simultaneous with collapse of edge 4. The finite residual
+            # segment is intentionally large enough to be mesh-resolvable.
+            [0.8, 1.0, 1.2, 1.32, 1.0, 0.7],
             # The bottom cross-needle is first: split 3 -> edge 0,
             # simultaneous with collapse of edge 1.
-            [0.8, 1.0, 1.2, 1.2998, 1.0, 0.7],
+            [0.8, 1.0, 1.2, 1.28, 1.0, 0.7],
         )
         for speeds in scenarios:
             pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
@@ -885,6 +886,22 @@ class PolygonTests(unittest.TestCase):
             self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
             shell = build_roof_shell(surface, 0.10)
             self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_rejects_sub_tolerance_split_collapse_sliver_in_shell(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        # This perturbation leaves a valid but sub-tolerance terminal sliver.
+        # The upper surface must retain it, while the solid-shell validator
+        # must reject the resulting face rather than weakening its area gate.
+        speeds = [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_roof_shell(surface, 0.10)
+        self.assertEqual(ctx.exception.code, "ZERO_AREA_FACE")
 
     def test_wavefront_rejects_partial_overlap_as_complete_needle(self):
         points = [
