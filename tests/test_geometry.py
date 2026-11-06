@@ -1118,6 +1118,50 @@ class PolygonTests(unittest.TestCase):
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
+    def test_wavefront_handles_64_edge_wavy_u_contour_with_variable_pitch(self):
+        outline = [
+            (0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (3.0, 4.0),
+            (3.0, 1.0), (1.0, 1.0), (1.0, 4.0), (0.0, 4.0),
+        ]
+        points = []
+        for edge_index, start in enumerate(outline):
+            end = outline[(edge_index + 1) % len(outline)]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            length = math.hypot(dx, dy)
+            left_normal = (-dy / length, dx / length)
+            for step in range(8):
+                t = step / 8.0
+                bend = 0.008 * math.sin(math.pi * t)
+                points.append((
+                    start[0] + dx * t + left_normal[0] * bend,
+                    start[1] + dy * t + left_normal[1] * bend,
+                    0.0,
+                ))
+
+        self.assertEqual(len(points), 64)
+        pitches = [
+            31.0 + 4.5 * math.sin(index * 0.917)
+            + 2.5 * math.cos(index * 0.641)
+            for index in range(len(points))
+        ]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(
+            trace.projected_facet_area,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
     def test_wavefront_keeps_small_resolvable_split_collapse_sliver_in_shell(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
