@@ -8,6 +8,7 @@ from core.geometry import (
 )
 from core.planes import boundary_envelope_conflicts, build_boundary_planes
 from core.envelope import lower_envelope_restricted_cells
+from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 
 
