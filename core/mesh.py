@@ -69,6 +69,76 @@ def _mesh_edge_usage(faces: Sequence[Face]) -> dict[tuple[int, int], int]:
     return usage
 
 
+
+def _point_on_boundary_segment(point: tuple[float, float], start: Point2, end: Point2,
+                               tolerance: float) -> bool:
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = (dx * dx + dy * dy) ** 0.5
+    if length <= tolerance:
+        return False
+    px, py = point[0] - start[0], point[1] - start[1]
+    if abs(dx * py - dy * px) / length > tolerance:
+        return False
+    projection = (px * dx + py * dy) / (length * length)
+    margin = tolerance / length
+    return -margin <= projection <= 1.0 + margin
+
+
+def validate_surface_boundary_edges(vertices: Sequence[Point3], faces: Sequence[Face],
+                                     boundary_xy: Sequence[Point2],
+                                     tolerance: float) -> list[tuple[int, int]]:
+    """Return directed outer boundary edges or reject internal cracks.
+
+    Every single-use edge must lie on exactly one source-contour segment, and
+    the edge chain must cover each source segment exactly once in XY.
+    """
+    edge_uses: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for face in faces:
+        for index, first in enumerate(face):
+            second = face[(index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_uses.setdefault(key, []).append((first, second))
+
+    open_edges: list[tuple[int, int]] = []
+    for uses in edge_uses.values():
+        if len(uses) > 2:
+            raise GeometryInputError(
+                "NON_MANIFOLD_SURFACE",
+                "Верхняя поверхность содержит ребро с более чем двумя смежными гранями."
+            )
+        if len(uses) == 1:
+            open_edges.append(uses[0])
+
+    covered = [0.0 for _ in boundary_xy]
+    for first, second in open_edges:
+        p, q = vertices[first], vertices[second]
+        matches = []
+        for index, start in enumerate(boundary_xy):
+            end = boundary_xy[(index + 1) % len(boundary_xy)]
+            if (_point_on_boundary_segment((p[0], p[1]), start, end, tolerance)
+                    and _point_on_boundary_segment((q[0], q[1]), start, end, tolerance)):
+                matches.append(index)
+        if len(matches) != 1:
+            raise GeometryInputError(
+                "INTERNAL_OPEN_EDGE",
+                f"Верхняя поверхность разорвана: открытое ребро "
+                f"({p[0]:.6g}, {p[1]:.6g}) → ({q[0]:.6g}, {q[1]:.6g}) "
+                f"не является частью исходного контура."
+            )
+        covered[matches[0]] += ((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2) ** 0.5
+
+    for index, start in enumerate(boundary_xy):
+        end = boundary_xy[(index + 1) % len(boundary_xy)]
+        expected = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
+        allowed = max(tolerance * 10.0, expected * 1e-7)
+        if abs(covered[index] - expected) > allowed:
+            raise GeometryInputError(
+                "BOUNDARY_COVERAGE_MISMATCH",
+                f"Карнизный сегмент {index + 1} покрыт не полностью: "
+                f"{covered[index]:.8g} из {expected:.8g}."
+            )
+    return open_edges
+
 def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> RoofSurface:
     """Build an open planar upper surface from a closed 3D boundary loop.
@@ -145,6 +215,13 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
             "NON_MANIFOLD_SURFACE",
             f"При сборке поверхности обнаружено рёбер с более чем двумя гранями: {len(non_manifold_edges)}."
         )
+
+    # A projected-area match alone can hide cracks whose missing and
+    # overlapping regions cancel. Validate all open edges against the exact
+    # source boundary before exposing the surface to Blender.
+    validate_surface_boundary_edges(
+        registry.vertices, faces, domain, weld_tolerance * 5.0
+    )
 
     return RoofSurface(
         vertices=tuple(registry.vertices),
