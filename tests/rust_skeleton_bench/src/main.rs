@@ -255,7 +255,8 @@ fn extract_and_validate_roof(
 enum InputMode {
     Polygon,
     PslgUnitWeights,
-    PslgPitchWeights,
+    PslgPitchWeightsNormalized,
+    PslgPitchWeightsRaw,
 }
 
 fn run_points_case(
@@ -268,7 +269,7 @@ fn run_points_case(
     // Equal pitch stays on the ordinary polygon path unless an explicit
     // control case requests the PSLG API.
     let mode = if pitches_degrees.iter().any(|value| (*value - pitches_degrees[0]).abs() > 1.0e-9) {
-        InputMode::PslgPitchWeights
+        InputMode::PslgPitchWeightsNormalized
     } else {
         InputMode::Polygon
     };
@@ -314,12 +315,20 @@ fn run_points_case_mode(
     // unweighted API therefore uses z = time * tan(pitch), while the weighted
     // API with physical speeds uses z = time. Keep these conversions explicit
     // so equal-pitch control runs compare the same roof planes.
+    let common_speed_scale = weights.iter().copied().fold(0.0f64, f64::max);
     let speeds = match mode {
-        InputMode::PslgPitchWeights => weights.clone(),
+        InputMode::PslgPitchWeightsNormalized => {
+            weights.iter().map(|weight| weight / common_speed_scale).collect()
+        }
+        InputMode::PslgPitchWeightsRaw => weights.clone(),
         InputMode::Polygon | InputMode::PslgUnitWeights => vec![1.0; count],
     };
+    // If all physical wavefront speeds are divided by S, the event time grows
+    // by S. Thus z = t / S; this common normalization changes neither event
+    // topology nor the requested physical roof planes.
     let time_to_z = match mode {
-        InputMode::PslgPitchWeights => 1.0,
+        InputMode::PslgPitchWeightsNormalized => 1.0 / common_speed_scale,
+        InputMode::PslgPitchWeightsRaw => 1.0,
         InputMode::Polygon | InputMode::PslgUnitWeights => 1.0 / weights[0],
     };
     let (input_pslg, input_polygon) = match mode {
@@ -330,7 +339,9 @@ fn run_points_case_mode(
                 return;
             }
         },
-        InputMode::PslgUnitWeights | InputMode::PslgPitchWeights => {
+        InputMode::PslgUnitWeights
+        | InputMode::PslgPitchWeightsNormalized
+        | InputMode::PslgPitchWeightsRaw => {
             let api_weights = if matches!(mode, InputMode::PslgUnitWeights) {
                 vec![1.0; count]
             } else {
@@ -437,8 +448,10 @@ fn main() {
     ];
     run_points_case("concave_L_equal_pitch", &l_shape, &[35.0; 6], repeats);
     run_points_case_mode("concave_L_equal_pitch_pslg_unit", &l_shape, &[35.0; 6], repeats, InputMode::PslgUnitWeights);
-    run_points_case_mode("concave_L_equal_pitch_pslg_weighted", &l_shape, &[35.0; 6], repeats, InputMode::PslgPitchWeights);
+    run_points_case_mode("concave_L_equal_pitch_pslg_weighted_normalized", &l_shape, &[35.0; 6], repeats, InputMode::PslgPitchWeightsNormalized);
+    run_points_case_mode("concave_L_equal_pitch_pslg_weighted_raw", &l_shape, &[35.0; 6], repeats, InputMode::PslgPitchWeightsRaw);
     run_points_case("concave_L_variable_pitch", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats);
+    run_points_case_mode("concave_L_variable_pitch_raw", &l_shape, &[30.0, 36.0, 42.0, 34.0, 39.0, 32.0], repeats, InputMode::PslgPitchWeightsRaw);
 
     let u_shape = [
         [0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [7.0, 8.0],
@@ -446,8 +459,10 @@ fn main() {
     ];
     run_points_case("concave_U_equal_pitch", &u_shape, &[35.0; 8], repeats);
     run_points_case_mode("concave_U_equal_pitch_pslg_unit", &u_shape, &[35.0; 8], repeats, InputMode::PslgUnitWeights);
-    run_points_case_mode("concave_U_equal_pitch_pslg_weighted", &u_shape, &[35.0; 8], repeats, InputMode::PslgPitchWeights);
+    run_points_case_mode("concave_U_equal_pitch_pslg_weighted_normalized", &u_shape, &[35.0; 8], repeats, InputMode::PslgPitchWeightsNormalized);
+    run_points_case_mode("concave_U_equal_pitch_pslg_weighted_raw", &u_shape, &[35.0; 8], repeats, InputMode::PslgPitchWeightsRaw);
     run_points_case("concave_U_variable_pitch", &u_shape, &[32.0, 35.0, 38.0, 40.0, 34.0, 37.0, 31.0, 36.0], repeats);
+    run_points_case_mode("concave_U_variable_pitch_raw", &u_shape, &[32.0, 35.0, 38.0, 40.0, 34.0, 37.0, 31.0, 36.0], repeats, InputMode::PslgPitchWeightsRaw);
 
     let multi_notch = [
         [0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [10.0, 8.0],
