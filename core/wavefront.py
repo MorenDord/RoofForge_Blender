@@ -13,7 +13,7 @@ obeys t = (n . x - c) / speed and has gradient magnitude tan(theta).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from heapq import heappop, heappush
 from math import hypot, isfinite, tan, radians
@@ -236,6 +236,26 @@ class WavefrontEventQueue:
 
         batch.sort(key=self._event_key)
         return EventBatch(first.time, tuple(batch))
+
+
+@dataclass
+class WavefrontSimulationState:
+    """Mutable event-driven state for one or more wavefront loops."""
+
+    current_time: float
+    loops: dict[int, WavefrontLoop]
+    edges: dict[int, MovingLine]
+    event_queue: WavefrontEventQueue
+    next_edge_id: int
+    next_loop_id: int
+    time_tolerance: float
+    epsilon: float
+    terminal_loops: dict[int, str] = field(default_factory=dict)
+    processed_events: list[WavefrontEvent] = field(default_factory=list)
+
+    @property
+    def is_complete(self) -> bool:
+        return not self.loops
 
 
 def _dot(a: Point2, b: Point2) -> float:
@@ -679,6 +699,178 @@ def apply_split_event(
         next_edge_id=second_new_edge + 1,
         next_loop_id=next_loop,
     )
+
+
+def create_wavefront_state(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float = 1e-9,
+) -> WavefrontSimulationState:
+    """Initialize a global event-driven wavefront state from one flat-eave loop."""
+    edges_tuple = build_moving_lines(points, pitches_degrees, eps)
+    edges = {edge.edge_id: edge for edge in edges_tuple}
+    loop = WavefrontLoop(0, tuple(edge.edge_id for edge in edges_tuple), 0)
+    vertices = _loop_vertices(loop, edges, 0.0, eps)
+    if abs(_signed_area_at(vertices)) <= eps:
+        raise GeometryInputError("DEGENERATE_INITIAL_WAVEFRONT", "Начальный волновой фронт имеет нулевую площадь.")
+
+    scale = max(
+        1.0,
+        max(point[0] for point in points) - min(point[0] for point in points),
+        max(point[1] for point in points) - min(point[1] for point in points),
+    )
+    queue = WavefrontEventQueue()
+    queue.push_many(collect_loop_events(loop, edges, 0.0, eps))
+    return WavefrontSimulationState(
+        current_time=0.0,
+        loops={loop.loop_id: loop},
+        edges=edges,
+        event_queue=queue,
+        next_edge_id=max(edges, default=-1) + 1,
+        next_loop_id=loop.loop_id + 1,
+        time_tolerance=eps * max(1.0, scale) * 100.0,
+        epsilon=eps,
+    )
+
+
+def _current_generation_maps(
+    state: WavefrontSimulationState,
+) -> tuple[dict[int, int], dict[int, int]]:
+    edge_generations = {edge_id: edge.generation for edge_id, edge in state.edges.items()}
+    loop_generations = {loop_id: loop.generation for loop_id, loop in state.loops.items()}
+    return edge_generations, loop_generations
+
+
+def _resolve_edge_collapse_group(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> WavefrontLoop | None:
+    """Apply one same-loop edge-collapse batch; return a child loop or terminate it."""
+    collapsed = {event.edge_id for event in events}
+    if None in collapsed or not collapsed:
+        raise GeometryInputError("INCOMPLETE_COLLAPSE_BATCH", "Событие схлопывания не содержит ID ребра.")
+    if any(edge_id not in loop.edge_ids for edge_id in collapsed):
+        raise GeometryInputError("STALE_COLLAPSE_EVENT", "Схлопываемое ребро больше не принадлежит активному контуру.")
+
+    remaining = tuple(edge_id for edge_id in loop.edge_ids if edge_id not in collapsed)
+    for edge_id in collapsed:
+        state.edges.pop(edge_id, None)
+
+    if len(remaining) >= 3:
+        return WavefrontLoop(loop.loop_id, remaining, loop.generation + 1)
+
+    if len(remaining) == 2:
+        first, second = state.edges[remaining[0]], state.edges[remaining[1]]
+        alignment = _dot(first.normal, second.normal)
+        gap = first.offset_at(state.current_time) + second.offset_at(state.current_time)
+        tolerance = state.epsilon * max(1.0, abs(first.offset_at(state.current_time)),
+                                        abs(second.offset_at(state.current_time))) * 100.0
+        if alignment > -1.0 + state.epsilon * 100.0 or abs(gap) > tolerance:
+            raise GeometryInputError(
+                "TWO_EDGE_TERMINATION_UNRESOLVED",
+                "После схлопывания остались два фронта, но они не образуют подтверждённую needle-пару."
+            )
+        state.terminal_loops[loop.loop_id] = "NEEDLE"
+        state.edges.pop(remaining[0], None)
+        state.edges.pop(remaining[1], None)
+        return None
+
+    state.terminal_loops[loop.loop_id] = "POINT"
+    for edge_id in remaining:
+        state.edges.pop(edge_id, None)
+    return None
+
+
+def advance_wavefront_state(
+    state: WavefrontSimulationState,
+) -> EventBatch | None:
+    """Advance all live loops to and process the globally earliest event batch.
+
+    Independent loops may process events at the same time. Events of different
+    kinds on the same loop at the same instant are rejected until a dedicated
+    simultaneous-event resolver is implemented.
+    """
+    if state.is_complete:
+        return None
+
+    edge_generations, loop_generations = _current_generation_maps(state)
+    batch = state.event_queue.pop_next_batch(
+        current_time=state.current_time,
+        time_tolerance=state.time_tolerance,
+        current_edge_generations=edge_generations,
+        current_loop_generations=loop_generations,
+    )
+    if batch is None:
+        raise GeometryInputError(
+            "NO_VALID_WAVEFRONT_EVENTS",
+            "Для активных контуров не осталось актуальных событий волнового фронта."
+        )
+
+    state.current_time = batch.time
+    state.processed_events.extend(batch.events)
+    events_by_loop: dict[int, list[WavefrontEvent]] = {}
+    for event in batch.events:
+        events_by_loop.setdefault(event.loop_id, []).append(event)
+
+    changed_loops: list[WavefrontLoop] = []
+    for loop_id in sorted(events_by_loop):
+        loop = state.loops.get(loop_id)
+        if loop is None:
+            # This should be impossible after generation validation, but keep
+            # the state machine fail-safe if an external caller mutates state.
+            raise GeometryInputError("STALE_LOOP_EVENT", "Событие ссылается на отсутствующий активный контур.")
+        loop_events = events_by_loop[loop_id]
+        kinds = {event.kind for event in loop_events}
+
+        if kinds == {EventKind.SPLIT_CANDIDATE}:
+            if len(loop_events) != 1:
+                raise GeometryInputError(
+                    "SIMULTANEOUS_SPLIT_EVENTS_UNRESOLVED",
+                    "Несколько split-событий одного контура произошли одновременно; требуется общий resolver."
+                )
+            result = apply_split_event(
+                loop,
+                state.edges,
+                loop_events[0],
+                next_edge_id=state.next_edge_id,
+                next_loop_id=state.next_loop_id,
+                eps=state.epsilon,
+            )
+            del state.loops[loop_id]
+            state.edges = result.edges
+            for child in result.loops:
+                state.loops[child.loop_id] = child
+                changed_loops.append(child)
+            state.next_edge_id = result.next_edge_id
+            state.next_loop_id = result.next_loop_id
+
+        elif kinds == {EventKind.EDGE_COLLAPSE}:
+            child = _resolve_edge_collapse_group(state, loop, loop_events)
+            del state.loops[loop_id]
+            if child is not None:
+                state.loops[child.loop_id] = child
+                changed_loops.append(child)
+
+        elif kinds == {EventKind.VERTEX_HIT}:
+            raise GeometryInputError(
+                "SPLIT_ENDPOINT_EVENT_UNRESOLVED",
+                "Рефлексная вершина попала в конец ребра; требуется обработка vertex-hit/needle вырождения."
+            )
+        else:
+            raise GeometryInputError(
+                "SIMULTANEOUS_EVENT_BATCH_UNRESOLVED",
+                "Одновременные события разных типов для одного контура пока не разрешаются автоматически."
+            )
+
+    # Events for changed loop generations are invalidated lazily by the queue.
+    # New candidates are scheduled from the new topology at the same global time.
+    for loop in changed_loops:
+        state.event_queue.push_many(
+            collect_loop_events(loop, state.edges, state.current_time, state.epsilon)
+        )
+
+    return batch
 
 
 def _dedupe_polygon(points: Sequence[Point3], tolerance: float) -> tuple[Point3, ...]:
