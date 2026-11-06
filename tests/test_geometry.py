@@ -8,6 +8,7 @@ from core.geometry import (
 )
 from core.planes import boundary_envelope_conflicts, build_boundary_planes
 from core.envelope import lower_envelope_restricted_cells
+from core.shell import build_roof_shell
 
 
 class PolygonTests(unittest.TestCase):
@@ -142,6 +143,55 @@ class PolygonTests(unittest.TestCase):
                     edge_uses[key] = edge_uses.get(key, 0) + 1
             self.assertLessEqual(max(edge_uses.values()), 2)
             self.assertTrue(all(len(face) >= 3 for face in surface.faces))
+
+
+    def test_solid_shell_is_closed_and_extruded_along_global_z(self):
+        fixtures = [
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
+             (1.0, 1.0, 0.0), (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+            [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 3.0, 0.0),
+             (3.0, 3.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+             (1.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
+        ]
+        for points in fixtures:
+            surface = build_roof_surface(points, [35.0] * len(points))
+            shell = build_roof_shell(surface, 0.15)
+            self.assertEqual(len(shell.vertices), 2 * len(surface.vertices))
+            self.assertEqual(shell.top_face_count, len(surface.faces))
+            self.assertEqual(shell.bottom_face_count, len(surface.faces))
+            self.assertEqual(shell.side_face_count, len(shell.faces) - 2 * len(surface.faces))
+            for top, bottom in zip(surface.vertices, shell.vertices[len(surface.vertices):]):
+                self.assertAlmostEqual(top[0], bottom[0], places=9)
+                self.assertAlmostEqual(top[1], bottom[1], places=9)
+                self.assertAlmostEqual(top[2] - bottom[2], 0.15, places=9)
+
+            edge_uses = {}
+            for face in shell.faces:
+                for index, first in enumerate(face):
+                    second = face[(index + 1) % len(face)]
+                    key = tuple(sorted((first, second)))
+                    edge_uses[key] = edge_uses.get(key, 0) + 1
+            self.assertTrue(all(count == 2 for count in edge_uses.values()))
+
+    def test_clockwise_input_still_generates_upward_top_faces(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)]
+        points.reverse()
+        surface = build_roof_surface(points, [35.0] * len(points))
+        for face in surface.faces:
+            xy = [(surface.vertices[i][0], surface.vertices[i][1]) for i in face]
+            self.assertGreater(signed_area(xy), 0.0)
+        shell = build_roof_shell(surface, 0.1)
+        self.assertEqual(len(shell.faces), shell.top_face_count + shell.bottom_face_count + shell.side_face_count)
+
+    def test_invalid_thickness_is_rejected(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)]
+        surface = build_roof_surface(points, [35.0] * len(points))
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_roof_shell(surface, 0.0)
+        self.assertEqual(ctx.exception.code, "INVALID_THICKNESS")
 
 
 if __name__ == "__main__":
