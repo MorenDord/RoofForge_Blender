@@ -95,7 +95,7 @@ The custom Python weighted-wavefront candidate currently assumes constant-Z eave
 
 ### Собственный Python weighted wavefront (кандидат; пока не подключён к Blender)
 
-CI runs [42301390659](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301390659) (push) и [42301399106](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42301399106) (PR) прошли полностью на commit `4f970e15e97bc563db52a86d0cd2ef5cc6c1f6b2`: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
+CI runs [42302385095](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302385095) (push) и [42302392894](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302392894) (PR) прошли полностью на commit `603a7b5d0fa696af801cf55154a05549aecc1317`: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -124,9 +124,9 @@ CI runs [42301390659](https://github.com/MorenDord/RoofForge_Blender/actions/run
 
 ### Ограничения и статус кандидата
 
-- Это детерминированное радиальное concave-семейство, а не доказательство для произвольного простого многоугольника.
-- Индивидуальные pitch прошли на этом семействе до 64 рёбер; это ещё не seeded/random corpus и не полный набор near-simultaneous событий.
-- Существующие ручные L/U fixtures и отдельные split/collapse варианты проходят, но generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой.
+- Регрессионное покрытие теперь включает три класса: симметричное радиальное concave-семейство, асимметричный радиальный профиль и волнистые L/U-контуры с индивидуальными уклонами на 64 рёбрах. Это всё ещё детерминированные fixtures, не seeded/random corpus и не доказательство для произвольного простого многоугольника.
+- Для 64-рёберных wavy L и U проверяются complete trace, полное projected-area coverage, facet slope metadata, сборка surface и замкнутая manifold-shell.
+- Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` всё ещё использует `core.mesh.build_roof_surface()`. Новый `build_wavefront_roof_surface()` не подключён к пользовательскому оператору.
 - Около 475 мс для variable-pitch 64-edge surface — улучшение относительно 28.5 с, но preview/final бюджеты ещё следует определить и измерить с Blender mesh creation.
