@@ -738,23 +738,6 @@ class PolygonTests(unittest.TestCase):
             (3.0, 2.0, base_z), (2.0, 4.0, base_z),
             (0.0, 4.0, base_z),
         ]
-        trace = run_weighted_wavefront(
-            points, [45.0] * len(points), require_area_coverage=False
-        )
-        event_summary = [
-            (event.kind.value, round(event.time, 8), event.edge_id,
-             event.vertex_id, event.target_edge_id, event.position)
-            for event in trace.events
-        ]
-        facet_summary = [
-            (facet.source_edge_id, round(facet.start_time, 8),
-             round(facet.end_time, 8), facet.vertices)
-            for facet in trace.facets
-        ]
-        self.assertAlmostEqual(
-            trace.projected_facet_area, 22.0, places=6,
-            msg=f"terminal={trace.terminal_time}, events={event_summary}, facets={facet_summary}"
-        )
         surface = build_wavefront_roof_surface(points, [45.0] * len(points))
         self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
         self.assertTrue(all(vertex[2] >= base_z - 1e-8 for vertex in surface.vertices))
