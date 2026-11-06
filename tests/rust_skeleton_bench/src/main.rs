@@ -275,7 +275,7 @@ fn run_points_case(
         let b = points[(i + 1) % count];
         let c = points[(i + 2) % count];
         let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
-        cross * signed_area(points).signum() < -1.0e-9
+        cross * signed_area(&points).signum() < -1.0e-9
     });
     let edges: Vec<[usize; 2]> = (0..count)
         .map(|index| [index, (index + 1) % count])
@@ -287,7 +287,7 @@ fn run_points_case(
     // Inputs are normalized to CCW above. Equal weights can be scaled
     // globally; per-edge pitches use the weighted PSLG path.
     let (input_pslg, input_polygon) = if variable_pitch {
-        match Pslg::from_flat(points, &edges, Some(&weights)) {
+        match Pslg::from_flat(&points, &edges, Some(&weights)) {
             Ok(value) => (Some(value), None),
             Err(error) => {
                 println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
@@ -295,7 +295,7 @@ fn run_points_case(
             }
         }
     } else {
-        match Polygon::from_flat(points, &[0]) {
+        match Polygon::from_flat(&points, &[0]) {
             Ok(value) => (None, Some(value)),
             Err(error) => {
                 println!("{label},{count},{concave},{variable_pitch},input_error,,,0,0,\"{error}\"");
@@ -325,7 +325,7 @@ fn run_points_case(
 
         match result {
             Ok(skeleton) => {
-                match extract_and_validate_roof(&skeleton, points, &speeds, z_scale) {
+                match extract_and_validate_roof(&skeleton, &points, &speeds, z_scale) {
                     Ok((faces, vertices, residual)) => {
                         times_ms.push(start.elapsed().as_secs_f64() * 1000.0);
                         segment_count = skeleton.finite_segments().count();
