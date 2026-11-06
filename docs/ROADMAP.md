@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested L/U cross-needle terminal events, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 54 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
+The initial geometry vertical slice builds a closed shell for a verified rectangular fixture. The weighted wavefront alpha now advances multiple loops, handles a single reflex split, resolves tested equal- and unequal-speed L/U cross-needle terminal events when full opposing segments coincide at the event height, collects source-edge roof facets, fixes T-junctions and assembles a welded RoofSurface. End-to-end shells pass for rectangle, V-notch (including unequal pitches), L and U fixtures. CW winding and nonzero constant eave height are also covered. Pure-Python CI passes 54 tests on Python 3.11 and 3.13. Blender 5.0 runtime validation remains pending.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -24,10 +24,10 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 - [x] Global multi-loop event scheduler and earliest-event stepping
 - [x] Swept facet-fragment and skeleton-arc collection
 - [x] Single reflex split with child-loop replacement and stale event invalidation
-- [x] Tested L/U cross-needle terminal event resolver for equal-speed opposing fronts
+- [x] Tested L/U cross-needle terminal events with unequal opposing speeds when finite segments coincide exactly at the event height
 - [x] T-junction conformance and welded facet assembly into RoofSurface
 - [ ] Complete weighted straight-skeleton solver for arbitrary concave contours and all simultaneous/parallel event classes
-- [ ] Unequal-speed needle and higher-order vertex-event resolution
+- [ ] Partial-overlap unequal-speed needle events, split/collapse event ordering and higher-order vertex-event resolution
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
 - [x] Surface boundary-chain check: internal open edges are rejected

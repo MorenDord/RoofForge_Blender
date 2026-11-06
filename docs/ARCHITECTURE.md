@@ -53,13 +53,13 @@
 - `apply_split_event` for one strict interior split, with stable source-edge identity on the two replacement edge instances;
 - a global multi-loop state machine that advances every active loop to the globally earliest event;
 - swept edge fragments lifted into 3D source-edge planes, plus skeleton vertex trajectories;
-- a restricted cross-needle resolver for simultaneous reflex endpoint hits and edge collapses when all remaining fronts pair as opposite, coincident finite segments with matching speeds;
+- a restricted cross-needle resolver for simultaneous reflex endpoint hits and edge collapses when all remaining fronts pair as opposite, coincident finite segments at the event height (opposing speeds need not be equal);
 - a T-junction conformance pass that subdivides earlier facet edges at later split vertices;
 - `build_wavefront_roof_surface`, which welds facets, checks source-plane membership, projected area and outer-boundary continuity, and returns the shared `RoofSurface` payload.
 
-Pure-Python regression fixtures currently produce closed manifold shells for a rectangle, a V-notch (including one asymmetric per-edge pitch set), an L contour and a U contour. L/U fixtures currently exercise equal-speed cross-needle cases. A clockwise L contour and a nonzero constant eave height are also tested.
+Pure-Python regression fixtures currently produce closed manifold shells for a rectangle, a V-notch (including one asymmetric per-edge pitch set), an L contour and a U contour. L/U fixtures now include both equal-speed and deliberately asymmetric pitch cases whose opposing finite segments coincide completely at the terminal event. A clockwise L contour and a nonzero constant eave height are also tested.
 
-**Remaining limitations:** the first wavefront path requires constant-Z eaves; arbitrary simultaneous split batches, higher-order vertex events and opposing needle pairs with unequal speeds are not fully resolved. Full geometric self-intersection detection is not implemented. The Blender generator operator still uses the existing plane/envelope path; this wavefront alpha has not been runtime-tested inside Blender 5.0 and must not be advertised as general arbitrary-polygon support.
+**Remaining limitations:** the first wavefront path requires constant-Z eaves; partial-overlap unequal-speed needle events, split/collapse event-order changes and higher-order vertex events are not fully resolved. Full geometric self-intersection detection is not implemented. The Blender generator operator still uses the existing plane/envelope path; this wavefront alpha has not been runtime-tested inside Blender 5.0 and must not be advertised as general arbitrary-polygon support.
 
 ## Core data structures
 - RoofInput: source UUID, local transform, ordered boundary points, stable boundary edge IDs, unit scale.

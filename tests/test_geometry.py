@@ -746,5 +746,110 @@ class PolygonTests(unittest.TestCase):
 
 
 
+    def test_wavefront_l_shape_resolves_unequal_opposing_speeds(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        # Opposing speeds differ, while both pairs meet at the same event height.
+        speeds = [0.8, 1.0, 1.2, 1.3, 1.0, 0.7]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
+        terminal_arcs = [
+            arc for arc in trace.skeleton_arcs
+            if abs(arc.start[2] - trace.terminal_time) < 1e-8
+            and abs(arc.end[2] - trace.terminal_time) < 1e-8
+        ]
+        self.assertEqual(len(terminal_arcs), 2)
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_u_shape_resolves_unequal_opposing_speeds(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 4.0, 0.0),
+            (3.0, 4.0, 0.0), (3.0, 1.0, 0.0), (1.0, 1.0, 0.0),
+            (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        # Three full segment pairs coincide at the same height, but no pair
+        # has to propagate at equal inward speed.
+        speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
+        terminal_arcs = [
+            arc for arc in trace.skeleton_arcs
+            if abs(arc.start[2] - trace.terminal_time) < 1e-8
+            and abs(arc.end[2] - trace.terminal_time) < 1e-8
+        ]
+        self.assertEqual(len(terminal_arcs), 3)
+        self.assertAlmostEqual(trace.projected_facet_area, 10.0, places=6)
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(surface.surface_area_xy, 10.0, places=6)
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_l_shape_handles_near_equal_opposing_speeds(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+        speeds = [0.999999, 1.0, 1.000001, 1.000001, 1.0, 0.999999]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertEqual(trace.terminal_kind, "MULTI_TERMINAL")
+        self.assertEqual(len([
+            arc for arc in trace.skeleton_arcs
+            if abs(arc.start[2] - trace.terminal_time) < 1e-8
+            and abs(arc.end[2] - trace.terminal_time) < 1e-8
+        ]), 2)
+
+    def test_wavefront_l_shape_event_order_changes_around_equal_pair_sums(self):
+        points = [
+            (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
+        ]
+
+        def first_batch(speeds):
+            pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+            moving = build_moving_lines(points, pitches)
+            edges = {line.edge_id: line for line in moving}
+            loop = WavefrontLoop(0, tuple(line.edge_id for line in moving))
+            candidates = collect_loop_events(loop, edges, 0.0)
+            first_time = min(event.time for event in candidates)
+            return [
+                event for event in candidates
+                if abs(event.time - first_time) <= 1e-8
+            ]
+
+        # When the right opposing pair closes first, edge 4 collapses and the
+        # reflex vertex reaches the interior of target edge 5.
+        right_first = first_batch([0.8, 1.0, 1.2, 1.3002, 1.0, 0.7])
+        self.assertEqual(
+            {event.edge_id for event in right_first if event.kind == EventKind.EDGE_COLLAPSE},
+            {4},
+        )
+        self.assertEqual(
+            {(event.vertex_id, event.target_edge_id) for event in right_first
+             if event.kind == EventKind.SPLIT_CANDIDATE},
+            {(3, 5)},
+        )
+
+        # When the bottom opposing pair closes first, edge 1 collapses and the
+        # same reflex vertex reaches the interior of target edge 0.
+        bottom_first = first_batch([0.8, 1.0, 1.2, 1.2998, 1.0, 0.7])
+        self.assertEqual(
+            {event.edge_id for event in bottom_first if event.kind == EventKind.EDGE_COLLAPSE},
+            {1},
+        )
+        self.assertEqual(
+            {(event.vertex_id, event.target_edge_id) for event in bottom_first
+             if event.kind == EventKind.SPLIT_CANDIDATE},
+            {(3, 0)},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

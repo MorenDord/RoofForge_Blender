@@ -900,8 +900,10 @@ def _resolve_cross_needle_vertex_hit(
     Endpoint hits are grouped by reflex vertex. Each group must contain exactly
     two hits on adjacent target edges, proving the reflex vertex reached their
     common wavefront endpoint. After the simultaneous edge collapses, every
-    remaining finite front must pair with one opposite, coincident front of
-    equal speed. The paired segments become terminal skeleton arcs.
+    remaining finite front must pair with one opposite, coincident finite
+    segment at the event height. The paired segments must match endpoint to
+    endpoint, but their propagation speeds may differ: equality is required
+    at the collision instant, not throughout motion.
 
     This covers the L-shaped one-node cross-needle and the U-shaped
     multi-node event. It is deliberately not a generic simultaneous-event
@@ -984,7 +986,6 @@ def _resolve_cross_needle_vertex_hit(
             second_segment = segments[second_id]
             alignment = _dot(first_line.normal, second_line.normal)
             line_gap = first_line.offset_at(state.current_time) + second_line.offset_at(state.current_time)
-            speed_delta = abs(first_line.speed - second_line.speed)
             scale = max(
                 1.0,
                 abs(first_line.offset_at(state.current_time)),
@@ -1002,7 +1003,6 @@ def _resolve_cross_needle_vertex_hit(
             if (
                 alignment <= -1.0 + state.epsilon * 100.0
                 and abs(line_gap) <= tol
-                and speed_delta <= state.epsilon * max(1.0, first_line.speed, second_line.speed) * 100.0
                 and first_segment[3] > tol
                 and second_segment[3] > tol
                 and abs(first_segment[3] - second_segment[3]) <= tol
