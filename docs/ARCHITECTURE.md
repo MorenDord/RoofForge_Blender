@@ -19,10 +19,9 @@
 - core/planes.py — boundary-edge plane generation and active-halfspace checks
 - core/envelope.py — convex and concave lower-envelope partition
 - core/mesh.py — welded mesh payload assembly, projected coverage and outer-boundary continuity checks
-- core/shell.py — closed shell construction by global roof-local -Z extrusion and manifold edge validation
-- core/validation.py — pure-Python edge incidence, face winding, connected-component and vertex-link validation
-- core/shell.py — closed shell construction by global roof-local -Z extrusion and manifold edge validation
-- core/model.py, ids.py, validation.py, shell.py, adjacency.py, classification.py, profiles.py, seams.py, uv.py, optimization.py, lod.py
+- core/shell.py — closed shell construction by global roof-local -Z extrusion
+- core/validation.py — edge incidence, face winding, connected-component and vertex-link validation
+- core/model.py, ids.py, adjacency.py, classification.py, profiles.py, seams.py, uv.py, optimization.py, lod.py
 - tests/ — pure Python fixtures and Blender background integration tests
 
 ## Data flow
