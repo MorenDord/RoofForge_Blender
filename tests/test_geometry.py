@@ -15,6 +15,7 @@ from core.distance_field import build_distance_field_roof_surface
 from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
     advance_wavefront_state, apply_split_event, build_moving_lines,
+    build_wavefront_roof_surface,
     collect_loop_events, create_wavefront_state, find_split_candidates,
     run_weighted_wavefront,
     simulate_convex_wavefront, _line_intersection,
@@ -613,6 +614,29 @@ class PolygonTests(unittest.TestCase):
             vertex[2] >= base_z - 1e-8
             for facet in trace.facets for vertex in facet.vertices
         ))
+
+
+
+    def test_wavefront_surface_assembles_rectangle_into_welded_mesh(self):
+        points = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
+                  (4.0, 2.0, 0.0), (0.0, 2.0, 0.0)]
+        surface = build_wavefront_roof_surface(points, [45.0] * 4)
+        self.assertAlmostEqual(surface.source_area_xy, 8.0, places=7)
+        self.assertAlmostEqual(surface.surface_area_xy, 8.0, places=7)
+        self.assertEqual(len(surface.faces), 4)
+        shell = build_roof_shell(surface, 0.15)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_surface_assembles_v_notch_into_manifold_shell(self):
+        points = [
+            (0.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 4.0, 0.0),
+            (4.0, 4.0, 0.0), (3.0, 2.0, 0.0), (2.0, 4.0, 0.0),
+            (0.0, 4.0, 0.0),
+        ]
+        surface = build_wavefront_roof_surface(points, [45.0] * len(points))
+        self.assertAlmostEqual(surface.surface_area_xy, 22.0, places=6)
+        shell = build_roof_shell(surface, 0.12)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
 
 
