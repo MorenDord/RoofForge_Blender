@@ -26,11 +26,11 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 - [x] Single reflex split with child-loop replacement and stale event invalidation
 - [x] Tested L/U cross-needle terminal events with unequal opposing speeds when finite segments coincide exactly at the event height
 - [x] Restricted same-loop simultaneous strict split + one edge-collapse resolver; validates child topology transactionally and permits the resulting terminal partial needle only when its event endpoints lie on both coincident fronts
+- [x] End-to-end distinct-time continuation in both L event orders; after compound topology mutation the next event is later than the batching tolerance and references only the live child-loop generation and active edge instances
 - [x] Finite-segment endpoint validation for ordinary two-front needle termination; reject partial overlap rather than misclassifying it as a full needle
 - [x] T-junction conformance and welded facet assembly into RoofSurface
 - [ ] Complete weighted straight-skeleton solver for arbitrary concave contours and all simultaneous/parallel event classes
 - [ ] General partial-overlap opposing-front resolver, including multiple overlap intervals and surviving tails not represented by the constrained split/collapse fixture
-- [ ] Sequential near-simultaneous split/collapse cases where the events are distinct in time and topology changes between them
 - [ ] Multiple independent splits on one loop, nested split sequences and higher-order vertex-event resolution
 - [x] 3D vertex welding and face-to-slope metadata
 - [x] Projected domain coverage check and >2-face edge guard
@@ -86,4 +86,4 @@ The initial geometry vertical slice builds a closed shell for a verified rectang
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Extend same-loop topology handling beyond the verified one-split/one-collapse batch. First cover two independently timed events after a topology change and prove that newly scheduled candidates—not stale pre-split candidates—control the next step. Then support multiple independent splits on one loop and generic partial-overlap needle segments with explicit surviving-tail topology. Keep exact source-plane, coverage, boundary-chain, T-junction and closed-shell manifold checks. Treat sub-tolerance sliver faces as rejected geometry, not as a reason to weaken validation. Keep mixed-height eaves out of this solver and do not connect it to Blender until the broader event suite passes.
+Extend same-loop topology handling beyond the verified one-split/one-collapse batch. First support generic partial-overlap needle segments beyond the constrained one-split/one-collapse case, deriving all overlap endpoints and surviving tails. Then support multiple independent splits on one loop, nested split sequences and higher-order vertex events. Keep adversarial event-order tests on both sides of batching tolerance. Keep exact source-plane, coverage, boundary-chain, T-junction and closed-shell manifold checks. Treat sub-tolerance sliver faces as rejected geometry, not as a reason to weaken validation. Keep mixed-height eaves out of this solver and do not connect it to Blender until the broader event suite passes.
