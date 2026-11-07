@@ -2,11 +2,18 @@
 
 import bmesh
 
+MAX_BOUNDARY_EDGES = 64
+
 
 def _ordered_cycle_points(bm, edges):
     edges = list(edges)
     if len(edges) < 3:
         raise ValueError("На объекте не найдена замкнутая граница минимум из трёх рёбер.")
+    if len(edges) > MAX_BOUNDARY_EDGES:
+        raise ValueError(
+            f"Эта alpha-версия RoofForge поддерживает максимум {MAX_BOUNDARY_EDGES} "
+            "граничных рёбер. Упрости контур или уменьши число сегментов."
+        )
 
     edge_set = set(edges)
     degree = {}

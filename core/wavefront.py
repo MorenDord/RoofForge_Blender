@@ -344,14 +344,30 @@ def _is_convex_loop(vertices: Sequence[KinematicVertex], winding: int, eps: floa
     return True
 
 
+def is_flat_eave_contour(points: Sequence[Point3], eps: float = 1e-9) -> bool:
+    """Return whether all eaves share one Z height within an XY-scale tolerance.
+
+    The test is translation-invariant: moving a roof contour far above the
+    world origin must not make visibly different eave heights appear equal.
+    """
+    if not points or not isfinite(eps) or eps < 0.0:
+        return False
+    if any(not all(isfinite(value) for value in point) for point in points):
+        return False
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    zs = [point[2] for point in points]
+    xy_scale = max(1.0, max(xs) - min(xs), max(ys) - min(ys))
+    return max(zs) - min(zs) <= eps * xy_scale
+
+
 def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> tuple[MovingLine, ...]:
     """Create one positively weighted moving line per ordered contour edge."""
     if len(points) < 3 or len(points) != len(pitches_degrees):
         raise GeometryInputError("INPUT_COUNT", "Нужно минимум три вершины и по одному уклону на каждое ребро.")
     z_values = [point[2] for point in points]
-    z_tolerance = eps * max(1.0, max(z_values) - min(z_values), *(abs(z) for z in z_values))
-    if max(z_values) - min(z_values) > z_tolerance:
+    if not is_flat_eave_contour(points, eps):
         raise GeometryInputError(
             "MIXED_EAVE_HEIGHTS_UNSUPPORTED",
             "Weighted 2D wavefront первой версии поддерживает только контур с постоянной высотой карнизов."
@@ -1929,8 +1945,8 @@ def build_wavefront_roof_surface(
 ):
     """Assemble and validate welded roof facets from a completed wavefront trace.
 
-    The result is the same RoofSurface payload used by the existing shell
-    builder. This function remains pure Python and is not yet wired into bpy.
+    The result is the same RoofSurface payload used by the Blender add-on
+    and the existing shell builder. This geometry function remains bpy-free.
     """
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .planes import build_boundary_planes

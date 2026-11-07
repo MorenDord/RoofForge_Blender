@@ -17,7 +17,7 @@ from core.wavefront import (
     advance_wavefront_state, apply_split_event, build_moving_lines,
     build_wavefront_roof_surface,
     collect_loop_events, create_wavefront_state, find_split_candidates,
-    run_weighted_wavefront,
+    run_weighted_wavefront, is_flat_eave_contour,
     simulate_convex_wavefront, _line_intersection, _resolve_edge_collapse_group,
 )
 
@@ -357,6 +357,22 @@ class PolygonTests(unittest.TestCase):
                   (4.0, 2.0, 0.5), (0.0, 2.0, 0.0)]
         with self.assertRaises(GeometryInputError) as ctx:
             build_moving_lines(points, [45.0] * 4)
+        self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
+
+    def test_flat_eave_detection_is_independent_of_absolute_z_offset(self):
+        flat = [
+            (0.0, 0.0, 1_000_000_000.0),
+            (4.0, 0.0, 1_000_000_000.0),
+            (4.0, 2.0, 1_000_000_000.0),
+            (0.0, 2.0, 1_000_000_000.0),
+        ]
+        stepped = list(flat)
+        stepped[1] = (stepped[1][0], stepped[1][1], 1_000_000_000.5)
+
+        self.assertTrue(is_flat_eave_contour(flat))
+        self.assertFalse(is_flat_eave_contour(stepped))
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_moving_lines(stepped, [45.0] * 4)
         self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
 
     def test_wavefront_convex_simulation_rejects_reflex_contour(self):

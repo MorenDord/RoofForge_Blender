@@ -6,6 +6,7 @@ Run from the repository root:
 from __future__ import annotations
 
 import importlib
+import math
 import sys
 from pathlib import Path
 
@@ -78,6 +79,25 @@ def create_l_contour(name: str):
     return obj
 
 
+def create_regular_wire_loop(name: str, edge_count: int):
+    points = [
+        (math.cos(2.0 * math.pi * index / edge_count),
+         math.sin(2.0 * math.pi * index / edge_count),
+         0.0)
+        for index in range(edge_count)
+    ]
+    edges = [(index, (index + 1) % edge_count) for index in range(edge_count)]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
+
 def check_generated_shell(source, source_coordinates) -> None:
     generated = [
         obj for obj in bpy.data.objects
@@ -139,6 +159,17 @@ def main() -> None:
     # Also exercise boundary extraction from an actual surface mesh face.
     run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
     run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
+
+    # 64 is the enforced alpha limit, not merely a benchmark target.
+    clear_scene()
+    oversized = create_regular_wire_loop("RoofForge_Smoke_OverLimit", 65)
+    mesh_io = importlib.import_module(f"{extension.__name__}.addon.adapters.mesh_io")
+    try:
+        mesh_io.read_object_boundary(oversized)
+    except ValueError as exc:
+        ensure("64" in str(exc), "over-limit diagnostic does not state the 64-edge limit")
+    else:
+        raise RuntimeError("RoofForge Blender smoke test failed: 65-edge boundary was accepted")
 
     # Concave flat-eave L contour with independent pitch per boundary edge.
     clear_scene()

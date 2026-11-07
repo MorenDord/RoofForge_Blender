@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.1.** This is an early user-test build, not a finished 1.0 release. It adds automatic object-boundary detection, per-edge pitch fields, a debounced live rebuild and a tested flat-eave weighted wavefront path. The geometry engine still has explicit scope limits described below.
+> **Current test build: 0.2.0-alpha.2.** This is an early user-test build, not a finished 1.0 release. It adds automatic object-boundary detection, per-edge pitch fields, a debounced live rebuild and a tested flat-eave weighted wavefront path. The geometry engine still has explicit scope limits described below.
 
 ## Project documents
 
@@ -36,7 +36,7 @@ When every boundary vertex has the same Z height, RoofForge uses the Python weig
 - selected multi-notch and same-time split/collapse fixtures remain experimental and are not guaranteed;
 - selected simultaneous split/collapse and needle events.
 
-This is a tested family of cases, not a proof for every possible simple polygon. A geometric/event configuration outside the solver's supported event set is rejected with an error; the previous generated roof is kept during live update.
+This is a tested family of cases, not a proof for every possible simple polygon. Some multi-notch simultaneous-event combinations remain a known alpha limitation and are deliberately excluded from the passing corpus. Unsupported event configurations are rejected with an error; the previous generated roof is kept during live update.
 
 ### Mixed-height 3D eaves
 
@@ -46,13 +46,13 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 - Exactly one simple closed boundary loop is supported. Multiple disconnected loops and holes are not.
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
-- 64 edges is the target maximum for this milestone.
+- 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Non-uniform object scale can change world-space pitch. Apply object scale for predictable world-space results.
 - No optional overhang/eaves generation, ridge/valley/hip profiles, standing seams, UVs, LOD or export automation.
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.1-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.1.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.2-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.2.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 

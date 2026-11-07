@@ -8,7 +8,7 @@ import bpy
 from ..core.geometry import GeometryInputError
 from ..core.mesh import build_roof_surface
 from ..core.shell import build_roof_shell
-from ..core.wavefront import build_wavefront_roof_surface
+from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
 
 def pitch_values(settings, edge_count: int) -> list[float]:
@@ -38,10 +38,7 @@ def build_roof_payload(points, pitches, thickness):
             "INPUT_COUNT",
             "Нужно минимум три вершины и по одному углу на каждое ребро."
         )
-    z_values = [float(point[2]) for point in points]
-    z_scale = max(1.0, max(abs(value) for value in z_values))
-    flat_tolerance = 1.0e-9 * z_scale
-    if max(z_values) - min(z_values) <= flat_tolerance:
+    if is_flat_eave_contour(points):
         surface = build_wavefront_roof_surface(points, pitches)
         solver = "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     else:
