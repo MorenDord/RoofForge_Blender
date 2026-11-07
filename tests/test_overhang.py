@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from core.geometry import GeometryInputError
@@ -96,15 +97,18 @@ class RoofOverhangTests(unittest.TestCase):
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
 
     def test_concave_u_with_individual_pitch_supports_overhang(self):
-        pitches = [30.0, 32.5, 35.0, 37.5, 30.0, 32.5, 35.0, 37.5]
+        speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
         surface = build_wavefront_roof_surface(CONCAVE_U, pitches)
         extended = self._assert_extended_shell(surface, 0.1)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
 
     def test_too_large_concave_overhang_is_rejected_instead_of_self_intersecting(self):
-        surface = build_wavefront_roof_surface(CONCAVE_L, [32.0] * len(CONCAVE_L))
+        speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6]
+        pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
+        surface = build_wavefront_roof_surface(CONCAVE_U, pitches)
         with self.assertRaises(GeometryInputError):
-            extend_convex_roof_surface(surface, 3.0)
+            extend_convex_roof_surface(surface, 1.5)
 
     def test_small_resolvable_convex_overhang_is_not_discarded_by_tolerance(self):
         surface = build_wavefront_roof_surface(FLAT_RECTANGLE, [35.0] * 4)

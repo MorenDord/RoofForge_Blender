@@ -464,15 +464,21 @@ def main() -> None:
         "non-flat overhang centimeters were not preserved in metadata",
     )
 
-    # A concave overhang that collapses a notch must be rejected safely.
+    # A U-notch that is narrower than twice the requested eave must be rejected.
     clear_scene()
-    concave_source = create_l_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
+    concave_source = create_u_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
     concave_settings = bpy.context.scene.roof_forge
-    concave_settings.eave_overhang_cm = 300.0
+    concave_settings.eave_overhang_cm = 150.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
-        "could not prepare concave overhang pitch settings",
+        "could not prepare concave U overhang pitch settings",
     )
+    stable_u_pitches = (
+        51.3401917459, 53.1301023542, 45.0, 38.6598082541,
+        39.8055710923, 35.5376777919, 45.0, 59.0362434679,
+    )
+    for item, pitch in zip(concave_settings.slope_settings, stable_u_pitches):
+        item.pitch = pitch
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
         "oversized concave overhang unexpectedly accepted a collapsed offset",
