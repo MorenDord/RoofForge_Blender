@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.10.** This is an early user-test build, not a finished 1.0 release. Eaves are generated from one outward-offset source contour. Each Pitch row is mapped to its edge by a numbered top-view plan. A separate Number size slider adjusts the labels without changing roof geometry.
+> **Current test build: 0.2.0-alpha.11.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. The preview shows the actual roof facets with white antialiased lines and centered numbers on a transparent background.
 
 ## Project documents
 
@@ -16,13 +16,13 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 
 - Select a mesh object; no vertex or edge selection is needed.
 - Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
-- Show a top-view numbered contour plan; each number maps directly to the corresponding per-edge Pitch field below it. No Edit Mode edge selection is required.
+- Show a top-view numbered roof-facet plan generated from actual roof geometry. Each number is centered inside its slope and maps directly to the corresponding per-edge Pitch field. White graphics use a transparent background; coplanar seams are omitted.
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- **One-contour eaves:** first offset the source polygon outward in XY, intersecting adjacent parallel offset edges at each corner. Then rebuild the complete roof using that new contour and the same ordered per-edge pitch values. No separate strips, corner caps or post-build stitching are appended.
-- Each offset edge remains parallel to its source edge and is exactly the requested horizontal distance outward. Reflex corners use the same line-intersection offset; self-intersecting or collapsed offsets are rejected.
-- The source vertex Z value is retained at its corresponding offset vertex. The roof solver then recalculates the full roof from the new XYZ boundary.
+- **Source-anchored eaves:** the pitch planes are constructed through the original 3D source edges. The outward offset contour extends the XY build domain only; it does not move or re-anchor the support planes.
+- The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
+- Coplanar internal edges are dissolved from the generated Blender mesh, while true ridges and the outer boundary remain.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm and newly prepared pitches default to 30°.
 - No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
 - Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
@@ -31,7 +31,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The top-view plan uses the same deterministic contour traversal order as the Pitch fields. A separate Number size slider changes only the plan labels. The plan is generated from the saved source contour and does not run the roof solver while the panel is drawing.
+The top-view plan is created from the saved generated roof faces and source-slope metadata; it does not run the roof solver while the panel is drawing. Labels are placed in the largest visible facet of each slope and reduced to fit available clearance. Number size and line thickness are separate controls, and the square preview scales to the available sidebar width.
 
 ## Geometry paths and limitations
 
@@ -59,7 +59,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original rela
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.10-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.10.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.11-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.11.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
