@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.8.** This is an early user-test build, not a finished 1.0 release. Eaves are now generated from one outward-offset source contour: RoofForge rebuilds the whole roof from that new contour instead of appending separate strips to an existing roof.
+> **Current test build: 0.2.0-alpha.9.** This is an early user-test build, not a finished 1.0 release. Eaves are generated from one outward-offset source contour. Each numbered Pitch row now visibly includes a Show button; alpha.9 adds a Blender smoke assertion that the button is actually present in the registered panel.
 
 ## Project documents
 
@@ -59,7 +59,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original rela
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.8-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.8.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.9-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.9.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 

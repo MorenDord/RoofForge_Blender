@@ -3,7 +3,7 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** 0.2.0-alpha.8 packaged; manual Blender viewport QA pending
+**Status:** alpha.9 UI correction committed; package CI pending
 
 ## User-confirmed priorities
 
@@ -94,7 +94,7 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
 
-### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.8 для flat-Z контуров)
+### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.9 для flat-Z контуров)
 
 Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370549428) (push) and [42370553763](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370553763) (PR) both passed on package commit `7730ac1b7b4caff1776c58a534cee04f40f34298`: Python 3.11/3.13, flat and concave offset-contour geometry tests, Blender 5.0.1 smoke, clean alpha.7 ZIP build, official Extension Validator, geometry/legacy/Rust/profile jobs.
 
@@ -138,7 +138,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` использует `build_wavefront_roof_surface()` для flat-Z контуров; mixed-Z остаётся на 3D support-plane envelope path.
-- В 0.2.0-alpha.8 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
+- В 0.2.0-alpha.9 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
 - `create_roof_mesh_data()` записывает face attributes через `foreach_set`, сокращая Python-цикл по каждой грани. Геометрический пересчёт при изменении pitch по-прежнему требуется; latency на пользовательской машине нужно оценивать вручную.
 
 Это рабочая alpha-интеграция с известными ограничениями событий, а не универсальный production solver. PR остаётся draft для сбора viewport QA.
@@ -157,7 +157,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 
 
 
-### Blender UI, сантиметры, свес и Live Update — интегрированы в 0.2.0-alpha.8
+### Blender UI, сантиметры, свес и Live Update — интегрированы в 0.2.0-alpha.9
 
 - addon/properties.py: коллекция pitch-настроек по каждому edge, ссылки на исходный и сгенерированный объект, статус и переключатель Live Update.
 - addon/operators/prepare.py: считывает контур и создаёт нумерованный список углов.
@@ -177,7 +177,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Пакет 0.2.0-alpha.8 собран и принят официальным Blender 5.0.1 Extension Validator. CI: push `42378167294`, PR `42378171463`; smoke включает Show selection для wire/face contours, Object/Edit Mode, source topology preservation и предыдущие geometry/UI regressions. Ручной viewport QA всё ещё нужен.
+- Пакет 0.2.0-alpha.9 собран и принят официальным Blender 5.0.1 Extension Validator. CI: push `42378167294`, PR `42378171463`; smoke включает Show selection для wire/face contours, Object/Edit Mode, source topology preservation и предыдущие geometry/UI regressions. Ручной viewport QA всё ещё нужен.
 
 ### Ограничение размера
 
@@ -185,7 +185,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Обычный CI benchmark и cProfile ограничены диапазоном 8, 16, 32 и 64 рёбер.
 - Контуры больше 64 рёбер не входят в критерии приёмки этой версии; отдельная оптимизация для 128 рёбер не требуется.
 
-## Точный статус готовности 0.2.0-alpha.8
+## Точный статус готовности 0.2.0-alpha.9
 
 - [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
 - [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью; новые поля default 30°.
@@ -196,11 +196,11 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
 - [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, per-edge Show selection on wire/face meshes, flat and mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [x] Clean Extension ZIP 0.2.0-alpha.8 собран и принят официальным Blender Extension Validator (artifact `13576552379`; SHA-256 `0b25ddcd1bcc5eb302215e88f5dafeca3aeccc9bc2334690a4d597a5570a45f8`).
+- [ ] Clean Extension ZIP 0.2.0-alpha.9 собран и принят официальным Blender Extension Validator.
 - [x] Pitch-row Show operator selects the exact contour edge in Object/Edit Mode; Blender smoke covers wire and face boundary meshes and checks that source coordinates/topology remain unchanged. Versioned alpha.8 push/PR CI runs `42378167294` and `42378171463` passed all jobs.
 - [x] Alpha.7 push run `42370549428` and PR run `42370553763` passed all Python, Blender, package, geometry, legacy, Rust and profile jobs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
-- [x] Выбор исходного граничного ребра из соответствующего Pitch row кнопкой Show; постоянный viewport overlay / pitch map и ручной viewport QA остаются отдельными задачами.
+- [ ] Alpha.9 UI panel fix and strengthened smoke for visible Show control; versioned package CI pending. Persistent viewport overlay / pitch map remains separate.
 
-Итог: 0.2.0-alpha.8 готова к ручной проверке в Blender. Это не стабильный 0.2.0 release; PR остаётся draft до viewport QA.
+Итог: alpha.9 может быть передана на ручную проверку только после зелёного versioned CI и проверки собранного ZIP на наличие Show в `addon/ui/panel.py`.

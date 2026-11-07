@@ -1,77 +1,82 @@
-# RoofForge 0.2.0-alpha.8 — Session Handoff
+# RoofForge 0.2.0-alpha.9 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Feature commit:** `891dae5ae7558a9d5972f5f2779f3ce68481412e`  
-**Versioned package commit:** `abe50c9cd7d9860a3be494d0f9af7ae262ec881a`  
+**UI fix commit:** `5d751ced47ea72736bf7eabe7d9bc0c326ad23a9`  
+**Versioned package commit:** pending alpha.9 package metadata commit  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Installable build:** `roof_forge-0.2.0-alpha.8.zip`, from CI artifact `roof_forge-0.2.0-alpha.8-blender-5.0.1` (artifact ID `13576552379`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378167294/artifacts/13576552379).  
-**Inner ZIP SHA-256:** `0b25ddcd1bcc5eb302215e88f5dafeca3aeccc9bc2334690a4d597a5570a45f8`.  
+**Alpha.9 artifact / SHA-256:** pending versioned package CI.  
 **Important:** `main` and `develop` must remain unchanged.
 
-## Selected milestone: per-edge Pitch → source boundary edge mapping
+## User report and verified cause
 
-Alpha.8 implements a discrete UI milestone from the 0.2.0 plan: the user can select the exact source boundary edge represented by any Pitch field.
+The user reported that the alpha.8 Show controls were not visible. Inspection of the actual downloaded inner alpha.8 ZIP confirmed this report:
+- `addon/operators/select_edge.py` was included and imported/registered.
+- `addon/ui/panel.py` in the ZIP was the unchanged old version: each Pitch row rendered the label and Pitch property only; no Show operator button.
+- The earlier smoke test exercised the operator directly but did not assert that the UI panel actually exposed it.
+- Therefore the previous alpha.8 release statement that the button was visible was incorrect. Do not direct user to alpha.8 for this feature.
 
-- Each Pitch row has a **Show** button.
-- Show enters Edit Mode if the source is currently in Object Mode.
-- It switches mesh selection mode to Edge, deselects other mesh elements and selects the precise boundary edge represented by that row.
-- Clicking Show on another row while already in Edit Mode moves selection to the new edge.
-- Works with wire-only contour objects and face meshes with one outer boundary.
-- The selection uses the same deterministic boundary walk as `read_object_boundary()` and pitch preparation.
-- The operator requires that the active object is the currently prepared source object. Invalid or stale edge indices are rejected with a refresh instruction.
-- The operator changes only mesh selection state; vertex coordinates and topology remain unchanged.
-- Pitch mapping and geometry reading do not depend on selected edges/vertices, so this UI affordance does not change roof generation.
-- This is transient native Edit Mode selection, not a persistent custom draw overlay or pitch-map preview. Those remain a separate milestone.
+## Alpha.9 correction
 
-## Implementation
+The source `addon/ui/panel.py` now visibly adds, in every Pitch row:
 
-- `addon/adapters/mesh_io.py`: refactors deterministic contour walk to expose directed ordered vertex index pairs.
-- `addon/operators/select_edge.py`: implements `roof_forge.select_slope_edge`.
-- `addon/operators/__init__.py`, `addon/registration.py`: registers the new operator.
-- `addon/ui/panel.py`: adds Show button to every Pitch row.
-- `tests/blender_smoke.py`: verifies wire contour selection from Object Mode, edge switching while in Edit Mode, face-boundary selection and unchanged source topology/coordinates.
+- `row.operator("roof_forge.select_slope_edge", text="Show", icon="EDGESEL")`
+- passes `item.edge_index` to the operator
+- leaves the Pitch property in the same row.
 
-## Verification on feature commit
+The Blender smoke test has been strengthened to assert:
+1. the source-edge operator is registered;
+2. the registered RoofForge sidebar panel exists;
+3. the panel `draw()` bytecode constants include `roof_forge.select_slope_edge`;
+4. the panel `draw()` bytecode constants include the visible label `Show`;
+5. existing operator execution tests select the correct edge for wire and face contours and do not modify source coordinates/topology.
 
-Push run [42378167294](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378167294) and PR run [42378171463](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378171463) both passed on versioned package commit `abe50c9cd7d9860a3be494d0f9af7ae262ec881a`:
-- Python 3.11 and 3.13 compile/tests.
-- Blender 5.0.1 background smoke including the new Show operator tests.
-- Clean package ZIP and official Blender Extension Validator.
-- Geometry benchmark, legacy spatial benchmark, Rust candidate diagnostics and legacy cProfile.
+This is intentionally a package-level regression gate: a green test run must fail if the UI code is missing even when the operator itself still works.
 
-The versioned alpha.8 ZIP was downloaded from GitHub Actions, the embedded checksum file was checked against the inner ZIP bytes, and the manifest inside the archive was confirmed as `0.2.0-alpha.8`.
+## Existing operator behaviour
 
-## Existing features retained
+- Each Pitch row's Show button selects exactly its assigned source boundary edge.
+- From Object Mode it enters Edit Mode; from Edit Mode it changes the highlighted edge.
+- Uses the same deterministic boundary walk as source contour and Pitch preparation.
+- Works with wire-only contours and face-mesh outer boundaries.
+- Does not change source topology or coordinates.
+- Native temporary Edit Mode selection only; no persistent colored overlay or pitch map yet.
 
-- Single outward-offset source contour then full roof rebuild.
-- Individual per-edge pitch values; 30° default.
-- Thickness 1 cm default; centimeter fields.
-- Live Update delay 0–1000 ms, default 0; thickness-only cache; last-valid-mesh rollback.
-- One boundary loop, 64 edges maximum; unsupported wavefront combinations still rejected.
-- Concave L/U flat-Z eaves in tested cases; arbitrary concave mixed-Z XYZ not guaranteed.
-- Delete/recreate after deleting generated roof; immutable source geometry.
+## Existing geometry and UX retained
 
-## User QA for alpha.8
+- One outward-offset source contour then full roof rebuild; no appended eave strips/caps.
+- Individual per-edge pitch values, new fields default to 30°.
+- Thickness default 1 cm, cm input.
+- Live Update delay 0–1000 ms, default 0 ms; thickness-only cache; last-valid-mesh rollback.
+- One simple boundary loop, max 64 edges.
+- L/U flat-Z offset roof cases covered, subject to weighted-wavefront limitations.
+- Arbitrary concave mixed-height XYZ is not guaranteed.
+- Delete/recreate and source geometry preservation remain covered.
 
-1. Select a source wire contour and prepare slope values.
-2. Click Show beside Edge 03 while in Object Mode; the source should enter Edit Mode and select exactly that boundary edge.
-3. Click Show beside another Pitch row; only the new matching edge should remain selected.
-4. Repeat on a face mesh, selecting its outer boundary.
-5. Confirm that no source coordinates or topology change.
-6. Generate/update a roof after using Show and verify that boundary acquisition and Pitch mapping remain correct.
+## CI / artifact status
 
-## Remaining milestones
+Alpha.8 had fully green CI but its panel source was missing the control. That alpha.8 artifact must not be reused for the Show milestone.
 
-- Robust arbitrary weighted-wavefront same-time split/collapse and seeded random simple polygon corpus.
-- General concave mixed-height XYZ solver.
-- Persistent viewport overlay, edge labels and roof-top pitch map.
-- Further performance gates and manual viewport QA.
+Alpha.9 must pass:
+- Python 3.11 and 3.13;
+- Blender 5.0.1 smoke including the new panel-content assertions and edge selection tests;
+- clean extension ZIP build;
+- official Blender 5.0.1 Extension Validator.
+
+Record final alpha.9 push/PR run IDs, artifact ID and inner ZIP SHA-256 only after downloading and inspecting the produced ZIP. Specifically inspect the packaged `addon/ui/panel.py` and verify it contains `text="Show"` and `roof_forge.select_slope_edge`.
+
+## User QA after alpha.9 is verified
+
+1. Install alpha.9 (not alpha.8) after removing previous RoofForge versions.
+2. Prepare a source wire contour and verify each Pitch row has a visible Show button.
+3. Click Show on Edge 03; verify exactly that edge is selected in Edit Mode.
+4. Click another Show; selection must move to the new edge.
+5. Repeat for a face mesh.
+6. Generate the roof and ensure source contour coordinates/topology remain unchanged.
 
 ## Repository rules
 
 - Continue only on `feature/0.2.0-arbitrary-contours-live-pitch`.
 - Keep PR #6 draft; do not merge to develop or tag stable 0.2.0.
-- Update this handoff after user feedback.
+- Do not claim alpha.9 is ready until package contents have been inspected.
