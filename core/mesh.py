@@ -184,7 +184,7 @@ def build_roof_surface_from_planes(
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = eps * scale * scale
 
-    cells_by_slope = lower_envelope_cells(domain, planes, eps)
+    cells_by_slope = lower_envelope_restricted_cells(domain, planes, eps)
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []
