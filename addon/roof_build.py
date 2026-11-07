@@ -7,10 +7,9 @@ from math import isfinite
 import bpy
 import bmesh
 
-from ..core.geometry import GeometryInputError, signed_area
-from ..core.mesh import build_roof_surface, build_roof_surface_from_planes
-from ..core.overhang import offset_contour_outward
-from ..core.planes import build_boundary_planes, boundary_envelope_conflicts
+from ..core.geometry import GeometryInputError
+from ..core.mesh import build_roof_surface
+from ..core.overhang import build_source_anchored_overhang_surface
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -71,29 +70,13 @@ def _cache_owner_id(owner) -> int | None:
 def _build_roof_surface(points, pitches, overhang):
     authored_points = tuple(tuple(float(value) for value in point) for point in points)
     if overhang > 0.0:
-        # The user contour is the underside support/eave line. Build each
-        # pitched plane through those original 3D edges, then extend only the
-        # competing domain outward. The planes themselves are not re-anchored
-        # to the expanded contour.
-        expanded = offset_contour_outward(authored_points, overhang)
-        planes = build_boundary_planes(authored_points, pitches)
-        conflicts = boundary_envelope_conflicts(
-            authored_points, planes, active_contour=expanded
-        )
-        if conflicts:
-            first = conflicts[0]
-            raise GeometryInputError(first.code, first.message)
-        domain = [(point[0], point[1]) for point in expanded]
-        original_area = abs(signed_area([(point[0], point[1]) for point in authored_points]))
-        surface = build_roof_surface_from_planes(
-            domain, planes, source_area_xy=original_area
+        surface = build_source_anchored_overhang_surface(
+            authored_points, pitches, overhang
         )
         return surface, "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
-
     if is_flat_eave_contour(authored_points):
         return build_wavefront_roof_surface(authored_points, pitches), "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     return build_roof_surface(authored_points, pitches), "SUPPORT_PLANE_ENVELOPE_3D"
-
 
 def build_roof_payload(
     points,
