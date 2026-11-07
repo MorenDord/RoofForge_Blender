@@ -93,9 +93,9 @@ The custom Python weighted-wavefront candidate currently assumes constant-Z eave
 
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
 
-### Собственный Python weighted wavefront (кандидат; пока не подключён к Blender)
+### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.1 для flat-Z контуров)
 
-CI runs [42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302884369) (push) и [42302896037](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42302896037) (PR) прошли полностью на commit `2a65724cd3df7cd7566a06295b7a3e38246c4e38`: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark с отдельными wavy L/U, Rust diagnostics, исторические benchmarks и cProfile.
+Alpha integration CI runs [42317727266](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317727266) (push) и [42317734486](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486) (PR) прошли полностью на commit 1f677f7509f6f61c94b10370468691cadd001e2d: Python 3.11/3.13, Blender 5.0.1 smoke/package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -137,7 +137,7 @@ CI runs [42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/run
 - Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` всё ещё использует `core.mesh.build_roof_surface()`. Новый `build_wavefront_roof_surface()` не подключён к пользовательскому оператору.
-- Около 475 мс для variable-pitch 64-edge surface — улучшение относительно 28.5 с, но preview/final бюджеты ещё следует определить и измерить с Blender mesh creation.
+- Около 475 мс для variable-pitch 64-edge surface — чистая геометрия на CI; Blender mesh creation и main-thread timer overhead тоже влияют на интерактивную задержку. Таймер использует debounce около 0.3 с.
 
 Следовательно, это перспективный Python-кандидат, а не production solver и не основание переключать генератор. PR остаётся draft до расширения корпуса, mixed-height policy, интеграции и live-update UI.
 
@@ -153,21 +153,44 @@ CI runs [42302884369](https://github.com/MorenDord/RoofForge_Blender/actions/run
 
 Вывод: старый Python solver годится как сравнительный эталон для малых плоских форм, но даже после оптимизаций слишком медленный для полноценного live rebuild сложных 64-рёберных контуров. Rust-кандидат достаточно быстр, однако его топологические сбои на важных concave-сценариях блокируют production integration.
 
+
+
+### Blender UI и Live Update — интегрированы в 0.2.0-alpha.1
+
+- addon/properties.py: коллекция pitch-настроек по каждому edge, ссылки на исходный и сгенерированный объект, статус и переключатель Live Update.
+- addon/operators/prepare.py: считывает контур и создаёт нумерованный список углов.
+- addon/ui/panel.py: поля Edge NN (Vx→Vy), Thickness, Live Update, Validate и Create/Update.
+- addon/live_update.py: debounce около 0.3 с, перестройка на Blender main thread, rollback при ошибке, остановка после переименования source/generated object.
+- addon/operators/generate.py: создаёт отдельный mesh или заменяет данные существующей сгенерированной крыши только после успешного build/validation.
+- Thickness и per-edge pitch запускают Live Update. Если число исходных граничных рёбер меняется, пользователь должен синхронизировать список углов.
+- UI-план крыши с графической нумерацией и подсветкой соответствующего edge пока отсутствует; в alpha поля соответствуют детерминированному порядку обхода.
+
+### Ограничения, явно оставленные для пользовательской проверки
+
+- Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
+- Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
+- Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
+- Новый пакет 0.2.0-alpha.1 собран и проверен официальным Blender 5.0.1 Extension validator. Результат требует ещё ручного viewport QA пользователя.
+
 ### Ограничение размера
 
 - 64 ребра — верхняя граница функционального и performance target для 0.2.0.
 - Обычный CI benchmark и cProfile ограничены диапазоном 8, 16, 32 и 64 рёбер.
 - Контуры больше 64 рёбер не входят в критерии приёмки этой версии; отдельная оптимизация для 128 рёбер не требуется.
 
-## Точный статус готовности 0.2.0 на сейчас
+## Точный статус готовности 0.2.0-alpha.1
 
-- [x] Автоопределение единственного замкнутого контура объекта без выделения рёбер/вершин; smoke для wire/face в Object/Edit Mode.
-- [x] Повторяемые benchmark-запуски и отдельный Rust-кандидат extraction/validation.
-- [ ] Один production solver проходит выпуклые, L/U, multi-notch, симметричные одновременные события, равные и индивидуальные углы.
-- [ ] Перенос Rust-кандидата внутрь addon/runtime без установки компилятора пользователем; сборки и smoke на Windows, macOS и Linux.
-- [ ] UI со стабильным соответствием «ребро → угол ската».
-- [ ] Debounced live rebuild: сохранение последней валидной крыши при ошибке, объединение быстрых изменений и отсутствие тяжёлой геометрии в draw callback.
-- [ ] Удаление пользовательских настроек свеса/карнизного выноса из интерфейса 0.2.0; оставить лишь конструктивное закрытие толщины по периметру.
-- [ ] Полный Blender smoke, чистая установка ZIP и визуальная ручная проверка в viewport.
+- [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
+- [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью.
+- [x] Flat-Z weighted wavefront подключён к пользовательскому генератору.
+- [x] Mixed-Z контуры не сплющиваются и остаются на 3D support-plane path (ограничения для concave mixed-Z зафиксированы).
+- [x] Debounced Live Update pitch/Thickness, rollback последней валидной крыши и rename guard.
+- [x] Optional overhang/eaves property/control отсутствует; конструктивные side faces для shell thickness сохранены.
+- [x] Blender 5.0.1 smoke включает concave L, индивидуальные углы и Live Update.
+- [x] Чистый Extension ZIP 0.2.0-alpha.1 собран и принят официальным Blender Extension validator.
+- [x] CI на Python 3.11/3.13 и все benchmark jobs проходят; 70 unit tests, 2 multi-notch test cases skipped по явной причине.
+- [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
+- [ ] Общий solver для mixed-height concave XYZ contours.
+- [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
 
-Следовательно, текущий PR остаётся draft/WIP. Не собирать и не маркировать его как 0.2.0 release, пока не закрыты пункты production solver, UI и live rebuild. Допускается отдельный внутренний alpha build только при явном сужении списка поддерживаемых форм и честном описании ограничений.
+Итог: 0.2.0-alpha.1 готова к пользовательской проверке, но не является стабильным 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.
