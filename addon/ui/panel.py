@@ -1,9 +1,9 @@
-"""RoofForge sidebar with a numbered top-view pitch plan."""
+"""RoofForge sidebar with a full-width, numbered roof facet plan."""
 import json
 
 import bpy
 
-from .plan_preview import get_contour_plan_icon
+from .plan_preview import get_roof_plan_icon
 
 
 class ROOFFORGE_PT_panel(bpy.types.Panel):
@@ -26,27 +26,31 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         if settings.slope_settings:
             plan_box = layout.box()
             plan_box.label(
-                text="Top view — numbers match Pitch fields",
-                icon="MESH_CIRCLE",
+                text="Roof facet plan — numbers match Pitch fields",
+                icon="MESH_CUBE",
             )
             try:
-                outline = json.loads(settings.outline_preview_json)
+                plan_data = json.loads(settings.roof_plan_json) if settings.roof_plan_json else {}
             except (TypeError, ValueError):
-                outline = []
-            if len(outline) >= 3:
-                preview_icon = get_contour_plan_icon(
-                    outline,
+                plan_data = {}
+            if plan_data.get("faces"):
+                preview_icon = get_roof_plan_icon(
+                    plan_data,
                     text_scale=settings.plan_label_scale,
+                    line_width=settings.plan_line_width,
                 )
                 if preview_icon:
-                    region_width = max(240, getattr(context.region, "width", 320))
-                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    region_width = max(180, getattr(context.region, "width", 320))
+                    # template_icon's base cell is 32 UI pixels. Keep the
+                    # square preview at the maximum width available in the
+                    # current sidebar region, with no fixed upper-size cap.
+                    preview_scale = max(1.0, (region_width - 24.0) / 32.0)
                     plan_box.template_icon(preview_icon, scale=preview_scale)
                 else:
-                    plan_box.label(text="Could not draw contour plan", icon="INFO")
+                    plan_box.label(text="Could not draw roof facet plan", icon="INFO")
             else:
                 plan_box.label(
-                    text="Load / Refresh Slope Angles to create the numbered plan",
+                    text="Generate the roof to calculate its facet plan",
                     icon="INFO",
                 )
             plan_box.prop(
@@ -55,7 +59,13 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                 text="Number size",
                 slider=True,
             )
-            plan_box.label(text="Edge number = matching Pitch field below")
+            plan_box.prop(
+                settings,
+                "plan_line_width",
+                text="Line thickness",
+                slider=True,
+            )
+            plan_box.label(text="Numbers map to matching Pitch fields")
 
             pitch_box = layout.box()
             pitch_box.label(
@@ -98,6 +108,6 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             col.separator()
             col.label(text="Flat-Z: weighted wavefront")
             col.label(text="Mixed-Z: 3D plane envelope")
-            col.label(text="Overhang: one offset contour")
+            col.label(text="Overhang: source-aligned underside")
         else:
             col.label(text="Select a mesh object to begin", icon="INFO")
