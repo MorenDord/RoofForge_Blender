@@ -48,6 +48,15 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         unit="LENGTH",
         update=_settings_changed,
     )
+    eave_overhang: bpy.props.FloatProperty(
+        name="Eave Overhang",
+        description="Horizontal extension of the roof beyond a convex source boundary",
+        default=0.0,
+        min=0.0,
+        soft_max=1.0,
+        unit="LENGTH",
+        update=_settings_changed,
+    )
     live_update: bpy.props.BoolProperty(name="Live Update", default=True)
     slope_settings: bpy.props.CollectionProperty(type=RoofForgeSlopeSettings)
     source_object: bpy.props.PointerProperty(type=bpy.types.Object)

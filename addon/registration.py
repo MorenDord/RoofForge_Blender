@@ -9,6 +9,7 @@ from .operators import (
 )
 from .ui.panel import ROOFFORGE_PT_panel
 from .live_update import cancel_pending_live_update
+from .roof_build import clear_surface_cache
 
 _CLASSES = (
     RoofForgeSlopeSettings,
@@ -32,6 +33,7 @@ def register():
 
 def unregister():
     cancel_pending_live_update()
+    clear_surface_cache()
     if hasattr(bpy.types.Scene, "roof_forge"):
         del bpy.types.Scene.roof_forge
     for cls in reversed(_CLASSES):

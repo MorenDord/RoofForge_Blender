@@ -62,8 +62,18 @@ def _run_pending_update():
     if settings is None or not settings.live_update:
         return None
 
-    source = settings.source_object
-    roof = settings.generated_object
+    try:
+        source = settings.source_object
+        roof = settings.generated_object
+        if source is not None:
+            _ = source.name
+        if roof is not None:
+            _ = roof.name
+    except ReferenceError:
+        settings.generated_object = None
+        settings.generated_name_snapshot = ""
+        settings.last_status = "Live Update остановлен: объект крыши был удалён. Нажми «Create / Update Roof» для повторного создания."
+        return None
     if source is None or roof is None:
         settings.last_status = "Live Update ожидает исходный объект и созданную крышу."
         return None
@@ -95,7 +105,8 @@ def _run_pending_update():
             return None
         pitches = pitch_values(settings, len(points))
         surface, shell, solver = build_roof_payload(
-            points, pitches, settings.thickness
+            points, pitches, settings.thickness, settings.eave_overhang,
+            cache_owner=source,
         )
         new_mesh = create_roof_mesh_data(
             f"{source.name}_RoofForge_LiveMesh", surface, shell
@@ -104,7 +115,10 @@ def _run_pending_update():
         roof.data = new_mesh
         try:
             roof.matrix_world = source.matrix_world.copy()
-            apply_shell_metadata(roof, source, surface, shell, pitches, solver)
+            apply_shell_metadata(
+                roof, source, surface, shell, pitches, solver,
+                settings.eave_overhang,
+            )
         except Exception:
             roof.data = old_mesh
             raise

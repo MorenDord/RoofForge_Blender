@@ -79,6 +79,32 @@ def create_l_contour(name: str):
     return obj
 
 
+def create_u_contour(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (3.0, 4.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 4.0, 0.0),
+        (0.0, 4.0, 0.0),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 def create_regular_wire_loop(name: str, edge_count: int):
     points = [
         (math.cos(2.0 * math.pi * index / edge_count),
@@ -213,6 +239,27 @@ def main() -> None:
     live_update = importlib.import_module(
         f"{extension.__name__}.addon.live_update"
     )
+    # A thickness-only live update must reuse the cached upper surface.
+    roof_build = importlib.import_module(f"{extension.__name__}.addon.roof_build")
+    original_wavefront_builder = roof_build.build_wavefront_roof_surface
+    old_thickness = settings.thickness
+    try:
+        roof_build.build_wavefront_roof_surface = lambda *args, **kwargs: (
+            (_ for _ in ()).throw(AssertionError("surface solver ran during thickness-only update"))
+        )
+        settings.thickness = old_thickness + 0.025
+        live_update._run_pending_update()
+        ensure(
+            abs(float(roof.get("roof_forge_thickness")) - settings.thickness) < 1e-7,
+            "thickness-only cached rebuild did not update shell metadata",
+        )
+    finally:
+        roof_build.build_wavefront_roof_surface = original_wavefront_builder
+        live_update.cancel_pending_live_update()
+
+    live_update = importlib.import_module(
+        f"{extension.__name__}.addon.live_update"
+    )
     settings.slope_settings[0].pitch += 2.0
     live_update._run_pending_update()
     live_update.cancel_pending_live_update()
@@ -222,6 +269,111 @@ def main() -> None:
         tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
         == source_coordinates,
         "concave source contour changed during generation or live update",
+    )
+
+    bpy.data.objects.remove(roof, do_unlink=True)
+    bpy.context.view_layer.update()
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Create / Update failed after the generated roof object was deleted",
+    )
+    recreated = settings.generated_object
+    ensure(recreated is not None, "generated object pointer was not restored after deletion")
+    ensure(
+        bpy.data.objects.get(recreated.name) is recreated,
+        "re-created roof is not registered in bpy.data.objects",
+    )
+    ensure(
+        bpy.context.scene.objects.get(recreated.name) is recreated,
+        "re-created roof is not linked to the active scene",
+    )
+    ensure(
+        recreated.get("roof_forge_generated", False),
+        "re-created object is missing RoofForge metadata",
+    )
+    generated_for_source = [
+        obj for obj in bpy.context.scene.objects
+        if obj.get("roof_forge_generated")
+        and obj.get("roof_forge_source_name") == source.name
+    ]
+    ensure(
+        len(generated_for_source) == 1,
+        f"expected exactly one re-created roof, got {len(generated_for_source)}",
+    )
+
+
+    # Concave U contour with per-edge pitch and no overhang.
+    clear_scene()
+    u_source = create_u_contour("RoofForge_Smoke_Concave_U")
+    u_settings = bpy.context.scene.roof_forge
+    u_settings.pitch_default = 35.0
+    u_settings.thickness = 0.12
+    u_settings.eave_overhang = 0.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare U contour pitch settings",
+    )
+    ensure(len(u_settings.slope_settings) == 8, "expected eight U contour slopes")
+    for index, item in enumerate(u_settings.slope_settings):
+        item.pitch = 30.0 + (index % 4) * 2.5
+    ensure(
+        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
+        "concave U contour did not validate at zero overhang",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "concave U contour did not generate at zero overhang",
+    )
+    u_roof = u_settings.generated_object
+    ensure(u_roof is not None, "concave U generated roof pointer missing")
+    ensure(
+        len(u_roof.data.polygons) > 0,
+        "concave U generated an empty mesh",
+    )
+
+    # Convex roof with a horizontal eave overhang.
+    clear_scene()
+    convex_source = create_square_object("RoofForge_Smoke_Convex_Overhang")
+    convex_settings = bpy.context.scene.roof_forge
+    convex_settings.pitch_default = 35.0
+    convex_settings.thickness = 0.12
+    convex_settings.eave_overhang = 0.25
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare convex overhang pitch settings",
+    )
+    ensure(
+        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
+        "convex contour with eave overhang did not validate",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "convex contour with eave overhang did not generate",
+    )
+    convex_roof = convex_settings.generated_object
+    ensure(convex_roof is not None, "convex overhang roof pointer missing")
+    coords = [vertex.co for vertex in convex_roof.data.vertices]
+    ensure(min(v.x for v in coords) < -0.20, "overhang did not extend the left eave")
+    ensure(min(v.y for v in coords) < -0.20, "overhang did not extend the lower eave")
+    ensure(max(v.x for v in coords) > 4.20, "overhang did not extend the right eave")
+    ensure(max(v.y for v in coords) > 3.20, "overhang did not extend the upper eave")
+
+    # The same nonzero overhang is intentionally rejected on an L contour.
+    clear_scene()
+    concave_source = create_l_contour("RoofForge_Smoke_Concave_Overhang_Reject")
+    concave_settings = bpy.context.scene.roof_forge
+    concave_settings.eave_overhang = 0.2
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare concave overhang pitch settings",
+    )
+    ensure(
+        bpy.ops.roof_forge.validate_input() == {"CANCELLED"},
+        "reflex contour unexpectedly accepted nonzero overhang",
+    )
+    ensure(
+        "выпуклых" in concave_settings.last_status,
+        "concave overhang error did not explain the current limitation",
     )
 
     extension.unregister()

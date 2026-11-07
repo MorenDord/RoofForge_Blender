@@ -35,6 +35,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col.separator()
         col.label(text="Solid roof shell")
         col.prop(settings, "thickness")
+        col.prop(settings, "eave_overhang")
         col.prop(settings, "live_update")
         col.operator("roof_forge.validate_input", icon="CHECKMARK")
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
@@ -45,7 +46,8 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
 
         if source is not None and source.type == "MESH":
             col.separator()
-            col.label(text="Flat-Z contours: weighted wavefront")
-            col.label(text="Mixed-Z contours: 3D plane-envelope path")
+            col.label(text="Flat-Z: weighted wavefront")
+            col.label(text="Mixed-Z: 3D plane envelope")
+            col.label(text="Overhang: convex contours only")
         else:
             col.label(text="Select a mesh object to begin", icon="INFO")

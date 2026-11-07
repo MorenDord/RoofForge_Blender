@@ -33,26 +33,35 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             sync_slope_settings(settings, source, len(points))
             pitches = pitch_values(settings, len(points))
             surface, shell, solver = build_roof_payload(
-                points, pitches, settings.thickness
+                points, pitches, settings.thickness, settings.eave_overhang,
+                cache_owner=source,
             )
             new_mesh = create_roof_mesh_data(
                 f"{source.name}_RoofForge_Mesh", surface, shell
             )
 
             current_roof = settings.generated_object
-            can_update = (
-                current_roof is not None
-                and bpy.data.objects.get(current_roof.name) is current_roof
-                and current_roof.name == settings.generated_name_snapshot
-                and current_roof.get("roof_forge_generated", False)
-            )
+            can_update = False
+            if current_roof is not None:
+                try:
+                    can_update = (
+                        bpy.data.objects.get(current_roof.name) is current_roof
+                        and current_roof.name == settings.generated_name_snapshot
+                        and current_roof.get("roof_forge_generated", False)
+                    )
+                except ReferenceError:
+                    can_update = False
+            if not can_update:
+                settings.generated_object = None
+                settings.generated_name_snapshot = ""
             if can_update:
                 roof_object = current_roof
                 old_mesh = roof_object.data
                 roof_object.data = new_mesh
                 try:
                     apply_shell_metadata(
-                        roof_object, source, surface, shell, pitches, solver
+                        roof_object, source, surface, shell, pitches, solver,
+                        settings.eave_overhang,
                     )
                 except Exception:
                     roof_object.data = old_mesh
@@ -63,18 +72,31 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 roof_object = bpy.data.objects.new(
                     f"{source.name}_RoofForge", new_mesh
                 )
-                context.collection.objects.link(roof_object)
                 created_object = True
+                # Link to the scene root rather than whichever collection
+                # happens to be active in the current editor.
+                context.scene.collection.objects.link(roof_object)
+                roof_object.hide_set(False)
                 apply_shell_metadata(
-                    roof_object, source, surface, shell, pitches, solver
+                    roof_object, source, surface, shell, pitches, solver,
+                    settings.eave_overhang,
                 )
+                context.view_layer.update()
+                if (
+                    bpy.data.objects.get(roof_object.name) is not roof_object
+                    or context.scene.objects.get(roof_object.name) is not roof_object
+                ):
+                    raise RuntimeError(
+                        "Blender не зарегистрировал созданный объект крыши в активной сцене."
+                    )
 
             settings.source_object = source
             settings.generated_object = roof_object
             settings.source_name_snapshot = source.name
             settings.generated_name_snapshot = roof_object.name
             settings.last_status = (
-                f"Готово: {len(points)} скатов, {len(shell.faces)} граней; {solver}."
+                f"Готово: {len(points)} скатов, {len(shell.faces)} граней; "
+                f"свес {settings.eave_overhang:g}; {solver}."
             )
             settings.live_update = bool(settings.live_update)
             new_mesh = None  # Ownership transferred to the generated object.

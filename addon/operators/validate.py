@@ -21,7 +21,8 @@ class ROOFFORGE_OT_validate_input(bpy.types.Operator):
             sync_slope_settings(settings, context.object, len(points))
             pitches = pitch_values(settings, len(points))
             surface, shell, solver = build_roof_payload(
-                points, pitches, settings.thickness
+                points, pitches, settings.thickness, settings.eave_overhang,
+                cache_owner=context.object,
             )
         except Exception as exc:
             message = getattr(exc, "message", str(exc))

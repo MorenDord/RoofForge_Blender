@@ -1,12 +1,14 @@
 """Shared Blender-side roof build and mesh serialization helpers."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from math import isfinite
 
 import bpy
 
 from ..core.geometry import GeometryInputError
 from ..core.mesh import build_roof_surface
+from ..core.overhang import extend_convex_roof_surface
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -25,27 +27,84 @@ def pitch_values(settings, edge_count: int) -> list[float]:
     return values
 
 
-def build_roof_payload(points, pitches, thickness):
-    """Build and validate a roof surface and a closed shell.
+_SURFACE_CACHE: OrderedDict[tuple, tuple[object, str]] = OrderedDict()
+_SURFACE_CACHE_LIMIT = 12
 
-    The weighted wavefront solver is used for constant-height eaves and
-    supports the tested concave / per-edge pitch cases. Mixed-height 3D
-    contours stay on the existing support-plane envelope path; no flattening
-    or coordinate projection is applied to the source vertices.
-    """
-    if len(points) < 3 or len(pitches) != len(points):
-        raise GeometryInputError(
-            "INPUT_COUNT",
-            "Нужно минимум три вершины и по одному углу на каждое ребро."
-        )
+
+def _cache_owner_id(owner) -> int | None:
+    if owner is None:
+        return None
+    try:
+        return int(owner.as_pointer())
+    except (AttributeError, ReferenceError, RuntimeError):
+        return id(owner)
+
+
+def _build_roof_surface(points, pitches, overhang):
     if is_flat_eave_contour(points):
         surface = build_wavefront_roof_surface(points, pitches)
         solver = "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     else:
         surface = build_roof_surface(points, pitches)
         solver = "SUPPORT_PLANE_ENVELOPE_3D"
+    if overhang > 0.0:
+        surface = extend_convex_roof_surface(surface, overhang)
+    return surface, solver
+
+
+def build_roof_payload(
+    points,
+    pitches,
+    thickness,
+    overhang: float = 0.0,
+    *,
+    cache_owner=None,
+):
+    """Build a validated roof shell, reusing unchanged surface geometry.
+
+    Thickness is deliberately excluded from the surface-cache signature.
+    A thickness-only Live Update therefore rebuilds the shell without running
+    the weighted wavefront or plane-envelope solver again.
+    """
+    if len(points) < 3 or len(pitches) != len(points):
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Нужно минимум три вершины и по одному углу на каждое ребро."
+        )
+    overhang = float(overhang)
+    if not isfinite(overhang) or overhang < 0.0:
+        raise GeometryInputError(
+            "INVALID_OVERHANG",
+            "Свес должен быть конечным неотрицательным расстоянием."
+        )
+
+    owner_id = _cache_owner_id(cache_owner)
+    signature = (
+        tuple(tuple(float(value) for value in point) for point in points),
+        tuple(float(value) for value in pitches),
+        overhang,
+    )
+    cache_key = (owner_id, signature) if owner_id is not None else None
+    cached = _SURFACE_CACHE.get(cache_key) if cache_key is not None else None
+
+    if cached is not None:
+        surface, solver = cached
+        _SURFACE_CACHE.move_to_end(cache_key)
+    else:
+        surface, solver = _build_roof_surface(points, pitches, overhang)
+        if cache_key is not None:
+            _SURFACE_CACHE[cache_key] = (surface, solver)
+            _SURFACE_CACHE.move_to_end(cache_key)
+            while len(_SURFACE_CACHE) > _SURFACE_CACHE_LIMIT:
+                _SURFACE_CACHE.popitem(last=False)
+
     shell = build_roof_shell(surface, thickness)
     return surface, shell, solver
+
+
+def clear_surface_cache() -> None:
+    """Release cached pure-Python roof surfaces when the extension unregisters."""
+    _SURFACE_CACHE.clear()
 
 
 def create_roof_mesh_data(name: str, surface, shell):
@@ -75,10 +134,8 @@ def create_roof_mesh_data(name: str, surface, shell):
             + list(surface.face_slope_indices)
             + [-1] * shell.side_face_count
         )
-        for index, value in enumerate(component_values):
-            component.data[index].value = value
-        for index, value in enumerate(slope_values):
-            slope.data[index].value = int(value)
+        component.data.foreach_set("value", component_values)
+        slope.data.foreach_set("value", slope_values)
         return mesh
     except Exception:
         bpy.data.meshes.remove(mesh)
@@ -115,7 +172,7 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
     return True
 
 
-def apply_shell_metadata(roof_object, source, surface, shell, pitches, solver):
+def apply_shell_metadata(roof_object, source, surface, shell, pitches, solver, overhang=0.0):
     """Write stable links and diagnostic metadata onto the generated object."""
     roof_object["roof_forge_generated"] = True
     roof_object["roof_forge_source_name"] = source.name
@@ -126,4 +183,5 @@ def apply_shell_metadata(roof_object, source, surface, shell, pitches, solver):
         f"{value:.6f}" for value in pitches
     )
     roof_object["roof_forge_thickness"] = float(shell.thickness)
+    roof_object["roof_forge_overhang"] = float(overhang)
     roof_object.matrix_world = source.matrix_world.copy()
