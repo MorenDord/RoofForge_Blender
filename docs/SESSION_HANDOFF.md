@@ -49,7 +49,7 @@
 - Renaming the source object or generated roof object stops automatic updates. The already generated geometry remains in the scene.
 - If topology edge count changes, the user must use `Load / Refresh Slope Angles` and verify the mapping.
 
-## Overhang and delete/recreate additions in alpha.4
+## Overhang and delete/recreate additions in alpha.5
 
 - `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` intersects adjacent offset boundary lines and creates one shared miter vertex per convex corner. Each source segment gets one parallel outer segment. No separate triangular corner fan is emitted; coverage and shell-manifold checks remain enabled.
 - Incoming/outgoing support planes must agree in height at each miter. Differing adjacent pitches that create a height mismatch are rejected as `OVERHANG_PITCH_DISCONTINUITY` rather than generating a broken seam.
@@ -125,8 +125,8 @@ For each issue, record Blender version, OS, contour points/edge count, per-edge 
 
 ## Important links
 - [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6)
-- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435)
-- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476)
+- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325221484)
+- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325226147)
 - [Implementation plan](https://github.com/MorenDord/RoofForge_Blender/blob/feature/0.2.0-arbitrary-contours-live-pitch/docs/PLAN_0.2.0_RU.md)
 
 ## Local checks

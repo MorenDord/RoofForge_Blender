@@ -96,7 +96,7 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 ### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.5 для flat-Z контуров)
 
-Alpha 0.2.0-alpha.5 CI evidence will be recorded after the new ridge-line miter, centimeter conversion and UI regressions pass on Python 3.11/3.13 and Blender 5.0.1.
+Alpha 0.2.0-alpha.5 CI runs [42325221484](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325221484) (push) and [42325226147](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325226147) (PR) both passed on code commit `0fada51cad542f792eaa8a63ec1c00bd117da6ce`: Python 3.11/3.13, flat and mixed-Z variable-pitch overhang tests, Blender 5.0.1 UI/unit/geometry smoke, Extension ZIP validation, geometry benchmark, Rust diagnostics, legacy solver benchmark and cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -184,15 +184,16 @@ Alpha 0.2.0-alpha.5 CI evidence will be recorded after the new ridge-line miter,
 ## Точный статус готовности 0.2.0-alpha.5
 
 - [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
-- [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью.
+- [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью; новые поля default 30°.
 - [x] Flat-Z weighted wavefront подключён к пользовательскому генератору.
-- [x] Mixed-Z контуры не сплющиваются и остаются на 3D support-plane path (ограничения для concave mixed-Z зафиксированы).
-- [x] Live Update pitch/Thickness with 0–1000 ms delay slider, rollback last-valid roof and rename guard.
-- [x] Eave Overhang: общая miter-вершина на углах; соседние несовместимые support-plane heights диагностируются; reflex L/U с nonzero свесом отклоняются.
-- [x] Update delay slider 0–1000 ms; default 0 ms (no debounce).
-- [ ] Blender 5.0.1 smoke covers flat variable-pitch overhang, mixed-Z variable-pitch overhang, centimeter conversions, 30°/1cm defaults, removed Validate/Default Pitch UI and existing delete/recreate cases.
-- [ ] Clean Extension ZIP 0.2.0-alpha.5 built and accepted by the official Blender Extension validator.
-- [x] CI push и PR на commit `a2b85ad...` прошёл; Python 3.11/3.13, geometry/legacy/Rust/profile и Blender package jobs успешны.
+- [x] Mixed-Z контуры сохраняют XYZ и используют 3D support-plane path.
+- [x] Thickness по умолчанию 1 см; Eave Overhang и Thickness вводятся в сантиметрах с учётом Scene Unit Scale.
+- [x] Validate Roof operator и Default Pitch property удалены; Create / Update выполняет валидацию.
+- [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
+- [x] 3D ridge-line miter overhang: flat variable-pitch и mixed-Z variable-pitch convex cases проходят тесты; reflex L/U с nonzero свесом отклоняются.
+- [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, удаление UI-полей/оператора, flat и mixed-Z variable-pitch overhang, L/U, cache и delete/recreate.
+- [x] Clean Extension ZIP 0.2.0-alpha.5 собран и принят официальным Blender Extension Validator.
+- [x] CI push `42325221484` и PR `42325226147` на code commit `0fada51...` прошёл; Python 3.11/3.13 и все geometry/legacy/Rust/profile/Blender package jobs успешны.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
 - [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
