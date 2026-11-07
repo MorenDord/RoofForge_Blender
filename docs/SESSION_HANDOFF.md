@@ -5,8 +5,11 @@
 **Validated 0.1.0 baseline:** develop at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Code commit:** `a56035369a8159e08de6e46819783b4476f7015d`  
+**Versioned package commit:** `7730ac1b7b4caff1776c58a534cee04f40f34298`  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Alpha.7 artifact / SHA-256:** pending versioned package CI.  
+**Installable build:** `roof_forge-0.2.0-alpha.7.zip`, from CI artifact `roof_forge-0.2.0-alpha.7-blender-5.0.1` (artifact ID `13573556398`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370549428/artifacts/13573556398).  
+**Inner ZIP SHA-256:** `38f625e999d41d0d5453b66fa93f3eb811adcfd20bd4d14ca2265b364cc77db4`.  
 **Important:** `main` and `develop` are unchanged. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -67,15 +70,15 @@ For reflex corners the same adjacent-line intersection formula is used. This mov
 - Source object mesh and transform remain unchanged.
 - Generated mesh has face attributes for roof component and source slope index.
 
-## CI evidence for the code commit
+## CI evidence for the versioned package commit
 
-Push run [42370341898](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370341898) and PR run [42370345017](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370345017) passed on code commit `a56035369a8159e08de6e46819783b4476f7015d`:
+Push run [42370549428](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370549428) and PR run [42370553763](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370553763) passed on versioned package commit `7730ac1b7b4caff1776c58a534cee04f40f34298`:
 - Python 3.11 and 3.13: all tests pass.
 - Blender 5.0.1 background smoke: passes, including flat variable-pitch contour rebuild, concave L/U rebuild with overhang, mixed-height XYZ convex rebuild, oversized U offset rejection, cm/default/UI/live-update/cache/delete-recreate regressions.
 - Clean extension ZIP built and accepted by official Blender 5.0.1 Extension Validator.
 - Geometry benchmarks, legacy spatial benchmark, Rust diagnostic candidate and legacy solver profile pass.
 
-The artifact from the code-only commit was built using alpha.6 manifest labels. The versioned alpha.7 package is triggered by the next metadata/docs commit; record its final artifact ID and SHA-256 after that CI completes.
+The alpha.7 package was built by Blender 5.0.1 CI, accepted by the official Extension Validator, downloaded from GitHub Actions and checked locally against the included SHA-256 file.
 
 ## User viewport QA priority
 

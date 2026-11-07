@@ -3,7 +3,7 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** implementation in progress
+**Status:** 0.2.0-alpha.7 packaged; manual Blender viewport QA pending
 
 ## User-confirmed priorities
 
@@ -71,7 +71,7 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
 - [x] Eaves use a single outward-offset source contour. Every new edge is parallel to its original edge and exactly the requested distance outward; corresponding vertex Z values and per-edge pitch order are preserved. The entire roof is rebuilt from this contour, with no post-build strips/caps. Convex and tested concave L/U contours, plus mixed-height convex XYZ, pass.
 - [x] Live Update delay is adjustable from 0 to 1000 ms, default 0 ms; no intentional debounce at zero. Ridge/valley/hip, seam, UV, LOD or export controls remain out of scope.
-- [ ] Blender 5.0.1 background smoke and official extension package validation pass; manual viewport QA remains a separate gate.
+- [x] Blender 5.0.1 background smoke and official extension package validation pass; manual viewport QA remains a separate gate.
 
 ## Current known mathematical risk
 
@@ -96,7 +96,7 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 ### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.7 для flat-Z контуров)
 
-Code-only CI for the new single-offset-contour implementation passed on commit `a56035369a8159e08de6e46819783b4476f7015d`: push run [42370341898](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370341898) and PR run [42370345017](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370345017). Python 3.11/3.13, Blender 5.0.1 smoke, extension validation and all geometry/legacy/Rust/profile jobs passed. Those code-only runs used the previous alpha.6 manifest label; final alpha.7 package validation follows the version bump.
+Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370549428) (push) and [42370553763](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370553763) (PR) both passed on package commit `7730ac1b7b4caff1776c58a534cee04f40f34298`: Python 3.11/3.13, flat and concave offset-contour geometry tests, Blender 5.0.1 smoke, clean alpha.7 ZIP build, official Extension Validator, geometry/legacy/Rust/profile jobs.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -195,10 +195,10 @@ Code-only CI for the new single-offset-contour implementation passed on commit `
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
 - [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, UI simplification, flat and mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [ ] Clean Extension ZIP 0.2.0-alpha.7 собран и принят официальным Blender Extension Validator.
-- [ ] Alpha.7 push and PR workflows pass Python 3.11/3.13, Blender smoke, Extension Validator, geometry/legacy/Rust/profile jobs.
+- [x] Clean Extension ZIP 0.2.0-alpha.7 собран и принят официальным Blender Extension Validator.
+- [x] Alpha.7 push run `42370549428` and PR run `42370553763` passed all Python, Blender, package, geometry, legacy, Rust and profile jobs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
 - [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
 
-Итог: 0.2.0-alpha.7 будет готова к пользовательской проверке после зелёного CI; это не стабильный 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.
+Итог: 0.2.0-alpha.7 готова к ручной проверке в Blender. Это не стабильный 0.2.0 release; PR остаётся draft до viewport QA.
