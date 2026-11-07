@@ -121,6 +121,45 @@ def lower_envelope_restricted_cells(
             if not arrangement_cells:
                 break
 
+        # The segments joining each original vertex to its corresponding
+        # miter-offset vertex are the exact bisectors between adjacent eave
+        # edges. They partition the exterior band into edge-owned strips,
+        # so the nearest source segment cannot change inside one cell.
+        if active_contour is not None and len(domain) == len(support):
+            for index, start in enumerate(support):
+                end = domain[index]
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                if hypot(dx, dy) <= point_tolerance:
+                    continue
+                a, b = -dy, dx
+                c_line = dy * start[0] - dx * start[1]
+                function_eps = eps * scale * hypot(a, b)
+                next_cells = []
+                for cell in arrangement_cells:
+                    negative = clip_half_plane(
+                        cell, -a, -b, -c_line, function_eps
+                    )
+                    positive = clip_half_plane(
+                        cell, a, b, c_line, function_eps
+                    )
+                    negative_valid = (
+                        len(negative) >= 3
+                        and abs(signed_area(negative)) > area_eps
+                    )
+                    positive_valid = (
+                        len(positive) >= 3
+                        and abs(signed_area(positive)) > area_eps
+                    )
+                    if negative_valid and positive_valid:
+                        next_cells.extend((negative, positive))
+                    elif negative_valid:
+                        next_cells.append(negative)
+                    elif positive_valid:
+                        next_cells.append(positive)
+                arrangement_cells = next_cells
+                if not arrangement_cells:
+                    break
+
         for cell in arrangement_cells:
             centroid = (
                 sum(point[0] for point in cell) / len(cell),
