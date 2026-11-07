@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.7.** This is an early user-test build, not a finished 1.0 release. Eaves are now generated from one outward-offset source contour: RoofForge rebuilds the whole roof from that new contour instead of appending separate strips to an existing roof.
+> **Current test build: 0.2.0-alpha.8.** This is an early user-test build, not a finished 1.0 release. Eaves are now generated from one outward-offset source contour: RoofForge rebuilds the whole roof from that new contour instead of appending separate strips to an existing roof.
 
 ## Project documents
 
@@ -16,7 +16,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 
 - Select a mesh object; no vertex or edge selection is needed.
 - Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
-- Show one numbered pitch field for each ordered boundary edge.
+- Show one numbered pitch field for each ordered boundary edge. A **Show** button beside each field selects its exact source edge in Edit Mode.
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
@@ -31,7 +31,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The angle fields are numbered in the deterministic contour traversal order. There is not yet an in-viewport edge highlight or roof-top preview diagram.
+The angle fields are numbered in the deterministic contour traversal order. The Show button uses that exact same traversal to select the source edge; a persistent colored overlay and roof-top pitch map are not yet implemented.
 
 ## Geometry paths and limitations
 
@@ -59,7 +59,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original rela
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.7-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.7.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.8-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.8.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -73,7 +73,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke checks offset-contour rebuilds for flat variable-pitch convex eaves, concave L/U eaves with nonzero overhang, mixed-height XYZ convex eaves, invalid oversized offsets, centimeter conversion, 30° pitch and 1 cm thickness defaults, the simplified UI, thickness-only cache and delete/recreate. Manual viewport QA is still required.
+Blender 5.0.1 background smoke checks offset-contour rebuilds for flat variable-pitch convex eaves, concave L/U eaves with nonzero overhang, mixed-height XYZ convex eaves, invalid oversized offsets, centimeter conversion, 30° pitch and 1 cm thickness defaults, the simplified UI, per-row source-edge selection on wire and face meshes, thickness-only cache and delete/recreate. Manual viewport QA is still required.
 
 ## License
 
