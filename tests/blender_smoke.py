@@ -209,6 +209,92 @@ def main() -> None:
     run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
     run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
 
+    # Show next to each Pitch field selects the exact corresponding source edge.
+    clear_scene()
+    highlight_source = create_square_object("RoofForge_Smoke_Edge_Highlight")
+    highlight_settings = bpy.context.scene.roof_forge
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare slope list for edge highlight test",
+    )
+    original_highlight_coords = tuple(
+        tuple(float(component) for component in vertex.co)
+        for vertex in highlight_source.data.vertices
+    )
+    original_highlight_topology = (
+        len(highlight_source.data.vertices),
+        len(highlight_source.data.edges),
+        len(highlight_source.data.polygons),
+    )
+    ensure(
+        bpy.ops.roof_forge.select_slope_edge(edge_index=2) == {"FINISHED"},
+        "could not select the third numbered source boundary edge from Object Mode",
+    )
+    ensure(highlight_source.mode == "EDIT", "Show did not enter Edit Mode")
+    highlight_bm = bmesh.from_edit_mesh(highlight_source.data)
+    highlight_bm.verts.index_update()
+    selected_edges = [edge for edge in highlight_bm.edges if edge.select]
+    ensure(
+        len(selected_edges) == 1,
+        f"Show should select exactly one edge, selected {len(selected_edges)}",
+    )
+    ensure(
+        tuple(sorted(vertex.index for vertex in selected_edges[0].verts)) == (2, 3),
+        "third Pitch row did not select the corresponding ordered boundary edge",
+    )
+    ensure(
+        bpy.ops.roof_forge.select_slope_edge(edge_index=1) == {"FINISHED"},
+        "Show could not change the highlighted edge while already in Edit Mode",
+    )
+    highlight_bm = bmesh.from_edit_mesh(highlight_source.data)
+    highlight_bm.verts.index_update()
+    selected_edges = [edge for edge in highlight_bm.edges if edge.select]
+    ensure(
+        len(selected_edges) == 1
+        and tuple(sorted(vertex.index for vertex in selected_edges[0].verts)) == (1, 2),
+        "Show did not update selection to the second contour edge",
+    )
+    bpy.ops.object.mode_set(mode="OBJECT")
+    ensure(
+        (
+            len(highlight_source.data.vertices),
+            len(highlight_source.data.edges),
+            len(highlight_source.data.polygons),
+        ) == original_highlight_topology,
+        "Show unexpectedly changed source mesh topology",
+    )
+    ensure(
+        tuple(
+            tuple(float(component) for component in vertex.co)
+            for vertex in highlight_source.data.vertices
+        ) == original_highlight_coords,
+        "Show unexpectedly changed source vertex coordinates",
+    )
+
+    # The same Show operation must target the outer boundary of a face mesh.
+    clear_scene()
+    face_highlight_source = create_square_object(
+        "RoofForge_Smoke_Face_Edge_Highlight", with_face=True
+    )
+    face_highlight_settings = bpy.context.scene.roof_forge
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED}",
+        "could not prepare slope list for face-boundary highlight test",
+    )
+    ensure(
+        bpy.ops.roof_forge.select_slope_edge(edge_index=0) == {"FINISHED},
+        "Show could not select an outer edge on a face mesh",
+    )
+    face_bm = bmesh.from_edit_mesh(face_highlight_source.data)
+    face_bm.verts.index_update()
+    face_edges = [edge for edge in face_bm.edges if edge.select]
+    ensure(
+        len(face_edges) == 1
+        and tuple(sorted(vertex.index for vertex in face_edges[0].verts)) == (0, 1),
+        "face-mesh Pitch row did not select the expected outer boundary edge",
+    )
+    bpy.ops.object.mode_set(mode="OBJECT")
+
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
     oversized = create_regular_wire_loop("RoofForge_Smoke_OverLimit", 65)

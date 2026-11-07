@@ -5,7 +5,20 @@ import bmesh
 MAX_BOUNDARY_EDGES = 64
 
 
-def _ordered_cycle_points(bm, edges):
+def _boundary_edges_for_object_bmesh(bm):
+    if bm.faces:
+        edges = [edge for edge in bm.edges if len(edge.link_faces) == 1]
+    else:
+        edges = [edge for edge in bm.edges if len(edge.link_faces) == 0]
+    if not edges:
+        raise ValueError(
+            "Не найдена открытая граница объекта. Нужен один контур из рёбер или край плоской сетки."
+        )
+    return edges
+
+
+def _ordered_cycle_topology(bm, edges):
+    """Return boundary vertices and edges in the same deterministic order."""
     edges = list(edges)
     if len(edges) < 3:
         raise ValueError("На объекте не найдена замкнутая граница минимум из трёх рёбер.")
@@ -29,7 +42,8 @@ def _ordered_cycle_points(bm, edges):
     bm.verts.index_update()
     bm.edges.index_update()
     start = min(degree, key=lambda vertex: vertex.index)
-    ordered = [start]
+    ordered_vertices = [start]
+    ordered_edges = []
     current = start
     previous_edge = None
 
@@ -45,19 +59,34 @@ def _ordered_cycle_points(bm, edges):
         else:
             raise ValueError("Не удалось однозначно обойти границу объекта.")
         next_vertex = edge.other_vert(current)
+        ordered_edges.append(edge)
         if next_vertex is start:
             break
-        if next_vertex in ordered:
+        if next_vertex in ordered_vertices:
             raise ValueError("Граница содержит самопересечение или несколько петель.")
-        ordered.append(next_vertex)
+        ordered_vertices.append(next_vertex)
         previous_edge, current = edge, next_vertex
 
-    if len(ordered) != len(edges):
+    if len(ordered_vertices) != len(edges) or len(ordered_edges) != len(edges):
         raise ValueError(
             "Объект содержит несколько граничных контуров; сейчас поддерживается один."
         )
+    return ordered_vertices, ordered_edges
 
-    return [tuple(float(value) for value in vertex.co) for vertex in ordered]
+
+def ordered_boundary_edge_vertex_indices(bm):
+    """Return directed vertex-index pairs matching RoofForge's contour order."""
+    edges = _boundary_edges_for_object_bmesh(bm)
+    vertices, _ordered_edges = _ordered_cycle_topology(bm, edges)
+    return [
+        (vertices[index].index, vertices[(index + 1) % len(vertices)].index)
+        for index in range(len(vertices))
+    ]
+
+
+def _ordered_cycle_points(bm, edges):
+    vertices, _ordered_edges = _ordered_cycle_topology(bm, edges)
+    return [tuple(float(value) for value in vertex.co) for vertex in vertices]
 
 
 def read_object_boundary(obj):
@@ -72,14 +101,7 @@ def read_object_boundary(obj):
         bm.from_mesh(obj.data)
 
     try:
-        if bm.faces:
-            boundary_edges = [edge for edge in bm.edges if len(edge.link_faces) == 1]
-        else:
-            boundary_edges = [edge for edge in bm.edges if len(edge.link_faces) == 0]
-        if not boundary_edges:
-            raise ValueError(
-                "Не найдена открытая граница объекта. Нужен один контур из рёбер или край плоской сетки."
-            )
+        boundary_edges = _boundary_edges_for_object_bmesh(bm)
         return _ordered_cycle_points(bm, boundary_edges)
     finally:
         if owns_bmesh:

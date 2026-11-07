@@ -5,6 +5,7 @@ from .properties import RoofForgeSettings, RoofForgeSlopeSettings
 from .operators import (
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_OT_prepare_slopes,
+    ROOFFORGE_OT_select_slope_edge,
 )
 from .ui.panel import ROOFFORGE_PT_panel
 from .live_update import cancel_pending_live_update
@@ -14,6 +15,7 @@ _CLASSES = (
     RoofForgeSlopeSettings,
     RoofForgeSettings,
     ROOFFORGE_OT_prepare_slopes,
+    ROOFFORGE_OT_select_slope_edge,
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_PT_panel,
 )
