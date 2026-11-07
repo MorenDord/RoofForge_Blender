@@ -154,7 +154,7 @@ def lower_envelope_restricted_cells(
                 projection = (
                     (sample[0] - sx) * dx + (sample[1] - sy) * dy
                 ) / length_sq
-                if -point_tolerance <= projection <= 1.0 + point_tolerance:
+                if point_tolerance < projection < 1.0 - point_tolerance:
                     active.append(index)
 
             if not active:
