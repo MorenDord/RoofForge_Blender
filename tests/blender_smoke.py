@@ -235,8 +235,8 @@ def main() -> None:
     extension.register()  # Registration must be safe to call twice.
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
     ensure(
-        not hasattr(bpy.ops.roof_forge, "select_slope_edge"),
-        "Edit Mode source-edge selection should no longer be part of the UI workflow",
+        not hasattr(bpy.types, "ROOFFORGE_OT_select_slope_edge"),
+        "Legacy Edit Mode source-edge selection operator is still registered",
     )
     panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
     panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
