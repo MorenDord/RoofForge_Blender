@@ -1,16 +1,20 @@
-"""Generate a closed RoofForge shell from the selected boundary loop."""
+"""Generate or rebuild a validated RoofForge alpha shell."""
 import bpy
 
 from ..adapters.mesh_io import read_object_boundary
-from ...core.geometry import GeometryInputError
-from ...core.mesh import build_roof_surface
-from ...core.shell import build_roof_shell
+from ..roof_build import (
+    apply_shell_metadata,
+    build_roof_payload,
+    create_roof_mesh_data,
+    pitch_values,
+    sync_slope_settings,
+)
 
 
 class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
     bl_idname = "roof_forge.generate_surface"
-    bl_label = "Create Roof Shell"
-    bl_description = "Build a roof with a solid shell extruded along the roof-local global Z axis"
+    bl_label = "Create / Update Roof"
+    bl_description = "Build or safely update a closed roof shell from the active mesh boundary"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -20,67 +24,72 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
     def execute(self, context):
         source = context.object
         settings = context.scene.roof_forge
+        new_mesh = None
+        roof_object = None
+        created_object = False
+
         try:
             points = read_object_boundary(source)
-            if len(points) < 3:
-                raise GeometryInputError("POLY_TOO_SMALL", "Контур должен содержать минимум три вершины.")
-            surface = build_roof_surface(points, [settings.pitch_default] * len(points))
-            shell = build_roof_shell(surface, settings.thickness)
-        except ValueError as exc:
+            sync_slope_settings(settings, source, len(points))
+            pitches = pitch_values(settings, len(points))
+            surface, shell, solver = build_roof_payload(
+                points, pitches, settings.thickness
+            )
+            new_mesh = create_roof_mesh_data(
+                f"{source.name}_RoofForge_Mesh", surface, shell
+            )
+
+            current_roof = settings.generated_object
+            can_update = (
+                current_roof is not None
+                and bpy.data.objects.get(current_roof.name) is current_roof
+                and current_roof.name == settings.generated_name_snapshot
+                and current_roof.get("roof_forge_generated", False)
+            )
+            if can_update:
+                roof_object = current_roof
+                old_mesh = roof_object.data
+                roof_object.data = new_mesh
+                apply_shell_metadata(
+                    roof_object, source, surface, shell, pitches, solver
+                )
+                if old_mesh is not new_mesh and old_mesh.users == 0:
+                    bpy.data.meshes.remove(old_mesh)
+            else:
+                roof_object = bpy.data.objects.new(
+                    f"{source.name}_RoofForge", new_mesh
+                )
+                context.collection.objects.link(roof_object)
+                created_object = True
+                apply_shell_metadata(
+                    roof_object, source, surface, shell, pitches, solver
+                )
+
+            settings.source_object = source
+            settings.generated_object = roof_object
+            settings.source_name_snapshot = source.name
+            settings.generated_name_snapshot = roof_object.name
+            settings.last_status = (
+                f"Готово: {len(points)} скатов, {len(shell.faces)} граней; {solver}."
+            )
+            settings.live_update = bool(settings.live_update)
+            new_mesh = None  # Ownership transferred to the generated object.
+
+        except Exception as exc:
+            if created_object and roof_object is not None:
+                if bpy.data.objects.get(roof_object.name) is roof_object:
+                    bpy.data.objects.remove(roof_object, do_unlink=True)
+            if new_mesh is not None and new_mesh.users == 0:
+                bpy.data.meshes.remove(new_mesh)
             message = getattr(exc, "message", str(exc))
+            settings.last_status = f"Построение не выполнено: {message}"
             self.report({"ERROR"}, message)
             return {"CANCELLED"}
 
-        mesh_data = None
-        roof_object = None
-        try:
-            mesh_data = bpy.data.meshes.new(f"{source.name}_RoofForge_Mesh")
-            mesh_data.from_pydata(shell.vertices, [], shell.faces)
-            mesh_data.update(calc_edges=True)
-            if len(mesh_data.polygons) != len(shell.faces):
-                raise RuntimeError("Blender изменил число полигонов при создании сетки; результат не сохранён.")
-
-            component_attribute = mesh_data.attributes.new(
-                name="roof_forge_component", type="INT", domain="FACE"
-            )
-            component_values = (
-                [0] * shell.top_face_count
-                + [1] * shell.bottom_face_count
-                + [2] * shell.side_face_count
-            )
-            slope_attribute = mesh_data.attributes.new(
-                name="roof_forge_slope_index", type="INT", domain="FACE"
-            )
-            slope_values = (
-                list(surface.face_slope_indices)
-                + list(surface.face_slope_indices)
-                + [-1] * shell.side_face_count
-            )
-            for index, component in enumerate(component_values):
-                component_attribute.data[index].value = component
-            for index, slope_index in enumerate(slope_values):
-                slope_attribute.data[index].value = int(slope_index)
-
-            roof_object = bpy.data.objects.new(f"{source.name}_RoofForge", mesh_data)
-            context.collection.objects.link(roof_object)
-            roof_object.matrix_world = source.matrix_world.copy()
-            roof_object["roof_forge_generated"] = True
-            roof_object["roof_forge_source_name"] = source.name
-            roof_object["roof_forge_stage"] = "CLOSED_SHELL"
-            roof_object["roof_forge_pitch_default"] = float(settings.pitch_default)
-            roof_object["roof_forge_thickness"] = float(settings.thickness)
-        except Exception as exc:
-            if roof_object is not None and roof_object.name in bpy.data.objects:
-                bpy.data.objects.remove(roof_object, do_unlink=True)
-            if mesh_data is not None and mesh_data.name in bpy.data.meshes:
-                bpy.data.meshes.remove(mesh_data)
-            self.report({"ERROR"}, f"Не удалось создать оболочку крыши: {exc}")
-            return {"CANCELLED"}
-
+        action = "Обновлена" if not created_object and roof_object else "Создана"
         self.report(
             {"INFO"},
-            f"Создана замкнутая оболочка: {len(shell.vertices)} вершин, "
-            f"{len(shell.faces)} граней; верх {shell.top_face_count}, "
-            f"низ {shell.bottom_face_count}, боковые стенки {shell.side_face_count}."
+            f"{action} крыша: {len(surface.faces)} верхних граней, "
+            f"{shell.side_face_count} боковых стенок; solver {solver}."
         )
         return {"FINISHED"}
