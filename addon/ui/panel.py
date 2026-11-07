@@ -1,4 +1,4 @@
-"""RoofForge sidebar panel."""
+"""RoofForge 0.2.0 alpha sidebar panel."""
 import bpy
 
 
@@ -12,17 +12,37 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.roof_forge
+        source = context.object
+
         col = layout.column(align=True)
         col.label(text="Roof boundary")
-        col.label(text="Boundary is detected from the active mesh object")
+        col.label(text="Active mesh object; no vertex/edge selection")
         col.prop(settings, "pitch_default")
+        col.operator("roof_forge.prepare_slopes", icon="EDGESEL")
+
+        if settings.slope_settings:
+            box = layout.box()
+            box.label(text=f"Individual slope pitch ({len(settings.slope_settings)})")
+            for item in settings.slope_settings:
+                row = box.row(align=True)
+                row.label(text=f"Edge {item.edge_index + 1:02d}")
+                row.prop(item, "pitch", text="°")
+            box.label(text="Order follows the detected closed boundary")
 
         col.separator()
-        col.label(text="Solid shell")
+        col.label(text="Solid roof shell")
         col.prop(settings, "thickness")
+        col.prop(settings, "live_update")
         col.operator("roof_forge.validate_input", icon="CHECKMARK")
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
-        col.separator()
-        col.label(text="No vertex or edge selection is required", icon="INFO")
-        col.label(text="Individual slope angles are being added")
+        if settings.last_status:
+            status = layout.box()
+            status.label(text=settings.last_status[:110], icon="INFO")
+
+        if source is not None and source.type == "MESH":
+            col.separator()
+            col.label(text="Flat-Z contours: weighted wavefront")
+            col.label(text="Mixed-Z contours: 3D plane-envelope path")
+        else:
+            col.label(text="Select a mesh object to begin", icon="INFO")
