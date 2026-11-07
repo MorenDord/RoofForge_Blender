@@ -60,6 +60,15 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
     )
     live_update: bpy.props.BoolProperty(name="Live Update", default=True)
     slope_settings: bpy.props.CollectionProperty(type=RoofForgeSlopeSettings)
+    outline_preview_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    plan_label_scale: bpy.props.FloatProperty(
+        name="Plan Label Size",
+        description="Adjust the size of edge numbers on the top-view roof plan",
+        default=1.0,
+        min=0.6,
+        max=1.8,
+        precision=1,
+    )
     source_object: bpy.props.PointerProperty(type=bpy.types.Object)
     generated_object: bpy.props.PointerProperty(type=bpy.types.Object)
     source_name_snapshot: bpy.props.StringProperty(default="")

@@ -6,6 +6,7 @@ Run from the repository root:
 from __future__ import annotations
 
 import importlib
+import json
 import math
 import sys
 from pathlib import Path
@@ -198,22 +199,35 @@ def main() -> None:
     extension.register()  # Registration must be safe to call twice.
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
     ensure(
-        hasattr(bpy.ops.roof_forge, "select_slope_edge"),
-        "Show source-edge operator was not registered",
+        not hasattr(bpy.ops.roof_forge, "select_slope_edge"),
+        "Edit Mode source-edge selection should no longer be part of the UI workflow",
     )
     panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
-    panel_constants = set(panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts)
+    panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
     ensure(
-        "roof_forge.select_slope_edge" in panel_constants,
-        "RoofForge Pitch panel does not create a Show operator button",
+        "get_contour_plan_icon" in panel_code.co_names
+        and "template_icon" in panel_code.co_names,
+        "RoofForge Pitch panel does not draw the numbered contour plan",
     )
     ensure(
-        "Show" in panel_constants,
-        "RoofForge Pitch panel does not display the Show button label",
+        "Top view — numbers match Pitch fields" in panel_code.co_consts,
+        "RoofForge Pitch panel does not label the numbered plan",
+    )
+    ensure(
+        "Show" not in panel_code.co_consts,
+        "Pitch panel should not require Edit Mode edge-selection buttons",
+    )
+    ensure(
+        not hasattr(bpy.ops.roof_forge, "select_slope_edge"),
+        "legacy Edit Mode edge-selection operator should not be registered",
     )
     ensure(
         hasattr(bpy.types, "ROOFFORGE_PT_main"),
         "RoofForge sidebar panel was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "plan_label_scale"),
+        "number-size control was not registered",
     )
     ensure(
         not hasattr(bpy.ops.roof_forge, "validate_input"),
@@ -227,91 +241,39 @@ def main() -> None:
     run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
     run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
 
-    # Show next to each Pitch field selects the exact corresponding source edge.
+    # The top-view plan is generated from the same stored ordered contour.
     clear_scene()
-    highlight_source = create_square_object("RoofForge_Smoke_Edge_Highlight")
-    highlight_settings = bpy.context.scene.roof_forge
+    plan_source = create_square_object("RoofForge_Smoke_Numbered_Plan")
+    plan_settings = bpy.context.scene.roof_forge
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
-        "could not prepare slope list for edge highlight test",
-    )
-    original_highlight_coords = tuple(
-        tuple(float(component) for component in vertex.co)
-        for vertex in highlight_source.data.vertices
-    )
-    original_highlight_topology = (
-        len(highlight_source.data.vertices),
-        len(highlight_source.data.edges),
-        len(highlight_source.data.polygons),
+        "could not prepare pitch settings for the numbered plan",
     )
     ensure(
-        bpy.ops.roof_forge.select_slope_edge(edge_index=2) == {"FINISHED"},
-        "could not select the third numbered source boundary edge from Object Mode",
+        len(json.loads(plan_settings.outline_preview_json)) == 4,
+        "prepared source contour was not stored for the plan preview",
     )
-    ensure(highlight_source.mode == "EDIT", "Show did not enter Edit Mode")
-    highlight_bm = bmesh.from_edit_mesh(highlight_source.data)
-    highlight_bm.verts.index_update()
-    selected_edges = [edge for edge in highlight_bm.edges if edge.select]
+    plan_points = json.loads(plan_settings.outline_preview_json)
+    plan_core = importlib.import_module(f"{extension.__name__}.core.plan_preview")
+    plan_png = plan_core.render_contour_plan_png(plan_points, text_scale=1.0)
     ensure(
-        len(selected_edges) == 1,
-        f"Show should select exactly one edge, selected {len(selected_edges)}",
+        plan_png.startswith(b"\x89PNG\r\n\x1a\n"),
+        "numbered contour plan renderer did not return a valid PNG",
     )
+    plan_ui = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
+    plan_icon = plan_ui.get_contour_plan_icon(
+        plan_points, text_scale=plan_settings.plan_label_scale
+    )
+    ensure(plan_icon > 0, "Blender preview icon was not created for the numbered plan")
+    plan_settings.plan_label_scale = 1.5
+    resized_icon = plan_ui.get_contour_plan_icon(
+        plan_points, text_scale=plan_settings.plan_label_scale
+    )
+    ensure(resized_icon > 0, "number-size change invalidated the plan preview")
     ensure(
-        tuple(sorted(vertex.index for vertex in selected_edges[0].verts)) == (2, 3),
-        "third Pitch row did not select the corresponding ordered boundary edge",
+        all(abs(float(plan_points[i][2])) < 1e-9 for i in range(4)),
+        "plan preview changed source contour coordinates",
     )
-    ensure(
-        bpy.ops.roof_forge.select_slope_edge(edge_index=1) == {"FINISHED"},
-        "Show could not change the highlighted edge while already in Edit Mode",
-    )
-    highlight_bm = bmesh.from_edit_mesh(highlight_source.data)
-    highlight_bm.verts.index_update()
-    selected_edges = [edge for edge in highlight_bm.edges if edge.select]
-    ensure(
-        len(selected_edges) == 1
-        and tuple(sorted(vertex.index for vertex in selected_edges[0].verts)) == (1, 2),
-        "Show did not update selection to the second contour edge",
-    )
-    bpy.ops.object.mode_set(mode="OBJECT")
-    ensure(
-        (
-            len(highlight_source.data.vertices),
-            len(highlight_source.data.edges),
-            len(highlight_source.data.polygons),
-        ) == original_highlight_topology,
-        "Show unexpectedly changed source mesh topology",
-    )
-    ensure(
-        tuple(
-            tuple(float(component) for component in vertex.co)
-            for vertex in highlight_source.data.vertices
-        ) == original_highlight_coords,
-        "Show unexpectedly changed source vertex coordinates",
-    )
-
-    # The same Show operation must target the outer boundary of a face mesh.
-    clear_scene()
-    face_highlight_source = create_square_object(
-        "RoofForge_Smoke_Face_Edge_Highlight", with_face=True
-    )
-    face_highlight_settings = bpy.context.scene.roof_forge
-    ensure(
-        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED}",
-        "could not prepare slope list for face-boundary highlight test",
-    )
-    ensure(
-        bpy.ops.roof_forge.select_slope_edge(edge_index=0) == {"FINISHED},
-        "Show could not select an outer edge on a face mesh",
-    )
-    face_bm = bmesh.from_edit_mesh(face_highlight_source.data)
-    face_bm.verts.index_update()
-    face_edges = [edge for edge in face_bm.edges if edge.select]
-    ensure(
-        len(face_edges) == 1
-        and tuple(sorted(vertex.index for vertex in face_edges[0].verts)) == (0, 1),
-        "face-mesh Pitch row did not select the expected outer boundary edge",
-    )
-    bpy.ops.object.mode_set(mode="OBJECT")
 
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
@@ -597,7 +559,7 @@ def main() -> None:
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, per-edge pitch, L/U concave overhang, live rebuild, Object/Edit Mode"
+        "automatic boundary detection, numbered contour plan, per-edge pitch, L/U concave overhang, live rebuild"
     )
 
 

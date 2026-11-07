@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import bpy
+import json
 
 from .adapters.mesh_io import read_object_boundary
 from .roof_build import (
@@ -135,6 +136,7 @@ def _run_pending_update():
             raise
         if old_mesh is not new_mesh and old_mesh.users == 0:
             bpy.data.meshes.remove(old_mesh)
+        settings.outline_preview_json = json.dumps(points, separators=(",", ":"))
         settings.last_status = (
             f"Обновлено: {len(points)} скатов, {len(shell.faces)} граней "
             f"({solver})."

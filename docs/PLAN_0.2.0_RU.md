@@ -3,13 +3,13 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** 0.2.0-alpha.9 packaged, inspected and ready for manual UI QA
+**Status:** alpha.10 numbered plan UI implemented; versioned package validation pending
 
 ## User-confirmed priorities
 
 1. Support **simple** polygon contours with up to 64 boundary edges: convex, concave, narrow notches and non-uniform edge lengths. More than 64 edges are outside the 0.2.0 target; self-intersecting contours, zero-length projected edges and multiple independent boundary loops must be diagnosed, not silently repaired.
 2. Do not require selecting vertices or edges in Edit Mode. Selecting the mesh object is enough; RoofForge discovers one outer boundary from the mesh topology. A face mesh uses its boundary edges; a wire-only mesh uses its closed wire loop.
-3. Give every boundary edge/slope its own pitch angle. Start with a compact list of numeric fields; a numbered top-view pitch map is not in this milestone.
+3. Give every boundary edge/slope its own pitch angle. Use a compact list of numeric fields plus a numbered top-view contour plan; each number must map to the same ordered Pitch row.
 4. Pitch edits trigger a debounced live rebuild. Keep the last valid roof visible until the replacement is built and validated. Coalesce rapid changes; never regenerate inside a UI draw callback.
 5. Provide an optional eave overhang in centimeters by offsetting the source contour outward as one polygon, then rebuilding the entire roof from that new contour with the same per-edge pitch order. Reject collapsed or self-intersecting offsets.
 
@@ -94,7 +94,7 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
 
-### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.9 для flat-Z контуров)
+### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.10 для flat-Z контуров)
 
 Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370549428) (push) and [42370553763](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42370553763) (PR) both passed on package commit `7730ac1b7b4caff1776c58a534cee04f40f34298`: Python 3.11/3.13, flat and concave offset-contour geometry tests, Blender 5.0.1 smoke, clean alpha.7 ZIP build, official Extension Validator, geometry/legacy/Rust/profile jobs.
 
@@ -138,7 +138,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` использует `build_wavefront_roof_surface()` для flat-Z контуров; mixed-Z остаётся на 3D support-plane envelope path.
-- В 0.2.0-alpha.9 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
+- В 0.2.0-alpha.10 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
 - `create_roof_mesh_data()` записывает face attributes через `foreach_set`, сокращая Python-цикл по каждой грани. Геометрический пересчёт при изменении pitch по-прежнему требуется; latency на пользовательской машине нужно оценивать вручную.
 
 Это рабочая alpha-интеграция с известными ограничениями событий, а не универсальный production solver. PR остаётся draft для сбора viewport QA.
@@ -157,12 +157,11 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 
 
 
-### Blender UI, сантиметры, свес и Live Update — интегрированы в 0.2.0-alpha.9
+### Blender UI, сантиметры, свес и Live Update — интегрированы в 0.2.0-alpha.10
 
 - addon/properties.py: коллекция pitch-настроек по каждому edge, ссылки на исходный и сгенерированный объект, статус и переключатель Live Update.
 - addon/operators/prepare.py: считывает контур и создаёт нумерованный список углов.
-- addon/operators/select_edge.py: Show operator выбирает нужное граничное ребро по тому же детерминированному обходу.
-- addon/ui/panel.py: поля Edge NN (Vx→Vy) с кнопкой Show, которая выбирает исходное ребро; Thickness (cm), Eave Overhang (cm), Live Update, Update Delay и Create/Update; Default Pitch и Validate удалены.
+- addon/ui/panel.py: нумерованный top-view план, автоматический масштаб по ширине N-панели, регулируемый размер цифр и напрямую редактируемые Pitch-поля. Thickness (cm), Eave Overhang (cm), Live Update, Update Delay и Create/Update; Default Pitch и Validate удалены.
 - addon/live_update.py: настраиваемый debounce 0–1000 мс, по умолчанию 0 мс, перестройка на Blender main thread, rollback при ошибке, rename guard и защита от удалённой крыши.
 - addon/operators/generate.py: при удалении результата stale pointer очищается; новая крыша линкуется в root collection активной сцены и проверяется через `scene.objects` перед успешным ответом.
 - Thickness, per-edge pitch и свес запускают Live Update. При изменении только thickness верхняя поверхность берётся из cache.
@@ -170,14 +169,14 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Сохраняется исходный Z соответствующей вершины и число/порядок рёбер. Благодаря этому список pitch остаётся привязан к тем же рёбрам.
 - Roof solver запускается заново уже с новым контуром. Отдельные полосы, corner caps, ridge stitching и post-build геометрические заплатки не создаются.
 - Вогнутые L/U-углы проходят тот же polygon offset; если паз схлопывается или новый контур пересекает сам себя, построение отклоняется до запуска solver.
-- Кнопка Show в каждой Pitch-строке использует тот же deterministic boundary traversal и выбирает соответствующее исходное ребро в Edit Mode. Постоянная цветная overlay-подсветка, графический план крыши и номера поверх mesh пока отсутствуют.
+- Схема сверху использует тот же deterministic boundary traversal: номер у ребра совпадает с номером Pitch-поля. PNG preview кэшируется по контуру и размеру цифр; draw callback не запускает roof solver. Постоянная цветная viewport overlay-подсветка остаётся отдельной задачей.
 
 ### Ограничения, явно оставленные для пользовательской проверки
 
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Пакет 0.2.0-alpha.9 собран и принят официальным Blender 5.0.1 Extension Validator. CI: push `42378167294`, PR `42378171463`; smoke включает Show selection для wire/face contours, Object/Edit Mode, source topology preservation и предыдущие geometry/UI regressions. Ручной viewport QA всё ещё нужен.
+- Alpha.10 source now includes pure PNG unit tests and Blender 5.0.1 smoke for PreviewCollection rendering, panel references, outline persistence and label-size control. Versioned alpha.10 package CI is pending.
 
 ### Ограничение размера
 
@@ -185,7 +184,27 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Обычный CI benchmark и cProfile ограничены диапазоном 8, 16, 32 и 64 рёбер.
 - Контуры больше 64 рёбер не входят в критерии приёмки этой версии; отдельная оптимизация для 128 рёбер не требуется.
 
-## Точный статус готовности 0.2.0-alpha.9
+## Аудит полезных решений из main / RoofForge 2.9.2
+
+Проверен main commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`, manifest `2.9.2` и монолитный UI/runtime.
+
+**Перенесено в alpha.10:**
+- Чертёжный top-view план с нумерацией рёбер.
+- Совпадение номера на схеме с номером Pitch-поля.
+- Автоматический масштаб схемы по ширине панели.
+- Отдельная настройка размера цифр.
+- Кэширование PNG preview и очистка preview/file при unregister.
+- В отличие от 2.9.2, alpha.10 рисует номера прямо возле соответствующих рёбер исходного контура. Для этого не запускается roof solver из panel draw; используется сохранённый ordered contour.
+
+**Другие полезные функции, найденные в 2.9.2, но пока не переносимые без адаптации:**
+1. Ограничение частоты интерактивной пересборки (1–60 Hz) с отложенным финальным пересчётом профилей/деталей после завершения перетаскивания. Это может быть полезно на тяжёлых контурах, но нужно согласовать с текущим 0 ms debounce и не ухудшить отзывчивость.
+2. Отдельные объекты коньков и ендов, извлекаемые из фактической топологии граней крыши. Их можно адаптировать к новой `RoofSurface` модели после проверки source-face metadata и 3D-кейсов.
+3. Генератор standing-seam фальцевой раскладки с шириной панелей, высотой/шириной фальца и концевым смещением. В 2.9.2 spatial-режим имеет отдельные ограничения; алгоритм нужно подключать к текущим фасетам, не вызывая старый roof solver.
+4. Сохранение исходной поверхности и параметров на generated object, чтобы обновлять профили после сохранения/открытия .blend. Это полезный архитектурный образец для последующей persistence/repair workflow.
+
+**Не перенесено:** старый roof generation, старый weighted/spatial solver, старый overhang strip builder, старый thickness code и старый монолитный PropertyGroup. Они не совместимы напрямую с текущим solver/API и могут вернуть старые ограничения/дефекты.
+
+## Точный статус готовности 0.2.0-alpha.10
 
 - [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
 - [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью; новые поля default 30°.
@@ -195,12 +214,12 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - [x] Validate Roof operator и Default Pitch property удалены; Create / Update выполняет валидацию.
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
-- [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, per-edge Show selection on wire/face meshes, flat and mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [x] Clean Extension ZIP 0.2.0-alpha.9 собран и принят официальным Blender Extension Validator (artifact `13576772349`; inner ZIP SHA-256 `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`).
-- [x] Alpha.9 panel renders a visible `Show` button in each Pitch row; smoke now asserts the operator ID and Show label are present in the registered panel `draw()` code, then verifies wire/face edge selection and unchanged source geometry. Alpha.9 push/PR CI runs `42379334950` and `42379338838` passed all jobs.
-- [x] Alpha.7 push run `42370549428` and PR run `42370553763` passed all Python, Blender, package, geometry, legacy, Rust and profile jobs.
+- [ ] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, numbered top-view plan icon generation and label-size update, stored contour preview, flat/mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
+- [ ] Clean Extension ZIP 0.2.0-alpha.10 собран и принят официальным Blender Extension Validator.
+- [x] Edit Mode Show controls removed from the Pitch workflow. Per-edge pitch editing maps directly through the numbered top-view plan.
+- [x] Pure renderer unit tests added for PNG signature/dimensions, monochrome output, configurable label size, double-digit edge labels, concave L/U contours and invalid inputs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
-- [x] Alpha.9 package was downloaded and inspected; the inner ZIP contains `addon/ui/panel.py` with both `roof_forge.select_slope_edge` and `text="Show"`. Persistent viewport overlay / pitch map remains separate.
+- [ ] Alpha.10 full push/PR CI, clean extension ZIP and official Extension Validator.
 
-Итог: 0.2.0-alpha.9 готова к ручной проверке в Blender. Alpha.8 не используй для этого milestone — в её ZIP кнопки Show не было.
+Итог: alpha.10 будет готова к ручной проверке после versioned CI и проверки содержимого ZIP. Pitch editing теперь не требует Edit Mode.

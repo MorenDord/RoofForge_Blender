@@ -5,17 +5,16 @@ from .properties import RoofForgeSettings, RoofForgeSlopeSettings
 from .operators import (
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_OT_prepare_slopes,
-    ROOFFORGE_OT_select_slope_edge,
 )
 from .ui.panel import ROOFFORGE_PT_panel
 from .live_update import cancel_pending_live_update
 from .roof_build import clear_surface_cache
+from .ui.plan_preview import clear_contour_plan_preview
 
 _CLASSES = (
     RoofForgeSlopeSettings,
     RoofForgeSettings,
     ROOFFORGE_OT_prepare_slopes,
-    ROOFFORGE_OT_select_slope_edge,
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_PT_panel,
 )
@@ -34,6 +33,7 @@ def register():
 def unregister():
     cancel_pending_live_update()
     clear_surface_cache()
+    clear_contour_plan_preview()
     if hasattr(bpy.types.Scene, "roof_forge"):
         del bpy.types.Scene.roof_forge
     for cls in reversed(_CLASSES):

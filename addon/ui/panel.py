@@ -1,5 +1,9 @@
-"""RoofForge 0.2.0 alpha sidebar panel."""
+"""RoofForge sidebar with a numbered top-view pitch plan."""
+import json
+
 import bpy
+
+from .plan_preview import get_contour_plan_icon
 
 
 class ROOFFORGE_PT_panel(bpy.types.Panel):
@@ -20,22 +24,54 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col.operator("roof_forge.prepare_slopes", icon="EDGESEL")
 
         if settings.slope_settings:
-            box = layout.box()
-            box.label(text=f"Individual slope pitch ({len(settings.slope_settings)})")
+            plan_box = layout.box()
+            plan_box.label(
+                text="Top view — numbers match Pitch fields",
+                icon="MESH_CIRCLE",
+            )
+            try:
+                outline = json.loads(settings.outline_preview_json)
+            except (TypeError, ValueError):
+                outline = []
+            if len(outline) >= 3:
+                preview_icon = get_contour_plan_icon(
+                    outline,
+                    text_scale=settings.plan_label_scale,
+                )
+                if preview_icon:
+                    region_width = max(240, getattr(context.region, "width", 320))
+                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    plan_box.template_icon(preview_icon, scale=preview_scale)
+                else:
+                    plan_box.label(text="Could not draw contour plan", icon="INFO")
+            else:
+                plan_box.label(
+                    text="Load / Refresh Slope Angles to create the numbered plan",
+                    icon="INFO",
+                )
+            plan_box.prop(
+                settings,
+                "plan_label_scale",
+                text="Number size",
+                slider=True,
+            )
+            plan_box.label(text="Edge number = matching Pitch field below")
+
+            pitch_box = layout.box()
+            pitch_box.label(
+                text=f"Individual slope pitch ({len(settings.slope_settings)})"
+            )
             for item in settings.slope_settings:
-                row = box.row(align=True)
+                row = pitch_box.row(align=True)
                 row.label(
                     text=f"Edge {item.edge_index + 1:02d} "
                          f"(V{item.start_vertex_index + 1}→V{item.end_vertex_index + 1})"
                 )
-                show = row.operator(
-                    "roof_forge.select_slope_edge",
-                    text="Show",
-                    icon="EDGESEL",
-                )
-                show.edge_index = item.edge_index
                 row.prop(item, "pitch", text="°")
-            box.label(text="Show selects the matching source edge in Edit Mode")
+            pitch_box.label(
+                text="Edit Pitch directly; no Edit Mode selection needed",
+                icon="INFO",
+            )
 
         col.separator()
         col.label(text="Solid roof shell")
@@ -45,8 +81,10 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         delay_row = col.row()
         delay_row.enabled = settings.live_update
         delay_row.prop(
-            settings, "live_update_delay_ms",
-            text="Update delay (ms)", slider=True,
+            settings,
+            "live_update_delay_ms",
+            text="Update delay (ms)",
+            slider=True,
         )
         if settings.live_update_delay_ms == 0:
             delay_row.label(text="No debounce", icon="TIME")

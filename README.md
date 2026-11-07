@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.9.** This is an early user-test build, not a finished 1.0 release. Eaves are generated from one outward-offset source contour. Each numbered Pitch row now visibly includes a Show button; alpha.9 adds a Blender smoke assertion that the button is actually present in the registered panel.
+> **Current test build: 0.2.0-alpha.10.** This is an early user-test build, not a finished 1.0 release. Eaves are generated from one outward-offset source contour. Each Pitch row is mapped to its edge by a numbered top-view plan. A separate Number size slider adjusts the labels without changing roof geometry.
 
 ## Project documents
 
@@ -16,7 +16,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 
 - Select a mesh object; no vertex or edge selection is needed.
 - Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
-- Show one numbered pitch field for each ordered boundary edge. A **Show** button beside each field selects its exact source edge in Edit Mode.
+- Show a top-view numbered contour plan; each number maps directly to the corresponding per-edge Pitch field below it. No Edit Mode edge selection is required.
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
@@ -31,7 +31,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The angle fields are numbered in the deterministic contour traversal order. The Show button uses that exact same traversal to select the source edge; a persistent colored overlay and roof-top pitch map are not yet implemented.
+The top-view plan uses the same deterministic contour traversal order as the Pitch fields. A separate Number size slider changes only the plan labels. The plan is generated from the saved source contour and does not run the roof solver while the panel is drawing.
 
 ## Geometry paths and limitations
 
@@ -59,7 +59,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original rela
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.9-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.9.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.10-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.10.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -73,7 +73,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke checks offset-contour rebuilds for flat variable-pitch convex eaves, concave L/U eaves with nonzero overhang, mixed-height XYZ convex eaves, invalid oversized offsets, centimeter conversion, 30° pitch and 1 cm thickness defaults, the simplified UI, per-row source-edge selection on wire and face meshes, thickness-only cache and delete/recreate. Manual viewport QA is still required.
+Blender 5.0.1 background smoke checks offset-contour rebuilds for flat variable-pitch convex eaves, concave L/U eaves with nonzero overhang, mixed-height XYZ convex eaves, invalid oversized offsets, centimeter conversion, 30° pitch and 1 cm thickness defaults, the simplified UI, numbered contour-plan preview and edge-to-Pitch mapping, thickness-only cache and delete/recreate. Manual viewport QA is still required.
 
 ## License
 

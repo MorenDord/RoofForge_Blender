@@ -1,86 +1,78 @@
-# RoofForge 0.2.0-alpha.9 — Session Handoff
+# RoofForge 0.2.0-alpha.10 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**UI fix commit:** `5d751ced47ea72736bf7eabe7d9bc0c326ad23a9`  
-**Versioned package commit:** `e8b377e15917dc09f9b262ee522dbb3b44b15ba8`  
+**Base UI reference:** `main` commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`, manifest 2.9.2  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Installable build:** `roof_forge-0.2.0-alpha.9.zip`, from CI artifact `roof_forge-0.2.0-alpha.9-blender-5.0.1` (artifact ID `13576772349`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379334950/artifacts/13576772349).  
-**Inner ZIP SHA-256:** `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`.  
+**Alpha.10 artifact / SHA-256:** pending versioned package CI.  
 **Important:** `main` and `develop` must remain unchanged.
 
-## User report and verified cause
+## User request
 
-The user reported that the alpha.8 Show controls were not visible. Inspection of the actual downloaded inner alpha.8 ZIP confirmed this report:
-- `addon/operators/select_edge.py` was included and imported/registered.
-- `addon/ui/panel.py` in the ZIP was the unchanged old version: each Pitch row rendered the label and Pitch property only; no Show operator button.
-- The earlier smoke test exercised the operator directly but did not assert that the UI panel actually exposed it.
-- Therefore the previous alpha.8 release statement that the button was visible was incorrect. Do not direct user to alpha.8 for this feature.
+The user said editing Pitch values through Edit Mode was inconvenient and requested the UI from main branch RoofForge 2.9.2, plus an audit of other useful features.
 
-## Alpha.9 correction
+## What was found in main 2.9.2
 
-The source `addon/ui/panel.py` now visibly adds, in every Pitch row:
+Main points at audit time:
+- Branch main commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`.
+- Package folder `RoofForge_2.9.2_weighted-endpoint-fix`.
+- Manifest version `2.9.2`.
+- The monolithic add-on includes a numbered top-view roof plan, per-edge pitch fields, plan-label sizing, interactive update-rate throttle, ridge/valley profile meshes and standing seam generation.
 
-- `row.operator("roof_forge.select_slope_edge", text="Show", icon="EDGESEL")`
-- passes `item.edge_index` to the operator
-- leaves the Pitch property in the same row.
+## Alpha.10 UI changes
 
-The Blender smoke test has been strengthened to assert:
-1. the source-edge operator is registered;
-2. the registered RoofForge sidebar panel exists;
-3. the panel `draw()` bytecode constants include `roof_forge.select_slope_edge`;
-4. the panel `draw()` bytecode constants include the visible label `Show`;
-5. existing operator execution tests select the correct edge for wire and face contours and do not modify source coordinates/topology.
+The Edit Mode Show button workflow is removed from the registered operators/UI. Each Pitch row is now identified from a schematic plan:
+- White background, black contour and simple black edge numbers.
+- Labels run in the same deterministic order as source contour and Pitch settings.
+- Number on an edge maps directly to the Pitch field with the same index.
+- Diagram scales to the available N-panel width.
+- `Number size` is independent of geometry settings and changes only label rendering.
+- The preview image is cached by contour + label-size signature, stored as a temporary PNG for Blender PreviewCollection, and cleaned up on unregister.
+- Renderer is pure Python in `core/plan_preview.py`; it does not call the roof solver or Blender API.
+- Ordered outline is stored in `scene.roof_forge.outline_preview_json` after Prepare, Generate and successful Live Update. It is persistent in the .blend scene settings.
+- Panel drawing reads cached outline and only builds/reuses the preview image; it does not execute roof geometry.
+- Existing per-edge numeric Pitch fields remain directly editable below the plan.
 
-This is intentionally a package-level regression gate: a green test run must fail if the UI code is missing even when the operator itself still works.
+## Implementation files
 
-## Existing operator behaviour
+- `core/plan_preview.py`: pure monochrome PNG contour renderer.
+- `addon/ui/plan_preview.py`: Blender PreviewCollection + temporary file cache lifecycle.
+- `addon/properties.py`: `outline_preview_json`, `plan_label_scale`.
+- `addon/operators/prepare.py`: stores the ordered contour when Pitch settings are loaded/refreshed.
+- `addon/operators/generate.py` / `addon/live_update.py`: refresh saved preview contour as roofs rebuild.
+- `addon/ui/panel.py`: plan schematic and direct Pitch fields; no Edit Mode Show button.
+- `addon/registration.py`: releases preview resources on unregister.
+- `tests/test_plan_preview.py`: PNG format, B/W pixel, label-size, two-digit number, L/U, invalid contour tests.
+- `tests/blender_smoke.py`: checks plan panel registration, icon creation and Number size control.
 
-- Each Pitch row's Show button selects exactly its assigned source boundary edge.
-- From Object Mode it enters Edit Mode; from Edit Mode it changes the highlighted edge.
-- Uses the same deterministic boundary walk as source contour and Pitch preparation.
-- Works with wire-only contours and face-mesh outer boundaries.
-- Does not change source topology or coordinates.
-- Native temporary Edit Mode selection only; no persistent colored overlay or pitch map yet.
+## Additional useful features audited in 2.9.2
 
-## Existing geometry and UX retained
+1. Interactive update-rate cap 1–60 Hz, with expensive profiles/seams deferred until the user stops dragging. Potentially useful but not copied yet because the current 0 ms debounce UX must be preserved until measured.
+2. Separate ridge and valley profile meshes extracted from actual roof face adjacency. Candidate next milestone after adapting it to current `RoofSurface` and face source IDs.
+3. Standing-seam layout generator with panel width, seam height/base width and end offsets. Candidate later feature; not safe to import without porting against current generated facets and shell thickness.
+4. Persistent source-surface/profile metadata on generated roof objects, useful for rebuilds after file save/reopen. Candidate architecture improvement.
+5. Old solver, overhang strip builder, mesh extrusion and monolithic property group were deliberately not copied; they are incompatible with the current alpha API and would risk bringing back older geometry limitations.
 
-- One outward-offset source contour then full roof rebuild; no appended eave strips/caps.
-- Individual per-edge pitch values, new fields default to 30°.
-- Thickness default 1 cm, cm input.
-- Live Update delay 0–1000 ms, default 0 ms; thickness-only cache; last-valid-mesh rollback.
-- One simple boundary loop, max 64 edges.
-- L/U flat-Z offset roof cases covered, subject to weighted-wavefront limitations.
-- Arbitrary concave mixed-height XYZ is not guaranteed.
-- Delete/recreate and source geometry preservation remain covered.
+## Validation required for alpha.10
 
-## CI / artifact status
+- Pure Python tests: 3.11 and 3.13.
+- Blender 5.0.1 smoke: visible top-plan UI references, PreviewCollection icon creation, label-size change, scene-persisted ordered outline; previous roof smoke still passes.
+- Clean Extension ZIP and official Blender Extension Validator.
+- Download exact alpha.10 artifact and inspect manifest + panel module contents before release.
 
-Alpha.8 had fully green CI but its panel source was missing the control. That alpha.8 artifact must not be reused for the Show milestone.
+## User QA
 
-Alpha.9 final CI passed:
-- Push run [42379334950](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379334950).
-- PR run [42379338838](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379338838).
-- Python 3.11 and 3.13;
-- Blender 5.0.1 smoke including the panel-content assertions and edge selection tests;
-- clean extension ZIP build and official Blender 5.0.1 Extension Validator;
-- geometry, legacy, Rust diagnostic and profile jobs.
-
-Artifact ID `13576772349`; inner ZIP SHA-256 `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`. The downloaded ZIP was inspected and includes `text="Show"` and `roof_forge.select_slope_edge` in `addon/ui/panel.py`.
-
-## User QA after alpha.9 is verified
-
-1. Install alpha.9 (not alpha.8) after removing previous RoofForge versions.
-2. Prepare a source wire contour and verify each Pitch row has a visible Show button.
-3. Click Show on Edge 03; verify exactly that edge is selected in Edit Mode.
-4. Click another Show; selection must move to the new edge.
-5. Repeat for a face mesh.
-6. Generate the roof and ensure source contour coordinates/topology remain unchanged.
+1. Remove previous RoofForge alpha, install alpha.10.
+2. Prepare a rectangle, L or U contour.
+3. Confirm a top-view plan appears above the Pitch fields.
+4. Confirm each number lies by its matching source edge and matches same-numbered Pitch row.
+5. Change Number size: only labels should resize; geometry/Pitch should not change.
+6. Change Pitch values directly in rows; no Edit Mode selection should be required.
+7. Try two-digit edge numbers on an 11–16 edge contour.
 
 ## Repository rules
 
 - Continue only on `feature/0.2.0-arbitrary-contours-live-pitch`.
 - Keep PR #6 draft; do not merge to develop or tag stable 0.2.0.
-- Do not claim alpha.9 is ready until package contents have been inspected.
+- User viewport QA remains separate from CI.

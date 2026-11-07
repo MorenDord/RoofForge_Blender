@@ -1,5 +1,6 @@
 """Prepare a numbered per-edge pitch list for the active mesh contour."""
 import bpy
+import json
 
 from ..adapters.mesh_io import read_object_boundary
 from ..roof_build import sync_slope_settings
@@ -20,6 +21,7 @@ class ROOFFORGE_OT_prepare_slopes(bpy.types.Operator):
         try:
             points = read_object_boundary(context.object)
             changed = sync_slope_settings(settings, context.object, len(points))
+            settings.outline_preview_json = json.dumps(points, separators=(",", ":"))
         except Exception as exc:
             self.report({"ERROR"}, str(getattr(exc, "message", exc)))
             return {"CANCELLED"}

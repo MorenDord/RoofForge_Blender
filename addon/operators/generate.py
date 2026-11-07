@@ -1,5 +1,6 @@
 """Generate or rebuild a validated RoofForge alpha shell."""
 import bpy
+import json
 
 from ..adapters.mesh_io import read_object_boundary
 from ..roof_build import (
@@ -32,6 +33,7 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
         try:
             points = read_object_boundary(source)
             sync_slope_settings(settings, source, len(points))
+            settings.outline_preview_json = json.dumps(points, separators=(",", ":"))
             pitches = pitch_values(settings, len(points))
             thickness_units = centimeters_to_blender_units(
                 settings.thickness_cm, context.scene
