@@ -68,7 +68,11 @@ def boundary_envelope_conflicts(
             breaks.sort()
 
             for t0, t1 in zip(breaks, breaks[1:]):
-                if not (-eps <= projection_at((t0 + t1) * 0.5) <= 1.0 + eps):
+                midpoint_projection = projection_at((t0 + t1) * 0.5)
+                # A perpendicular through an endpoint is not an infinite
+                # extension of that finite eave. Adjacent slopes are allowed
+                # together only in the local vertex transition region.
+                if not (eps < midpoint_projection < 1.0 - eps):
                     continue
                 undercut = False
                 for t in (t0, t1):
