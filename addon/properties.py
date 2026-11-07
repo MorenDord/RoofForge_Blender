@@ -9,6 +9,13 @@ def _pitch_changed(self, context):
     schedule_live_update(context.scene)
 
 
+def _settings_changed(self, context):
+    if context is None:
+        return
+    from .live_update import schedule_live_update
+    schedule_live_update(context.scene)
+
+
 class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
     edge_index: bpy.props.IntProperty(name="Edge Index", default=0, min=0)
     pitch: bpy.props.FloatProperty(
@@ -32,7 +39,12 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         precision=1,
     )
     thickness: bpy.props.FloatProperty(
-        name="Thickness", default=0.12, min=0.001, soft_max=1.0, unit="LENGTH"
+        name="Thickness",
+        default=0.12,
+        min=0.001,
+        soft_max=1.0,
+        unit="LENGTH",
+        update=_settings_changed,
     )
     live_update: bpy.props.BoolProperty(name="Live Update", default=True)
     slope_settings: bpy.props.CollectionProperty(type=RoofForgeSlopeSettings)
