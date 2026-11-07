@@ -4,12 +4,12 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Installable code/package snapshot:** pending alpha.4 CI.  
+**Installable code/package snapshot:** `a2b85ad189f019a1310ad46a6bfe69f94ef17361`.  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
 **Installable build:** `roof_forge-0.2.0-alpha.4.zip`, from CI artifact `roof_forge-0.2.0-alpha.4-blender-5.0.1` (artifact ID `13553300364`).  
-**Outer artifact:** pending alpha.4 CI upload.  
-**Inner ZIP SHA-256:** pending alpha.4 build.  
-**Latest CI:** alpha.4 push/PR runs pending.  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435/artifacts/13552943327).  
+**Inner ZIP SHA-256:** `185186234319dc31dfc03c592ba3d40aded78ed5ed47d55d7f456f1d1270aa57`.  
+**Latest CI:** [Push run 42321985435](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435) and [PR run 42321992476](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476) both passed.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -73,9 +73,9 @@
 
 ## CI evidence for the packaged commit
 
-Both complete workflows on head `1f677f...` passed:
+Both complete workflows on head `a2b85ad189f019a1310ad46a6bfe69f94ef17361` passed:
 - Python 3.11 and 3.13: 70 tests run, 2 known multi-notch limitations skipped.
-- Blender 5.0.1 background smoke: registration, wire/surface boundary extraction in Object/Edit Mode with all elements deselected, concave L with six individual pitch values, closed shell, Live Update pitch rebuild, source immutability.
+- Blender 5.0.1 background smoke: registration, wire/surface boundary extraction in Object/Edit Mode with all elements deselected, concave L/U with per-edge pitch, shared miter corners with no fan faces, incompatible pitch diagnostic, configurable 0/230 ms delay, thickness-only cache, pitch rebuild, source immutability and delete/recreate.
 - Clean Extension ZIP built by `tools/build_extension.py`.
 - Official `blender --command extension validate` accepted the package.
 - Geometry benchmark, Rust diagnostic benchmark, legacy spatial benchmark and 64-edge profile jobs passed.
@@ -84,13 +84,17 @@ This is background CI evidence. User's visual viewport QA is still required.
 
 ## User QA priority
 
-After installing the ZIP, please check:
-1. A convex quadrilateral with random XYZ heights (the existing 3D route).
-2. A flat-Z concave L and U with different pitch values on adjacent slopes.
-3. Edit a pitch after roof creation; ensure the same roof object updates and no duplicate appears.
-4. Change Thickness; ensure it updates.
-5. Rename the source object, then a generated roof object; ensure Live Update stops and the mesh is preserved.
-6. Try a 12-edge multi-notch contour as an intentional stress case. Failure is currently a known alpha limitation; capture the exact error and .blend rather than repairing it manually.
+1. Check that each overhang corner has one shared miter point, with no triangular fan or duplicate spokes.
+2. Try a roof with unequal pitches on adjacent boundary edges and nonzero overhang; the add-on must explain a support-plane height discontinuity instead of emitting broken geometry.
+3. Set Update delay to 0 ms and compare with 200–300 ms. Zero removes debounce; geometry calculation remains main-thread work.
+
+After installing the ZIP, please also check:
+4. A convex quadrilateral with random XYZ heights (the existing 3D route).
+5. A flat-Z concave L and U with different pitch values on adjacent slopes.
+6. Edit a pitch after roof creation; ensure the same roof object updates and no duplicate appears.
+7. Change Thickness; ensure it updates.
+8. Rename the source object, then a generated roof object; ensure Live Update stops and the mesh is preserved.
+9. Try a 12-edge multi-notch contour as an intentional stress case. Failure is currently a known alpha limitation; capture the exact error and .blend rather than repairing it manually.
 
 For each issue, record Blender version, OS, contour points/edge count, per-edge pitch, error text and a screenshot. A small .blend with the original contour is very useful.
 

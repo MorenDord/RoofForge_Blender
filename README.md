@@ -21,7 +21,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
 - Horizontal eave overhang for convex contours with one shared miter vertex per corner; no separate triangular corner fan.
-- Configurable Live Update debounce from 0 to 1000 ms, default 0 ms.
+- Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
 - Keep the last valid roof mesh if a requested live rebuild fails.
 - Stop automatic updating if the source object or generated roof object is renamed.
 - Preserve source mesh coordinates and the source object's world transform.

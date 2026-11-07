@@ -95,7 +95,7 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 ### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.4 для flat-Z контуров)
 
-Alpha 0.2.0-alpha.4 CI runs [42320863070](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070) (push) и [42320868809](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809) (PR) прошли полностью на code commit `304a90a488fae5bdb23cff54349a5fac3246c7a3`: Python 3.11/3.13, новые тесты свеса, Blender 5.0.1 L/U/delete-recreate/Live Update smoke, ZIP package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
+Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435) (push) и [42321992476](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476) (PR) прошли полностью на code commit `a2b85ad189f019a1310ad46a6bfe69f94ef17361`: Python 3.11/3.13, miter-свес и несовместимые pitches, Blender 5.0.1 L/U/delete-recreate/Live Update delay smoke, ZIP package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -191,7 +191,7 @@ Alpha 0.2.0-alpha.4 CI runs [42320863070](https://github.com/MorenDord/RoofForge
 - [x] Update delay slider 0–1000 ms; default 0 ms (no debounce).
 - [x] Blender 5.0.1 smoke включает L/U pitch, thickness-only cache, delete/recreate и overhang.
 - [x] Чистый Extension ZIP 0.2.0-alpha.4 собран и принят официальным Blender Extension validator.
-- [x] CI push и PR на commit `304a90a...` прошёл; Python 3.11/3.13, geometry/legacy/Rust/profile и Blender package jobs успешны.
+- [x] CI push и PR на commit `a2b85ad...` прошёл; Python 3.11/3.13, geometry/legacy/Rust/profile и Blender package jobs успешны.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
 - [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
