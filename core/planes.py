@@ -24,18 +24,17 @@ def boundary_envelope_conflicts(
     *,
     active_contour: Sequence[Point3] | None = None,
 ) -> list[Diagnostic]:
-    """Check support edges against source planes active inside a given contour.
+    """Check whether another finite source-edge plane undercuts an eave.
 
-    points are the authored support/eave vertices to preserve. An optional
-    expanded active_contour determines which source-edge halfspaces compete
-    at those support edges.
+    A competing edge plane is active only while the orthogonal projection of
+    the inspected point lies on that finite edge segment. This avoids treating
+    the infinite extension of a reflex edge as a roof face across a notch.
     """
     active_points = points if active_contour is None else active_contour
     if len(points) != len(planes) or len(active_points) != len(planes):
         return [Diagnostic("PLANE_COUNT", "Для каждого ребра контура должна быть построена своя плоскость.")]
-    polygon_xy = [(point[0], point[1]) for point in active_points]
-    winding = 1.0 if signed_area(polygon_xy) > 0.0 else -1.0
-    scale = _bbox_scale(polygon_xy)
+
+    scale = max(_bbox_scale([(p[0], p[1]) for p in active_points]), 1.0)
     z_tol = eps * scale
     diagnostics: list[Diagnostic] = []
 
@@ -47,27 +46,29 @@ def boundary_envelope_conflicts(
                 continue
             other_start = active_points[other_index]
             other_end = active_points[(other_index + 1) % len(active_points)]
-            ox, oy = other_end[0] - other_start[0], other_end[1] - other_start[1]
-            line_a, line_b = winding * -oy, winding * ox
-            line_c = winding * (oy * other_start[0] - ox * other_start[1])
-            side_tol = eps * scale * hypot(ox, oy)
+            dx = other_end[0] - other_start[0]
+            dy = other_end[1] - other_start[1]
+            length_sq = dx * dx + dy * dy
+            if length_sq <= (eps * scale) ** 2:
+                continue
 
-            def side_at(t: float) -> float:
+            def projection_at(t: float) -> float:
                 x = start[0] + (end[0] - start[0]) * t
                 y = start[1] + (end[1] - start[1]) * t
-                return line_a * x + line_b * y + line_c
+                return ((x - other_start[0]) * dx + (y - other_start[1]) * dy) / length_sq
 
-            side0, side1 = side_at(0.0), side_at(1.0)
+            p0, p1 = projection_at(0.0), projection_at(1.0)
             breaks = [0.0, 1.0]
-            delta = side1 - side0
-            if abs(delta) > side_tol:
-                crossing = (-side_tol - side0) / delta
-                if 0.0 < crossing < 1.0:
-                    breaks.append(crossing)
+            delta = p1 - p0
+            if abs(delta) > eps:
+                for boundary in (0.0, 1.0):
+                    crossing = (boundary - p0) / delta
+                    if 0.0 < crossing < 1.0:
+                        breaks.append(crossing)
             breaks.sort()
 
             for t0, t1 in zip(breaks, breaks[1:]):
-                if side_at((t0 + t1) * 0.5) < -side_tol:
+                if not (-eps <= projection_at((t0 + t1) * 0.5) <= 1.0 + eps):
                     continue
                 undercut = False
                 for t in (t0, t1):
@@ -79,7 +80,7 @@ def boundary_envelope_conflicts(
                 if undercut:
                     diagnostics.append(Diagnostic(
                         "BOUNDARY_UNDERCUT",
-                        f"Плоскость ската {other_index + 1} опускается ниже карниза ската {edge_index + 1} в области пересечения их внутренних полуплоскостей.",
+                        f"Плоскость ската {other_index + 1} опускается ниже карниза ската {edge_index + 1} на конечном участке своего ребра.",
                         "ERROR"
                     ))
                     break
