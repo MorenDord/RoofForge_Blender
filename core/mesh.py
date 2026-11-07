@@ -147,12 +147,13 @@ def build_roof_surface_from_planes(
     *,
     source_area_xy: float | None = None,
     eps: float = 1e-9,
+    active_contour: Sequence[Point2] | None = None,
 ) -> RoofSurface:
-    """Assemble a continuous lower envelope over a simple expanded domain.
+    """Assemble a continuous lower envelope over an expanded build domain.
 
-    All source planes compete over the expanded contour. Their equality lines
-    define the roof ridges automatically, avoiding artificial cutoff edges
-    between neighbouring overhang strips. The source-plane set is unchanged.
+    The optional active contour retains ownership of the original eave planes.
+    Exterior overhang cells inherit the active set from their nearest point on
+    that contour, so shifted reflex edges cannot undercut the source roof.
     """
     if len(planes) < 3:
         raise GeometryInputError(
@@ -184,7 +185,9 @@ def build_roof_surface_from_planes(
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = eps * scale * scale
 
-    cells_by_slope = lower_envelope_restricted_cells(domain, planes, eps)
+    cells_by_slope = lower_envelope_restricted_cells(
+        domain, planes, eps, active_contour=active_contour
+    )
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []
