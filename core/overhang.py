@@ -5,6 +5,8 @@ from math import hypot, isfinite
 from typing import Sequence
 
 from .geometry import GeometryInputError, signed_area, validate_simple_polygon
+from .mesh import build_roof_surface_from_planes
+from .planes import build_boundary_planes, boundary_envelope_conflicts
 
 Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
@@ -197,4 +199,50 @@ def offset_contour_outward(
     return tuple(result)
 
 
-__all__ = ["offset_contour_outward"]
+
+def build_source_anchored_overhang_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    distance: float,
+):
+    """Extend a roof beyond the original eaves without moving support lines.
+
+    Pitch planes are built through the original 3D contour first. The outward
+    offset is used only as the roof's XY domain, so the same planes continue
+    beyond the source contour and remain exact along every authored eave edge.
+    """
+    if len(points) < 3 or len(points) != len(pitches_degrees):
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Нужно минимум три вершины и по одному уклону на каждое ребро."
+        )
+    distance = float(distance)
+    if not isfinite(distance) or distance <= 0.0:
+        raise GeometryInputError(
+            "INVALID_OVERHANG",
+            "Для построения свеса нужно положительное конечное расстояние."
+        )
+    source = tuple(
+        tuple(float(value) for value in point) for point in points
+    )
+    expanded = offset_contour_outward(source, distance)
+    planes = build_boundary_planes(source, pitches_degrees)
+    conflicts = boundary_envelope_conflicts(
+        source, planes, active_contour=expanded
+    )
+    if conflicts:
+        first = conflicts[0]
+        raise GeometryInputError(first.code, first.message)
+
+    domain = [(point[0], point[1]) for point in expanded]
+    source_area = abs(signed_area([(point[0], point[1]) for point in source]))
+    return build_roof_surface_from_planes(
+        domain, planes, source_area_xy=source_area
+    )
+
+
+__all__ = [
+    "offset_contour_outward",
+    "build_source_anchored_overhang_surface",
+]
+
