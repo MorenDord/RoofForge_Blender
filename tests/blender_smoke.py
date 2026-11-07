@@ -205,13 +205,13 @@ def main() -> None:
     panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
     panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
     ensure(
-        "get_contour_plan_icon" in panel_code.co_names
+        "get_roof_plan_icon" in panel_code.co_names
         and "template_icon" in panel_code.co_names,
-        "RoofForge Pitch panel does not draw the numbered contour plan",
+        "RoofForge Pitch panel does not draw the generated roof facet plan",
     )
     ensure(
-        "Top view — numbers match Pitch fields" in panel_code.co_consts,
-        "RoofForge Pitch panel does not label the numbered plan",
+        "Roof facet plan — numbers match Pitch fields" in panel_code.co_consts,
+        "RoofForge Pitch panel does not label the facet plan",
     )
     ensure(
         "Show" not in panel_code.co_consts,
@@ -228,6 +228,14 @@ def main() -> None:
     ensure(
         hasattr(bpy.context.scene.roof_forge, "plan_label_scale"),
         "number-size control was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "plan_line_width"),
+        "plan line-thickness control was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "roof_plan_json"),
+        "generated roof plan data property was not registered",
     )
     ensure(
         not hasattr(bpy.ops.roof_forge, "validate_input"),
@@ -253,23 +261,41 @@ def main() -> None:
         len(json.loads(plan_settings.outline_preview_json)) == 4,
         "prepared source contour was not stored for the plan preview",
     )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "could not generate the roof used by the facet plan preview",
+    )
     plan_points = json.loads(plan_settings.outline_preview_json)
+    plan_data = json.loads(plan_settings.roof_plan_json)
+    ensure(
+        len(plan_data.get("faces", ())) > 0 and len(plan_data.get("planes", ())) == 4,
+        "generated facet plan did not preserve the actual roof topology",
+    )
     plan_core = importlib.import_module(f"{extension.__name__}.core.plan_preview")
-    plan_png = plan_core.render_contour_plan_png(plan_points, text_scale=1.0)
+    plan_png = plan_core.render_roof_plan_png(plan_data, text_scale=1.0)
     ensure(
         plan_png.startswith(b"\x89PNG\r\n\x1a\n"),
-        "numbered contour plan renderer did not return a valid PNG",
+        "transparent roof plan renderer did not return a valid PNG",
+    )
+    ensure(
+        len(plan_core.visible_roof_edges(plan_data)) > 4,
+        "facet plan is missing the roof's internal ridge lines",
     )
     plan_ui = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
-    plan_icon = plan_ui.get_contour_plan_icon(
-        plan_points, text_scale=plan_settings.plan_label_scale
+    plan_icon = plan_ui.get_roof_plan_icon(
+        plan_data,
+        text_scale=plan_settings.plan_label_scale,
+        line_width=plan_settings.plan_line_width,
     )
-    ensure(plan_icon > 0, "Blender preview icon was not created for the numbered plan")
+    ensure(plan_icon > 0, "Blender preview icon was not created for the roof plan")
     plan_settings.plan_label_scale = 1.5
-    resized_icon = plan_ui.get_contour_plan_icon(
-        plan_points, text_scale=plan_settings.plan_label_scale
+    plan_settings.plan_line_width = 3.0
+    resized_icon = plan_ui.get_roof_plan_icon(
+        plan_data,
+        text_scale=plan_settings.plan_label_scale,
+        line_width=plan_settings.plan_line_width,
     )
-    ensure(resized_icon > 0, "number-size change invalidated the plan preview")
+    ensure(resized_icon > 0, "plan number/line setting did not refresh the preview")
     ensure(
         all(abs(float(plan_points[i][2])) < 1e-9 for i in range(4)),
         "plan preview changed source contour coordinates",
@@ -476,6 +502,40 @@ def main() -> None:
     )
     convex_roof = convex_settings.generated_object
     ensure(convex_roof is not None, "convex overhang roof pointer missing")
+    ensure(
+        convex_roof.get("roof_forge_overhang_support") == "SOURCE_CONTOUR_UNDERSIDE",
+        "generated overhang metadata does not identify the original support contour",
+    )
+    support_surface, support_shell, _support_solver = roof_build_for_units.build_roof_payload(
+        [
+            tuple(float(c) for c in vertex.co)
+            for vertex in convex_source.data.vertices
+        ],
+        [30.0, 35.0, 40.0, 32.0],
+        roof_build_for_units.centimeters_to_blender_units(
+            convex_settings.thickness_cm, bpy.context.scene
+        ),
+        roof_build_for_units.centimeters_to_blender_units(
+            convex_settings.eave_overhang_cm, bpy.context.scene
+        ),
+        cache_owner=convex_source,
+    )
+    ensure(support_shell.extrude_up, "eave shell did not extrude upward from its source-aligned underside")
+    for edge_index, start in enumerate([
+        tuple(float(c) for c in vertex.co)
+        for vertex in convex_source.data.vertices
+    ]):
+        end = tuple(float(c) for c in convex_source.data.vertices[(edge_index + 1) % 4].co)
+        support_plane = support_surface.planes[edge_index]
+        ensure(
+            abs(support_plane.height(start[0], start[1]) - start[2]) < 1e-7
+            and abs(support_plane.height(end[0], end[1]) - end[2]) < 1e-7,
+            f"support surface moved away from original eave edge {edge_index + 1}",
+        )
+    ensure(
+        support_shell.vertices[len(support_surface.vertices):] == support_surface.vertices,
+        "overhang underside vertices do not match the source-anchored support surface",
+    )
     coords = [vertex.co for vertex in convex_roof.data.vertices]
     ensure(min(v.x for v in coords) < -0.20, "overhang did not extend the left eave")
     ensure(min(v.y for v in coords) < -0.20, "overhang did not extend the lower eave")
@@ -522,8 +582,8 @@ def main() -> None:
     xyz_roof = xyz_settings.generated_object
     ensure(xyz_roof is not None, "non-flat overhang roof pointer missing")
     ensure(
-        xyz_roof.get("roof_forge_solver") == "SUPPORT_PLANE_ENVELOPE_3D_OFFSET_CONTOUR",
-        "non-flat contour did not use the XYZ support-plane solver",
+        xyz_roof.get("roof_forge_solver") == "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR",
+        "non-flat overhang did not preserve the original 3D support planes",
     )
     ensure(
         abs(float(xyz_roof.get("roof_forge_overhang_cm")) - 20.0) < 1e-7,
