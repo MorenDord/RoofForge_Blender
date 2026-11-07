@@ -46,6 +46,22 @@ class RoofOverhangTests(unittest.TestCase):
         extended = extend_convex_roof_surface(surface, overhang)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
         self.assertEqual(len(extended.boundary_xy), len(surface.boundary_xy))
+        # Every outer eave segment must terminate on its own source slope plane.
+        # This prevents the global envelope from silently assigning a neighbour's
+        # lower plane to an offset edge, which was the visible protruding-eave bug.
+        for edge_index, point_xy in enumerate(extended.boundary_xy):
+            plane = surface.planes[edge_index]
+            matches = [
+                vertex for vertex in extended.vertices
+                if abs(vertex[0] - point_xy[0]) < 1e-7
+                and abs(vertex[1] - point_xy[1]) < 1e-7
+            ]
+            self.assertTrue(matches, f"missing outer miter vertex {edge_index + 1}")
+            self.assertTrue(
+                any(abs(plane.height(point_xy[0], point_xy[1]) - vertex[2]) < 1e-6
+                    for vertex in matches),
+                f"outer miter vertex {edge_index + 1} does not continue source plane {edge_index + 1}",
+            )
         shell = build_roof_shell(extended, 0.01)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
         return extended
