@@ -18,6 +18,8 @@ def _settings_changed(self, context):
 
 class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
     edge_index: bpy.props.IntProperty(name="Edge Index", default=0, min=0)
+    start_vertex_index: bpy.props.IntProperty(name="Start Vertex", default=0, min=0)
+    end_vertex_index: bpy.props.IntProperty(name="End Vertex", default=1, min=0)
     pitch: bpy.props.FloatProperty(
         name="Pitch",
         description="Inclination angle for this boundary edge",
