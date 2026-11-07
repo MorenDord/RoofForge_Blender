@@ -3,7 +3,7 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** alpha.10 numbered plan UI implemented; versioned package validation pending
+**Status:** 0.2.0-alpha.10 packaged, CI-validated and inspected; manual viewport QA pending
 
 ## User-confirmed priorities
 
@@ -176,7 +176,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Alpha.10 source now includes pure PNG unit tests and Blender 5.0.1 smoke for PreviewCollection rendering, panel references, outline persistence and label-size control. Versioned alpha.10 package CI is pending.
+- Alpha.10 final CI passed on commit `d77b9907bb4b6c777e0ff890e8a07e81417cd1f2`: [push run](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42381677571) and [PR run](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42381682391). Both include Python 3.11/3.13, Blender 5.0.1 smoke, package build, official Extension Validator and all benchmark jobs.
 
 ### Ограничение размера
 
@@ -214,12 +214,12 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - [x] Validate Roof operator и Default Pitch property удалены; Create / Update выполняет валидацию.
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
-- [ ] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, numbered top-view plan icon generation and label-size update, stored contour preview, flat/mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [ ] Clean Extension ZIP 0.2.0-alpha.10 собран и принят официальным Blender Extension Validator.
+- [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, numbered top-view plan icon generation and label-size update, stored contour preview, flat/mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
+- [x] Clean Extension ZIP 0.2.0-alpha.10 собран и принят официальным Blender Extension Validator (artifact `13577397939`; inner ZIP SHA-256 `b08430a8454860226b469a6a7e23798771121fd376b6eb6efc69940ad77f6ca9`).
 - [x] Edit Mode Show controls removed from the Pitch workflow. Per-edge pitch editing maps directly through the numbered top-view plan.
 - [x] Pure renderer unit tests added for PNG signature/dimensions, monochrome output, configurable label size, double-digit edge labels, concave L/U contours and invalid inputs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
-- [ ] Alpha.10 full push/PR CI, clean extension ZIP and official Extension Validator.
+- [x] Alpha.10 push run `42381677571` and PR run `42381682391` passed all jobs: Python 3.11/3.13, Blender smoke, ZIP build, Extension Validator and all benchmark jobs.
 
-Итог: alpha.10 будет готова к ручной проверке после versioned CI и проверки содержимого ZIP. Pitch editing теперь не требует Edit Mode.
+Итог: 0.2.0-alpha.10 готова к ручной проверке в Blender. Pitch editing теперь не требует Edit Mode; связь полей с рёбрами показана на схеме.
