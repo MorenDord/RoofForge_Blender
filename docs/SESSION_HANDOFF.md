@@ -51,8 +51,11 @@
 
 ## Overhang and delete/recreate additions in alpha.6
 
-- `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` intersects adjacent offset boundary lines and creates one shared miter vertex per convex corner. Each source segment gets one parallel outer segment. No separate triangular corner fan is emitted; coverage and shell-manifold checks remain enabled.
-- Incoming/outgoing support planes must agree in height at each miter. Differing adjacent pitches that create a height mismatch are rejected as `OVERHANG_PITCH_DISCONTINUITY` rather than generating a broken seam.
+- `eave_overhang_cm` and `thickness_cm` are entered as centimeters. `centimeters_to_blender_units()` converts them using the active scene's `unit_settings.scale_length`; apply source object scale for physically consistent world-space dimensions.
+- `core/overhang.py` creates one extension strip per ordered source boundary edge. Every strip vertex remains on that edge's authored support plane.
+- At each corner the neighbouring strips calculate their endpoints on the actual 3D intersection ridge of the two support planes. Their overlapping ridge segment is welded by splitting the longer strip-side edge at the shorter endpoint. The remaining ridge segment is the single external corner connector. This is the fix for the protruding custom-pitch eaves in the user's screenshot.
+- There are no independent miter tails, fan spokes, or vertical zero-width caps. The combined top boundary is checked for self-intersection, exact edge coverage and closed-shell manifold validity.
+- Reflex/concave turns are accepted while the resulting offset boundary remains simple. L/U with individual pitches and nonzero overhang are covered by Python and Blender smoke tests. Offsets that collapse/self-intersect are rejected.
 - If the generated object has been deleted, Create / Update clears the stale pointer/name snapshot, creates a replacement in the active scene root collection, and confirms it is present in `bpy.data.objects` and `scene.objects`.
 - Blender smoke explicitly deletes and re-creates the L roof from its unchanged source contour.
 - Thickness-only Live Update uses the validated surface cache and rebuilds only the closed shell. `mesh.attributes` face values use bulk `foreach_set`.
@@ -80,7 +83,7 @@
 
 ## CI evidence for the packaged commit
 
-Both complete workflows on head `a2b85ad189f019a1310ad46a6bfe69f94ef17361` passed:
+Both complete workflows on code/package commit `0a45005bcd8196728b39dd433fff94d36d8939a0` passed:
 - Python 3.11 and 3.13 CI: passed.
 - Blender 5.0.1 background smoke: passed.
 - Clean Extension ZIP and official Extension Validator: passed.
@@ -90,15 +93,11 @@ This is background CI evidence. User's visual viewport QA is still required.
 
 ## User QA priority
 
-1. Check that each overhang corner has one shared miter point, with no triangular fan or duplicate spokes.
-2. Try a roof with unequal pitches on adjacent boundary edges and nonzero overhang; the add-on must explain a support-plane height discontinuity instead of emitting broken geometry.
-3. Set Update delay to 0 ms and compare with 200–300 ms. Zero removes debounce; geometry calculation remains main-thread work.
-
-After installing the ZIP, please also check:
-4. A convex quadrilateral with random XYZ heights (the existing 3D route).
-5. A flat-Z concave L and U with different pitch values on adjacent slopes.
-6. Edit a pitch after roof creation; ensure the same roof object updates and no duplicate appears.
-7. Change Thickness; ensure it updates.
+1. Check a flat-Z convex contour with custom pitch on every edge. No strip should protrude beyond its neighbouring ridge connector.
+2. Check the same with a mixed-Z convex contour.
+3. Check L/U contours with individual pitches and nonzero eaves. Moderate offsets should remain continuous; a too-large offset that collapses the notch should fail cleanly and preserve the last valid roof.
+4. Set Update delay to 0 ms and compare with 200–300 ms. Zero removes intentional debounce; geometry still runs on Blender's main thread.
+5. Delete and re-create a roof from the same source, then change pitch and thickness; ensure the same result object updates.
 8. Rename the source object, then a generated roof object; ensure Live Update stops and the mesh is preserved.
 9. Try a 12-edge multi-notch contour as an intentional stress case. Failure is currently a known alpha limitation; capture the exact error and .blend rather than repairing it manually.
 
