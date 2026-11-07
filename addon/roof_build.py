@@ -282,6 +282,8 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
     settings.source_name_snapshot = source.name
     settings.generated_object = None
     settings.generated_name_snapshot = ""
+    if hasattr(settings, "roof_plan_json"):
+        settings.roof_plan_json = ""
     settings.last_status = (
         f"Загружено скатов: {edge_count}. Углы можно задавать отдельно."
     )
