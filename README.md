@@ -33,7 +33,7 @@ The angle fields are numbered in the deterministic contour traversal order. Ther
 When every boundary vertex has the same Z height, RoofForge uses the Python weighted wavefront solver. It supports per-edge pitch and has passing CI fixtures for:
 - convex and concave radial contours through 64 edges;
 - concave L/U contours with wavy boundaries and individual pitches;
-- a multi-notch concave contour;
+- selected multi-notch and same-time split/collapse fixtures remain experimental and are not guaranteed;
 - selected simultaneous split/collapse and needle events.
 
 This is a tested family of cases, not a proof for every possible simple polygon. A geometric/event configuration outside the solver's supported event set is rejected with an error; the previous generated roof is kept during live update.
