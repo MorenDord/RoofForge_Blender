@@ -8,7 +8,7 @@ import bpy
 
 from ..core.geometry import GeometryInputError
 from ..core.mesh import build_roof_surface
-from ..core.overhang import extend_convex_roof_surface
+from ..core.overhang import offset_contour_outward
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -67,17 +67,22 @@ def _cache_owner_id(owner) -> int | None:
 
 
 def _build_roof_surface(points, pitches, overhang):
-    if is_flat_eave_contour(points):
-        surface = build_wavefront_roof_surface(points, pitches)
+    # Eaves are part of the source contour now. Offset the contour once, then
+    # build the entire roof from that one new closed boundary. No strips or
+    # corner patches are appended to a previously generated roof.
+    build_points = (
+        offset_contour_outward(points, overhang)
+        if overhang > 0.0
+        else tuple(tuple(float(value) for value in point) for point in points)
+    )
+    if is_flat_eave_contour(build_points):
+        surface = build_wavefront_roof_surface(build_points, pitches)
         solver = "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     else:
-        surface = build_roof_surface(points, pitches)
+        surface = build_roof_surface(build_points, pitches)
         solver = "SUPPORT_PLANE_ENVELOPE_3D"
     if overhang > 0.0:
-        # The eave stage extends each source boundary strip in its own support
-        # plane, then closes every corner against one contour-derived miter loop.
-        surface = extend_convex_roof_surface(surface, overhang)
-        solver = f"{solver}_EAVE_MITER_LOOP"
+        solver = f"{solver}_OFFSET_CONTOUR"
     return surface, solver
 
 

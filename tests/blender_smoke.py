@@ -253,7 +253,7 @@ def main() -> None:
     roof = settings.generated_object
     ensure(roof is not None, "generated roof pointer was not stored")
     ensure(
-        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_FLAT_EAVE",
+        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_FLAT_EAVE_OFFSET_CONTOUR",
         "flat concave L did not use the weighted wavefront solver",
     )
     ensure(
@@ -330,7 +330,7 @@ def main() -> None:
     )
 
 
-    # Concave U contour with per-edge pitch and no overhang.
+    # Concave U contour with per-edge pitch and a nonzero eave offset.
     clear_scene()
     u_source = create_u_contour("RoofForge_Smoke_Concave_U")
     u_settings = bpy.context.scene.roof_forge
@@ -345,7 +345,7 @@ def main() -> None:
         item.pitch = 30.0 + (index % 4) * 2.5
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "concave U contour did not generate at zero overhang",
+        "concave U contour did not generate from its expanded eave contour",
     )
     u_roof = u_settings.generated_object
     ensure(u_roof is not None, "concave U generated roof pointer missing")
@@ -384,7 +384,7 @@ def main() -> None:
     )
     delay_settings.live_update_delay_ms = 0
 
-    # Convex roof with a horizontal eave overhang.
+    # Convex roof rebuilt from one expanded contour.
     clear_scene()
     convex_source = create_square_object("RoofForge_Smoke_Convex_Overhang")
     convex_settings = bpy.context.scene.roof_forge
@@ -427,13 +427,8 @@ def main() -> None:
         if component == 0
     ]
     ensure(
-        all(slope >= -1 for slope in top_slope_values),
-        "overhang contains invalid face/slope metadata",
-    )
-    miter_cap_count = sum(1 for slope in top_slope_values if slope == -1)
-    ensure(
-        miter_cap_count > 0,
-        "custom-pitch eave did not create local miter corner caps",
+        all(0 <= slope < 4 for slope in top_slope_values),
+        "the rebuilt roof must contain only the original four edge pitches and no separate eave-cap faces",
     )
     ensure(
         len(top_slope_values) == len(convex_roof.data.attributes["roof_forge_slope_index"].data)
@@ -442,7 +437,7 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
-    # The same miter algorithm must work on non-flat XYZ eaves.
+    # The same offset-contour rebuild must work on non-flat XYZ eaves.
     clear_scene()
     xyz_source = create_xyz_rectangle("RoofForge_Smoke_XYZ_Overhang")
     xyz_settings = bpy.context.scene.roof_forge
@@ -461,7 +456,7 @@ def main() -> None:
     xyz_roof = xyz_settings.generated_object
     ensure(xyz_roof is not None, "non-flat overhang roof pointer missing")
     ensure(
-        xyz_roof.get("roof_forge_solver") == "SUPPORT_PLANE_ENVELOPE_3D",
+        xyz_roof.get("roof_forge_solver") == "SUPPORT_PLANE_ENVELOPE_3D_OFFSET_CONTOUR",
         "non-flat contour did not use the XYZ support-plane solver",
     )
     ensure(
