@@ -427,16 +427,8 @@ def main() -> None:
         if component == 0
     ]
     ensure(
-        all(slope >= -1 for slope in top_slope_values),
-        "mitered overhang contains invalid top face metadata",
-    )
-    corner_join_count = sum(
-        1 for component, slope in zip(component_values, slope_values)
-        if component == 0 and slope == -1
-    )
-    ensure(
-        corner_join_count <= 4,
-        f"expected at most one cap per convex corner, got {corner_join_count}",
+        all(slope >= 0 for slope in top_slope_values),
+        "overhang must preserve original slope ids on all edge strips; no fan/cap faces expected",
     )
     ensure(
         len(top_slope_values) == len(convex_roof.data.attributes["roof_forge_slope_index"].data)

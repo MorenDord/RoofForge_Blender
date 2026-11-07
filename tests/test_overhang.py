@@ -43,38 +43,38 @@ CONCAVE_U = [
 
 class RoofOverhangTests(unittest.TestCase):
     def _assert_extended_shell(self, surface, overhang):
+        edge_uses = {}
+        for face in surface.faces:
+            for index, first in enumerate(face):
+                second = face[(index + 1) % len(face)]
+                key = (min(first, second), max(first, second))
+                edge_uses[key] = edge_uses.get(key, 0) + 1
+        boundary_edge_count = sum(1 for count in edge_uses.values() if count == 1)
+
         extended = extend_convex_roof_surface(surface, overhang)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
-        self.assertGreaterEqual(len(extended.boundary_xy), len(surface.boundary_xy))
-        added_faces = list(zip(
+        added = list(zip(
             extended.faces[len(surface.faces):],
             extended.face_slope_indices[len(surface.faces):],
         ))
-        strips = [
-            (face, slope_id) for face, slope_id in added_faces
-            if slope_id >= 0
-        ]
-        caps = [
-            (face, slope_id) for face, slope_id in added_faces
-            if slope_id == -1
-        ]
+        strips = [(face, slope_id) for face, slope_id in added if slope_id >= 0]
         self.assertEqual(
-            len(strips), len(surface.boundary_xy),
-            "there must be exactly one plane-preserving strip per boundary edge",
+            len(strips), boundary_edge_count,
+            "there must be exactly one plane-preserving strip per source boundary segment",
+        )
+        self.assertTrue(
+            all(slope_id >= 0 for _face, slope_id in added),
+            "eave construction must not add fan/cap faces outside the authored support planes",
         )
         for face, slope_id in strips:
             plane = surface.planes[slope_id]
             for vertex_id in face:
                 x, y, z = extended.vertices[vertex_id]
                 self.assertAlmostEqual(plane.height(x, y), z, places=7)
-        self.assertTrue(
-            all(len(face) == 4 for face, _slope_id in caps),
-            "custom-angle joins must use one quad cap, not a fan of spokes",
-        )
+
         shell = build_roof_shell(extended, 0.01)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
         return extended
-
     def test_equal_pitch_flat_contour_has_exact_miter_offset(self):
         surface = build_wavefront_roof_surface(FLAT_RECTANGLE, [35.0] * 4)
         extended = self._assert_extended_shell(surface, 0.25)
