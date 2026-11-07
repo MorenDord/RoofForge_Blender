@@ -28,8 +28,14 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     text=f"Edge {item.edge_index + 1:02d} "
                          f"(V{item.start_vertex_index + 1}→V{item.end_vertex_index + 1})"
                 )
+                show = row.operator(
+                    "roof_forge.select_slope_edge",
+                    text="Show",
+                    icon="EDGESEL",
+                )
+                show.edge_index = item.edge_index
                 row.prop(item, "pitch", text="°")
-            box.label(text="Order follows the detected closed boundary")
+            box.label(text="Show selects the matching source edge in Edit Mode")
 
         col.separator()
         col.label(text="Solid roof shell")
@@ -54,6 +60,6 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             col.separator()
             col.label(text="Flat-Z: weighted wavefront")
             col.label(text="Mixed-Z: 3D plane envelope")
-            col.label(text="Overhang: convex contours only")
+            col.label(text="Overhang: one offset contour")
         else:
             col.label(text="Select a mesh object to begin", icon="INFO")

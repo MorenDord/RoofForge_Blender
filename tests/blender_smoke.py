@@ -198,6 +198,24 @@ def main() -> None:
     extension.register()  # Registration must be safe to call twice.
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
     ensure(
+        hasattr(bpy.ops.roof_forge, "select_slope_edge"),
+        "Show source-edge operator was not registered",
+    )
+    panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
+    panel_constants = set(panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts)
+    ensure(
+        "roof_forge.select_slope_edge" in panel_constants,
+        "RoofForge Pitch panel does not create a Show operator button",
+    )
+    ensure(
+        "Show" in panel_constants,
+        "RoofForge Pitch panel does not display the Show button label",
+    )
+    ensure(
+        hasattr(bpy.types, "ROOFFORGE_PT_main"),
+        "RoofForge sidebar panel was not registered",
+    )
+    ensure(
         not hasattr(bpy.ops.roof_forge, "validate_input"),
         "Validate Roof operator should no longer be registered",
     )
