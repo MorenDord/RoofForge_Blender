@@ -3,25 +3,25 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** 0.2.0-alpha.10 packaged, CI-validated and inspected; manual viewport QA pending
+**Status:** 0.2.0-alpha.11 implementation in progress; geometry/UI regression suite and package CI pending
 
 ## User-confirmed priorities
 
 1. Support **simple** polygon contours with up to 64 boundary edges: convex, concave, narrow notches and non-uniform edge lengths. More than 64 edges are outside the 0.2.0 target; self-intersecting contours, zero-length projected edges and multiple independent boundary loops must be diagnosed, not silently repaired.
 2. Do not require selecting vertices or edges in Edit Mode. Selecting the mesh object is enough; RoofForge discovers one outer boundary from the mesh topology. A face mesh uses its boundary edges; a wire-only mesh uses its closed wire loop.
-3. Give every boundary edge/slope its own pitch angle. Use a compact list of numeric fields plus a numbered top-view contour plan; each number must map to the same ordered Pitch row.
+3. Give every boundary edge/slope its own pitch angle. Use a compact list of numeric fields plus a numbered top-view roof-facet plan; each number is centered inside its generated slope and maps to the same ordered Pitch row.
 4. Pitch edits trigger a debounced live rebuild. Keep the last valid roof visible until the replacement is built and validated. Coalesce rapid changes; never regenerate inside a UI draw callback.
-5. Provide an optional eave overhang in centimeters by offsetting the source contour outward as one polygon, then rebuilding the entire roof from that new contour with the same per-edge pitch order. Reject collapsed or self-intersecting offsets.
+5. Provide an optional eave overhang in centimeters by extending the source-edge pitch planes over one outward-offset domain. Keep the underside/support surface exactly on the original 3D contour; add shell thickness above that support surface. Reject collapsed or self-intersecting offsets.
 
 Everything else in the 1.0 roadmap is deferred: ridge/valley/hip profiles, standing seams, UV, LOD, export, complex material handling and detach/relink.
 
 ## Geometry contract
 
 - Calculations remain in source-object local coordinates and retain all XYZ boundary coordinates.
-- Each source boundary edge owns one stable slope ID and one pitch angle.
+- Each source boundary edge owns one stable slope ID and one pitch angle. With overhang, its support plane remains anchored to the original edge endpoints; only the XY build domain is offset outward.
 - Its plane must pass through both endpoint vertices and satisfy the requested total inclination. A mathematically incompatible pitch must fail with a clear message; never clamp it silently.
 - The output must cover the source polygon exactly within scale-aware tolerances. Internal surface edges must be shared, and each boundary edge must be covered by the generated surface boundary.
-- Output facets must retain source-slope identity and be planar. The final thickness shell must pass edge- and vertex-manifold validation.
+- Output facets must retain source-slope identity and be planar. The final thickness shell must pass edge- and vertex-manifold validation. Coplanar internal seams must be dissolved from the Blender mesh.
 - For this milestone, "arbitrary contour" means any valid, non-self-intersecting single-loop polygon. Holes and multiple loops are deferred unless they fall out of the boundary model without destabilizing the core.
 - The existing weighted wavefront prototype is **not approved for production integration as-is**. The distance-field prototype is also not an acceptable replacement: its transition patches are approximate and its current uniform refinement has poor scaling.
 
@@ -68,6 +68,9 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [ ] Per-edge pitch values remain mapped to the correct source edge after rebuilds.
 - [x] Changing a pitch causes one coalesced Live Update using the selected 0–1000 ms delay; rapid changes cancel the pending timer and replace it.
 - [ ] A failed update leaves the last valid output unchanged.
+- [ ] With nonzero overhang, the underside/support planes pass through every original contour edge and the shell is extruded upward from that support surface.
+- [ ] Coplanar internal roof edges are absent from the generated Blender mesh.
+- [ ] The facet preview is transparent white RGBA, antialiased, width-responsive and labels stay inside their corresponding facet.
 - [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
 - [x] Eaves use a single outward-offset source contour. Every new edge is parallel to its original edge and exactly the requested distance outward; corresponding vertex Z values and per-edge pitch order are preserved. The entire roof is rebuilt from this contour, with no post-build strips/caps. Convex and tested concave L/U contours, plus mixed-height convex XYZ, pass.
 - [x] Live Update delay is adjustable from 0 to 1000 ms, default 0 ms; no intentional debounce at zero. Ridge/valley/hip, seam, UV, LOD or export controls remain out of scope.
