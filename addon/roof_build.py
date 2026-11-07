@@ -74,11 +74,10 @@ def _build_roof_surface(points, pitches, overhang):
         surface = build_roof_surface(points, pitches)
         solver = "SUPPORT_PLANE_ENVELOPE_3D"
     if overhang > 0.0:
-        # The eave stage rebuilds the expanded boundary as a single global
-        # lower envelope. It consumes the original, already validated support
-        # planes and keeps the weighted wavefront as the base for flat L/U roofs.
+        # The eave stage extends each source boundary strip in its own support
+        # plane, then closes every corner against one contour-derived miter loop.
         surface = extend_convex_roof_surface(surface, overhang)
-        solver = f"{solver}_EAVE_ENVELOPE"
+        solver = f"{solver}_EAVE_MITER_LOOP"
     return surface, solver
 
 

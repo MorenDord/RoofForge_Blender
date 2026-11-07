@@ -15,6 +15,119 @@ def _cross2(first: Point2, second: Point2) -> float:
     return first[0] * second[1] - first[1] * second[0]
 
 
+
+
+def _miter_offset_point(
+    previous: Point3,
+    corner: Point3,
+    following: Point3,
+    distance: float,
+    winding: float,
+    tolerance: float,
+    corner_index: int,
+) -> Point2:
+    """Return the one XY corner shared by the complete parallel-offset loop."""
+    previous_dx = corner[0] - previous[0]
+    previous_dy = corner[1] - previous[1]
+    next_dx = following[0] - corner[0]
+    next_dy = following[1] - corner[1]
+    previous_length = hypot(previous_dx, previous_dy)
+    next_length = hypot(next_dx, next_dy)
+    if previous_length <= tolerance or next_length <= tolerance:
+        raise GeometryInputError(
+            "OVERHANG_ZERO_LENGTH_EDGE",
+            f"Ребро рядом с углом {corner_index + 1} имеет нулевую длину.",
+        )
+
+    previous_tangent = (
+        previous_dx / previous_length,
+        previous_dy / previous_length,
+    )
+    next_tangent = (next_dx / next_length, next_dy / next_length)
+    previous_normal = (
+        winding * previous_tangent[1],
+        -winding * previous_tangent[0],
+    )
+    next_normal = (
+        winding * next_tangent[1],
+        -winding * next_tangent[0],
+    )
+    previous_origin = (
+        corner[0] + previous_normal[0] * distance,
+        corner[1] + previous_normal[1] * distance,
+    )
+    next_origin = (
+        corner[0] + next_normal[0] * distance,
+        corner[1] + next_normal[1] * distance,
+    )
+
+    denominator = _cross2(previous_tangent, next_tangent)
+    if abs(denominator) <= 1e-12:
+        alignment = (
+            previous_tangent[0] * next_tangent[0]
+            + previous_tangent[1] * next_tangent[1]
+        )
+        if alignment < 0.0:
+            raise GeometryInputError(
+                "OVERHANG_PARALLEL_BACKTRACK",
+                f"В углу {corner_index + 1} контур разворачивается назад.",
+            )
+        return previous_origin
+
+    delta = (
+        next_origin[0] - previous_origin[0],
+        next_origin[1] - previous_origin[1],
+    )
+    parameter = _cross2(delta, next_tangent) / denominator
+    result = (
+        previous_origin[0] + previous_tangent[0] * parameter,
+        previous_origin[1] + previous_tangent[1] * parameter,
+    )
+    miter_length = hypot(
+        result[0] - corner[0], result[1] - corner[1]
+    )
+    if miter_length > max(distance * 50.0, distance + tolerance * 10.0):
+        raise GeometryInputError(
+            "OVERHANG_MITER_TOO_LONG",
+            f"Угол {corner_index + 1} слишком острый: miter длиннее 50 ширин свеса.",
+        )
+    return result
+
+
+def _triangle_area_3d(first: Point3, second: Point3, third: Point3) -> float:
+    ab = (
+        second[0] - first[0],
+        second[1] - first[1],
+        second[2] - first[2],
+    )
+    ac = (
+        third[0] - first[0],
+        third[1] - first[1],
+        third[2] - first[2],
+    )
+    cross = (
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    )
+    return 0.5 * hypot(hypot(cross[0], cross[1]), cross[2])
+
+
+def _point_on_segment_3d(
+    point: Point3, first: Point3, second: Point3, tolerance: float
+) -> bool:
+    direction = tuple(second[i] - first[i] for i in range(3))
+    offset = tuple(point[i] - first[i] for i in range(3))
+    length_sq = sum(value * value for value in direction)
+    if length_sq <= tolerance * tolerance:
+        return hypot(hypot(offset[0], offset[1]), offset[2]) <= tolerance
+    parameter = sum(offset[i] * direction[i] for i in range(3)) / length_sq
+    if parameter < -tolerance or parameter > 1.0 + tolerance:
+        return False
+    closest = tuple(first[i] + parameter * direction[i] for i in range(3))
+    residual = tuple(point[i] - closest[i] for i in range(3))
+    return hypot(hypot(residual[0], residual[1]), residual[2]) <= tolerance
+
 def _edge_offset_ridge_intersection(
     edge_start: Point3,
     edge_end: Point3,
@@ -147,15 +260,12 @@ def extend_convex_roof_surface(
 ) -> RoofSurface:
     """Extend a simple convex or concave eave, preserving each original plane.
 
-    Each boundary segment gets one quad strip whose vertices all lie on that
-    edge's source support plane. At every corner, the neighbouring strips
-    terminate on the exact 3D intersection ridge. Their overlapping part is
-    welded by splitting the longer side edge at the shorter endpoint; the
-    remaining ridge segment is the single outer corner boundary edge.
-
-    The resulting outer boundary alternates strip-parallel eave edges and
-    shared ridge connectors. No independent miter tails, fan spokes or
-    vertical zero-width wall edges are introduced.
+    Each boundary segment gets one strip on its own support plane. At every
+    corner the neighbouring strips share the overlapping part of their exact
+    3D intersection ridge. A single local miter triangle fills the remaining
+    gap to the XY offset corner computed from the source contour. The output
+    perimeter is therefore one simple offset loop; ridge intersections are
+    internal edges, never protruding perimeter tails.
     """
     if not isfinite(distance) or distance < 0.0:
         raise GeometryInputError(
@@ -262,8 +372,10 @@ def extend_convex_roof_surface(
 
     incoming_points: list[Point3] = []
     outgoing_points: list[Point3] = []
+    miter_points: list[Point3] = []
     incoming_distances: list[float] = []
     outgoing_distances: list[float] = []
+    corner_cap_active: list[bool] = []
 
     for index, record in enumerate(ordered):
         previous_record = ordered[index - 1]
@@ -288,6 +400,19 @@ def extend_convex_roof_surface(
                 "свес нельзя продолжить без разрыва.",
             )
 
+        # The XY perimeter corner is determined only by the source contour
+        # and the requested eave distance. It is shared by both neighbouring
+        # strips; roof pitch must never push the outline outward along a ridge.
+        miter_xy = _miter_offset_point(
+            previous_corner,
+            corner,
+            following_corner,
+            distance,
+            winding,
+            tolerance,
+            index,
+        )
+
         gradient_scale = max(
             1.0,
             abs(incoming_plane.a), abs(incoming_plane.b),
@@ -298,51 +423,6 @@ def extend_convex_roof_surface(
             and abs(incoming_plane.b - outgoing_plane.b) <= plane_tolerance * gradient_scale
         )
         if coincident:
-            # Both planes are identical; their offset lines meet at the
-            # ordinary XY miter point.
-            previous_dx = corner[0] - previous_corner[0]
-            previous_dy = corner[1] - previous_corner[1]
-            next_dx = following_corner[0] - corner[0]
-            next_dy = following_corner[1] - corner[1]
-            previous_length = hypot(previous_dx, previous_dy)
-            next_length = hypot(next_dx, next_dy)
-            if previous_length <= tolerance or next_length <= tolerance:
-                raise GeometryInputError(
-                    "OVERHANG_ZERO_LENGTH_EDGE",
-                    f"Ребро рядом с углом {index + 1} имеет нулевую длину.",
-                )
-            previous_tangent = (previous_dx / previous_length, previous_dy / previous_length)
-            next_tangent = (next_dx / next_length, next_dy / next_length)
-            previous_origin = (
-                corner[0] + winding * previous_tangent[1] * distance,
-                corner[1] - winding * previous_tangent[0] * distance,
-            )
-            next_origin = (
-                corner[0] + winding * next_tangent[1] * distance,
-                corner[1] - winding * next_tangent[0] * distance,
-            )
-            denominator = _cross2(previous_tangent, next_tangent)
-            if abs(denominator) <= 1e-12:
-                alignment = (
-                    previous_tangent[0] * next_tangent[0]
-                    + previous_tangent[1] * next_tangent[1]
-                )
-                if alignment < 0.0:
-                    raise GeometryInputError(
-                        "OVERHANG_PARALLEL_BACKTRACK",
-                        f"В углу {index + 1} контур разворачивается назад.",
-                    )
-                miter_xy = previous_origin
-            else:
-                delta = (
-                    next_origin[0] - previous_origin[0],
-                    next_origin[1] - previous_origin[1],
-                )
-                parameter = _cross2(delta, next_tangent) / denominator
-                miter_xy = (
-                    previous_origin[0] + previous_tangent[0] * parameter,
-                    previous_origin[1] + previous_tangent[1] * parameter,
-                )
             point = (
                 miter_xy[0], miter_xy[1],
                 outgoing_plane.height(*miter_xy),
@@ -350,30 +430,70 @@ def extend_convex_roof_surface(
             incoming_point = outgoing_point = point
         else:
             incoming_point = _edge_offset_ridge_intersection(
-                previous_corner, corner, corner,
-                incoming_plane, outgoing_plane,
-                distance, winding, tolerance,
+                previous_corner,
+                corner,
+                corner,
+                incoming_plane,
+                outgoing_plane,
+                distance,
+                winding,
+                tolerance,
             )
             outgoing_point = _edge_offset_ridge_intersection(
-                corner, following_corner, corner,
-                outgoing_plane, incoming_plane,
-                distance, winding, tolerance,
+                corner,
+                following_corner,
+                corner,
+                outgoing_plane,
+                incoming_plane,
+                distance,
+                winding,
+                tolerance,
             )
             _validate_corner_ridge(
                 corner, incoming_point, outgoing_point, tolerance, index
             )
 
+        # The two support-plane strips meet along their common ridge segment.
+        # A single miter-cap triangle closes the gap from that segment to the
+        # contour-derived offset corner. The cap is local: it cannot extend
+        # either strip beyond the one shared outer perimeter.
+        miter_z = 0.5 * (
+            incoming_plane.height(*miter_xy)
+            + outgoing_plane.height(*miter_xy)
+        )
+        miter_point = (miter_xy[0], miter_xy[1], miter_z)
+
+        cap_area_3d = _triangle_area_3d(
+            outgoing_point, incoming_point, miter_point
+        )
+        if cap_area_3d > tolerance * tolerance:
+            cap_active = True
+        else:
+            # If the standard offset corner already lies on the shared ridge
+            # segment, no cap is needed: one straight boundary connector is
+            # sufficient. Otherwise a zero-area cap would conceal a broken join.
+            if not _point_on_segment_3d(
+                miter_point, outgoing_point, incoming_point, tolerance * 20.0
+            ):
+                raise GeometryInputError(
+                    "OVERHANG_MITER_CAP_DEGENERATE",
+                    f"В углу {index + 1} miter-контур не пересекает общую линию скатов. "
+                    "Измени Pitch или уменьши свес.",
+                )
+            cap_active = False
+
         incoming_points.append(incoming_point)
         outgoing_points.append(outgoing_point)
+        miter_points.append(miter_point)
         incoming_distances.append(hypot(
-            incoming_point[0] - corner[0],
-            incoming_point[1] - corner[1],
+            hypot(incoming_point[0] - corner[0], incoming_point[1] - corner[1]),
+            incoming_point[2] - corner[2],
         ))
         outgoing_distances.append(hypot(
-            outgoing_point[0] - corner[0],
-            outgoing_point[1] - corner[1],
+            hypot(outgoing_point[0] - corner[0], outgoing_point[1] - corner[1]),
+            outgoing_point[2] - corner[2],
         ))
-
+        corner_cap_active.append(cap_active)
     registry = _VertexRegistry(tolerance)
     remap = [registry.add(point) for point in surface.vertices]
     if any(new_index != old_index for old_index, new_index in enumerate(remap)):
@@ -383,6 +503,7 @@ def extend_convex_roof_surface(
         )
     incoming_ids = [registry.add(point) for point in incoming_points]
     outgoing_ids = [registry.add(point) for point in outgoing_points]
+    miter_ids = [registry.add(point) for point in miter_points]
 
     faces = [tuple(remap[index] for index in face) for face in surface.faces]
     slope_ids = list(surface.face_slope_indices)
@@ -435,6 +556,25 @@ def extend_convex_roof_surface(
         faces.append(tuple(compact))
         slope_ids.append(slope_index)
 
+    # Complete every corner with a local miter cap. Its base is the shared
+    # ridge segment already present on the longer strip; its other two sides
+    # replace the ridge tail with the single offset-loop corner.
+    for index in range(len(ordered)):
+        if not corner_cap_active[index]:
+            continue
+        cap = (
+            outgoing_ids[index],
+            incoming_ids[index],
+            miter_ids[index],
+        )
+        if len(set(cap)) != 3:
+            raise GeometryInputError(
+                "OVERHANG_MITER_CAP_DEGENERATE",
+                f"В углу {index + 1} miter-заглушка имеет повторяющиеся вершины.",
+            )
+        faces.append(cap)
+        slope_ids.append(-1)
+
     boundary_xy: list[Point2] = []
 
     def append_boundary_point(point: Point3) -> None:
@@ -449,6 +589,8 @@ def extend_convex_roof_surface(
         next_index = (index + 1) % len(ordered)
         append_boundary_point(outgoing_points[index])
         append_boundary_point(incoming_points[next_index])
+        if corner_cap_active[next_index]:
+            append_boundary_point(miter_points[next_index])
         append_boundary_point(outgoing_points[next_index])
 
     if len(boundary_xy) > 1 and hypot(
@@ -504,7 +646,7 @@ def extend_convex_roof_surface(
     except GeometryInputError as exc:
         raise GeometryInputError(
             "OVERHANG_SURFACE_INVALID",
-            "Не удалось сварить соседние полосы свеса по общей линии скатов: " + exc.message,
+            "Не удалось собрать единую внешнюю кромку свеса: " + exc.message,
         ) from exc
 
     surface_area = sum(

@@ -427,8 +427,13 @@ def main() -> None:
         if component == 0
     ]
     ensure(
-        all(slope >= 0 for slope in top_slope_values),
-        "overhang must preserve original slope ids on all edge strips; no fan/cap faces expected",
+        all(slope >= -1 for slope in top_slope_values),
+        "overhang contains invalid face/slope metadata",
+    )
+    miter_cap_count = sum(1 for slope in top_slope_values if slope == -1)
+    ensure(
+        miter_cap_count > 0,
+        "custom-pitch eave did not create local miter corner caps",
     )
     ensure(
         len(top_slope_values) == len(convex_roof.data.attributes["roof_forge_slope_index"].data)
