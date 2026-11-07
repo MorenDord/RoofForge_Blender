@@ -102,8 +102,12 @@ def _run_pending_update():
         )
         old_mesh = roof.data
         roof.data = new_mesh
-        roof.matrix_world = source.matrix_world.copy()
-        apply_shell_metadata(roof, source, surface, shell, pitches, solver)
+        try:
+            roof.matrix_world = source.matrix_world.copy()
+            apply_shell_metadata(roof, source, surface, shell, pitches, solver)
+        except Exception:
+            roof.data = old_mesh
+            raise
         if old_mesh is not new_mesh and old_mesh.users == 0:
             bpy.data.meshes.remove(old_mesh)
         settings.last_status = (
