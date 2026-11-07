@@ -17,12 +17,23 @@ from .geometry import (
 Point3 = tuple[float, float, float]
 
 
-def boundary_envelope_conflicts(points: Sequence[Point3], planes: Sequence[PlaneZ],
-                                eps: float = 1e-8) -> list[Diagnostic]:
-    """Report eave undercuts only from planes whose inward edge halfspace is active."""
-    if len(points) != len(planes):
+def boundary_envelope_conflicts(
+    points: Sequence[Point3],
+    planes: Sequence[PlaneZ],
+    eps: float = 1e-8,
+    *,
+    active_contour: Sequence[Point3] | None = None,
+) -> list[Diagnostic]:
+    """Check support edges against source planes active inside a given contour.
+
+    points are the authored support/eave vertices to preserve. An optional
+    expanded active_contour determines which source-edge halfspaces compete
+    at those support edges.
+    """
+    active_points = points if active_contour is None else active_contour
+    if len(points) != len(planes) or len(active_points) != len(planes):
         return [Diagnostic("PLANE_COUNT", "Для каждого ребра контура должна быть построена своя плоскость.")]
-    polygon_xy = [(point[0], point[1]) for point in points]
+    polygon_xy = [(point[0], point[1]) for point in active_points]
     winding = 1.0 if signed_area(polygon_xy) > 0.0 else -1.0
     scale = _bbox_scale(polygon_xy)
     z_tol = eps * scale
@@ -34,8 +45,8 @@ def boundary_envelope_conflicts(points: Sequence[Point3], planes: Sequence[Plane
         for other_index, other in enumerate(planes):
             if other_index == edge_index:
                 continue
-            other_start = points[other_index]
-            other_end = points[(other_index + 1) % len(points)]
+            other_start = active_points[other_index]
+            other_end = active_points[(other_index + 1) % len(active_points)]
             ox, oy = other_end[0] - other_start[0], other_end[1] - other_start[1]
             line_a, line_b = winding * -oy, winding * ox
             line_c = winding * (oy * other_start[0] - ox * other_start[1])
