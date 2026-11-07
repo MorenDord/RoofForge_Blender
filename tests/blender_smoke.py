@@ -159,6 +159,42 @@ def check_generated_shell(source, source_coordinates) -> None:
     ensure(roof.data.attributes.get("roof_forge_component") is not None, "component face attribute missing")
     ensure(roof.data.attributes.get("roof_forge_slope_index") is not None, "slope face attribute missing")
     ensure(len(roof.data.polygons) > 0, "generated mesh has no polygons")
+    ensure(
+        len(roof.data.attributes["roof_forge_component"].data) == len(roof.data.polygons)
+        and len(roof.data.attributes["roof_forge_slope_index"].data) == len(roof.data.polygons),
+        "roof face metadata does not match the dissolved mesh topology",
+    )
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(roof.data)
+        bm.normal_update()
+        coords = [vertex.co for vertex in bm.verts]
+        span = max(
+            max(v.x for v in coords) - min(v.x for v in coords),
+            max(v.y for v in coords) - min(v.y for v in coords),
+            max(v.z for v in coords) - min(v.z for v in coords),
+            1.0,
+        )
+        tolerance = span * 2.0e-6
+        remaining_coplanar = []
+        for edge in bm.edges:
+            if len(edge.link_faces) != 2:
+                continue
+            first, second = edge.link_faces
+            if first.normal.dot(second.normal) < 1.0 - 1.0e-8:
+                continue
+            origin = first.verts[0].co
+            if all(
+                abs(first.normal.dot(vertex.co - origin)) <= tolerance
+                for vertex in second.verts
+            ):
+                remaining_coplanar.append(edge.index)
+        ensure(
+            not remaining_coplanar,
+            f"coplanar internal roof edges were not dissolved: {remaining_coplanar[:8]}",
+        )
+    finally:
+        bm.free()
     ensure(len(source.data.vertices) == 4, "source vertex count changed")
     after = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     ensure(after == source_coordinates, "source coordinates changed")
