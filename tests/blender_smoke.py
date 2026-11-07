@@ -54,6 +54,30 @@ def matrices_close(first, second, tolerance=1e-6) -> bool:
     )
 
 
+def create_l_contour(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (8.0, 0.0, 0.0),
+        (8.0, 4.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (4.0, 8.0, 0.0),
+        (0.0, 8.0, 0.0),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 def check_generated_shell(source, source_coordinates) -> None:
     generated = [
         obj for obj in bpy.data.objects
@@ -116,12 +140,66 @@ def main() -> None:
     run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
     run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
 
+    # Concave flat-eave L contour with independent pitch per boundary edge.
+    clear_scene()
+    source = create_l_contour("RoofForge_Smoke_Concave_L")
+    source_coordinates = tuple(
+        tuple(float(c) for c in vertex.co) for vertex in source.data.vertices
+    )
+    settings = bpy.context.scene.roof_forge
+    settings.pitch_default = 35.0
+    settings.thickness = 0.12
+    settings.live_update = True
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare per-edge pitch settings",
+    )
+    ensure(len(settings.slope_settings) == 6, "expected one pitch setting per L contour edge")
+    for index, item in enumerate(settings.slope_settings):
+        item.pitch = 31.0 + index * 1.5
+    ensure(
+        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
+        "per-edge concave L validation failed",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "per-edge concave L generation failed",
+    )
+    roof = settings.generated_object
+    ensure(roof is not None, "generated roof pointer was not stored")
+    ensure(
+        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_FLAT_EAVE",
+        "flat concave L did not use the weighted wavefront solver",
+    )
+    ensure(
+        len(roof.data.attributes["roof_forge_slope_index"].data) > 0,
+        "per-face slope metadata is missing",
+    )
+    before_update = tuple(tuple(float(c) for c in vertex.co) for vertex in roof.data.vertices)
+
+    # Execute the scheduled timer callback directly in background mode; GUI
+    # sessions run the same callback after the normal debounce interval.
+    from extension.addon.live_update import (
+        _run_pending_update,
+        cancel_pending_live_update,
+    )
+    settings.slope_settings[0].pitch += 2.0
+    _run_pending_update()
+    cancel_pending_live_update()
+    after_update = tuple(tuple(float(c) for c in vertex.co) for vertex in roof.data.vertices)
+    ensure(before_update != after_update, "live pitch edit did not rebuild the generated mesh")
+    ensure(
+        tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
+        == source_coordinates,
+        "concave source contour changed during generation or live update",
+    )
+
     extension.unregister()
     extension.unregister()  # Unregistration must be safe to call twice.
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, Object/Edit Mode, wire/surface meshes"
+        "automatic boundary detection, per-edge pitch, L contour, live rebuild, Object/Edit Mode"
     )
 
 
