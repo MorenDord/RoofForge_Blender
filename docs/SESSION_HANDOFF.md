@@ -4,9 +4,11 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **UI fix commit:** `5d751ced47ea72736bf7eabe7d9bc0c326ad23a9`  
-**Versioned package commit:** pending alpha.9 package metadata commit  
+**Versioned package commit:** `e8b377e15917dc09f9b262ee522dbb3b44b15ba8`  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Alpha.9 artifact / SHA-256:** pending versioned package CI.  
+**Installable build:** `roof_forge-0.2.0-alpha.9.zip`, from CI artifact `roof_forge-0.2.0-alpha.9-blender-5.0.1` (artifact ID `13576772349`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379334950/artifacts/13576772349).  
+**Inner ZIP SHA-256:** `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`.  
 **Important:** `main` and `develop` must remain unchanged.
 
 ## User report and verified cause
@@ -58,13 +60,15 @@ This is intentionally a package-level regression gate: a green test run must fai
 
 Alpha.8 had fully green CI but its panel source was missing the control. That alpha.8 artifact must not be reused for the Show milestone.
 
-Alpha.9 must pass:
+Alpha.9 final CI passed:
+- Push run [42379334950](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379334950).
+- PR run [42379338838](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42379338838).
 - Python 3.11 and 3.13;
-- Blender 5.0.1 smoke including the new panel-content assertions and edge selection tests;
-- clean extension ZIP build;
-- official Blender 5.0.1 Extension Validator.
+- Blender 5.0.1 smoke including the panel-content assertions and edge selection tests;
+- clean extension ZIP build and official Blender 5.0.1 Extension Validator;
+- geometry, legacy, Rust diagnostic and profile jobs.
 
-Record final alpha.9 push/PR run IDs, artifact ID and inner ZIP SHA-256 only after downloading and inspecting the produced ZIP. Specifically inspect the packaged `addon/ui/panel.py` and verify it contains `text="Show"` and `roof_forge.select_slope_edge`.
+Artifact ID `13576772349`; inner ZIP SHA-256 `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`. The downloaded ZIP was inspected and includes `text="Show"` and `roof_forge.select_slope_edge` in `addon/ui/panel.py`.
 
 ## User QA after alpha.9 is verified
 

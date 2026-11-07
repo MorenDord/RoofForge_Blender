@@ -3,7 +3,7 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** alpha.9 UI correction committed; package CI pending
+**Status:** 0.2.0-alpha.9 packaged, inspected and ready for manual UI QA
 
 ## User-confirmed priorities
 
@@ -196,11 +196,11 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
 - [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, per-edge Show selection on wire/face meshes, flat and mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [ ] Clean Extension ZIP 0.2.0-alpha.9 собран и принят официальным Blender Extension Validator.
-- [x] Pitch-row Show operator selects the exact contour edge in Object/Edit Mode; Blender smoke covers wire and face boundary meshes and checks that source coordinates/topology remain unchanged. Versioned alpha.8 push/PR CI runs `42378167294` and `42378171463` passed all jobs.
+- [x] Clean Extension ZIP 0.2.0-alpha.9 собран и принят официальным Blender Extension Validator (artifact `13576772349`; inner ZIP SHA-256 `99b99522313d96bfa2da779781b0c5a7b8b20a806d2280d4ee61b261067587c7`).
+- [x] Alpha.9 panel renders a visible `Show` button in each Pitch row; smoke now asserts the operator ID and Show label are present in the registered panel `draw()` code, then verifies wire/face edge selection and unchanged source geometry. Alpha.9 push/PR CI runs `42379334950` and `42379338838` passed all jobs.
 - [x] Alpha.7 push run `42370549428` and PR run `42370553763` passed all Python, Blender, package, geometry, legacy, Rust and profile jobs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
-- [ ] Alpha.9 UI panel fix and strengthened smoke for visible Show control; versioned package CI pending. Persistent viewport overlay / pitch map remains separate.
+- [x] Alpha.9 package was downloaded and inspected; the inner ZIP contains `addon/ui/panel.py` with both `roof_forge.select_slope_edge` and `text="Show"`. Persistent viewport overlay / pitch map remains separate.
 
-Итог: alpha.9 может быть передана на ручную проверку только после зелёного versioned CI и проверки собранного ZIP на наличие Show в `addon/ui/panel.py`.
+Итог: 0.2.0-alpha.9 готова к ручной проверке в Blender. Alpha.8 не используй для этого milestone — в её ZIP кнопки Show не было.
