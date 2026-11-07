@@ -1,15 +1,15 @@
-# RoofForge 0.2.0-alpha.1 — Session Handoff
+# RoofForge 0.2.0-alpha.3 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Installable code/package snapshot:** `1f677f7509f6f61c94b10370468691cadd001e2d` (latest commits after this snapshot are documentation/PR metadata only).  
+**Installable code/package snapshot:** `304a90a488fae5bdb23cff54349a5fac3246c7a3` (latest commits after this snapshot are documentation/PR metadata only).  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
-**Installable build:** `roof_forge-0.2.0-alpha.1.zip`, from CI artifact `roof_forge-0.2.0-alpha.1-blender-5.0.1` (artifact ID `13551363130`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486/artifacts/13551363130).  
-**Inner ZIP SHA-256:** `3a068a9f25fc84bcb3835d8005ec02f0062b9e8c3a3746f6b51d33f5f6de9afb`.  
-**Latest CI:** [Push run 42317727266](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317727266) and [PR run 42317734486](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486) both passed on the package snapshot.  
+**Installable build:** `roof_forge-0.2.0-alpha.3.zip`, from CI artifact `roof_forge-0.2.0-alpha.3-blender-5.0.1` (artifact ID `13553300364`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070/artifacts/13553300364).  
+**Inner ZIP SHA-256:** `3f703b0de2f4bdc89f4658c59f6487163eddc719199db1011c5e026e2d1e0e3b`.  
+**Latest CI:** [Push run 42320863070](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070) and [PR run 42320868809](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809) both passed on the package snapshot.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -17,12 +17,12 @@
 - One simple closed boundary loop, convex or concave, with up to 64 edges.
 - Active mesh object only; no vertex/edge selection required.
 - One independent pitch angle per boundary edge.
-- Debounced live rebuild on pitch/thickness change; retain the last valid generated roof on failure.
+- Debounced live rebuild on pitch/thickness/overhang change; retain the last valid generated roof on failure. Thickness-only rebuilds reuse the cached roof surface.
 - Preserve source XYZ; do not silently flatten mixed-height contours.
-- Remove optional eaves/overhang controls and generation.
+- Provide Eave Overhang in scene units: nonzero is supported for convex contours; concave L/U reflex corners require zero overhang.
 - Keep a compact simple per-edge UI; no need for a pitch-map preview yet.
 
-## What is now packaged in 0.2.0-alpha.1
+## What is now packaged in 0.2.0-alpha.3
 
 ### Automatic boundary detection
 - Detects one outer loop from a wire-only mesh or a face mesh with one boundary loop.
@@ -42,12 +42,20 @@
 - Generated result is a separate closed shell with face attributes `roof_forge_component` and `roof_forge_slope_index`.
 
 ### Live Update
-- Per-edge pitch and thickness callbacks schedule a timer with approximately 0.3 s debounce.
-- Mesh calculation and validation occur on Blender's main thread after the debounce.
+- Per-edge pitch, thickness and overhang callbacks schedule a timer with approximately 0.3 s debounce.
+- Mesh calculation and validation occur on Blender's main thread after the debounce. The surface LRU cache key is source object pointer + XYZ points + pitches + overhang; thickness is excluded.
 - New mesh data is built separately; only after successful validation is it swapped into the generated object.
 - On error, the last valid roof mesh remains unchanged and status is shown in the panel.
 - Renaming the source object or generated roof object stops automatic updates. The already generated geometry remains in the scene.
 - If topology edge count changes, the user must use `Load / Refresh Slope Angles` and verify the mapping.
+
+## Overhang and delete/recreate additions in alpha.3
+
+- `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` extends each convex boundary facet on its authored support plane and adds convex corner join triangles; strict coverage and shell-manifold checks remain enabled.
+- Reflex/concave contours with nonzero overhang are rejected as `OVERHANG_REFLEX_UNSUPPORTED`; use zero for L/U until a robust concave offset join is implemented.
+- If the generated object has been deleted, Create / Update clears the stale pointer/name snapshot, creates a replacement in the active scene root collection, and confirms it is present in `bpy.data.objects` and `scene.objects`.
+- Blender smoke explicitly deletes and re-creates the L roof from its unchanged source contour.
+- Thickness-only Live Update uses the validated surface cache and rebuilds only the closed shell. `mesh.attributes` face values use bulk `foreach_set`.
 
 ## Explicit alpha limitations
 
@@ -56,7 +64,7 @@
 - Flat-height concave L/U and selected wavy L/U cases pass; arbitrary adversarial simultaneous event groups are not guaranteed.
 - Mixed-height concave L/U is not a guaranteed path. The old 3D support-plane solver is retained for mixed-Z cases and may reject some contours.
 - Exactly one simple boundary loop is supported; holes and multiple disconnected loops are not.
-- 64 edges is the target maximum for this milestone. No 128-edge optimisation target.
+- 64 edges is the enforced maximum for this alpha. No 128-edge optimisation target.
 
 ## CI evidence for the packaged commit
 
@@ -103,8 +111,8 @@ For each issue, record Blender version, OS, contour points/edge count, per-edge 
 
 ## Important links
 - [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6)
-- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317727266)
-- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486)
+- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070)
+- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809)
 - [Implementation plan](https://github.com/MorenDord/RoofForge_Blender/blob/feature/0.2.0-arbitrary-contours-live-pitch/docs/PLAN_0.2.0_RU.md)
 
 ## Local checks
@@ -113,5 +121,5 @@ python -m compileall -q core addon __init__.py
 python -m unittest discover -s tests -v
 blender --background --factory-startup --python tests/blender_smoke.py
 python tools/build_extension.py --output-dir dist
-blender --command extension validate dist/roof_forge-0.2.0-alpha.1.zip
+blender --command extension validate dist/roof_forge-0.2.0-alpha.3.zip
 ```
