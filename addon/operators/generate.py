@@ -3,6 +3,7 @@ import bpy
 import json
 
 from ..adapters.mesh_io import read_object_boundary
+from ...core.plan_preview import surface_plan_data
 from ..roof_build import (
     apply_shell_metadata,
     build_roof_payload,
@@ -105,6 +106,9 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             settings.generated_object = roof_object
             settings.source_name_snapshot = source.name
             settings.generated_name_snapshot = roof_object.name
+            settings.roof_plan_json = json.dumps(
+                surface_plan_data(surface), separators=(",", ":")
+            )
             settings.last_status = (
                 f"Готово: {len(points)} скатов, {len(shell.faces)} граней; "
                 f"толщина {settings.thickness_cm:g} см; "
