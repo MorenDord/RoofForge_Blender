@@ -1,9 +1,8 @@
-"""Vertical-Z solid shell generation for RoofForge surfaces."""
+"""Closed roof shell generation with an optional source-contour underside."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Sequence
 
 from .geometry import GeometryInputError
 from .mesh import RoofSurface, validate_surface_boundary_edges
@@ -22,15 +21,21 @@ class RoofShell:
     bottom_face_count: int
     side_face_count: int
     thickness: float
+    extrude_up: bool = False
 
 
-def build_roof_shell(surface: RoofSurface, thickness: float,
-                     eps: float = 1e-9) -> RoofShell:
-    """Create a closed shell by extruding the top surface globally along -Z.
+def build_roof_shell(
+    surface: RoofSurface,
+    thickness: float,
+    eps: float = 1e-9,
+    *,
+    extrude_up: bool = False,
+) -> RoofShell:
+    """Create a closed Z-extruded shell.
 
-    All vertices are copied downward along roof-local global Z, not along
-    individual face normals. Any internal crack in the upper surface is a hard
-    error; it is never converted into an accidental internal wall.
+    When extrude_up is true, the supplied surface is the support/underside
+    surface. It remains at its authored elevation, including the original
+    eave contour, while roof thickness is added above it.
     """
     if not isfinite(thickness) or thickness <= 0.0:
         raise GeometryInputError("INVALID_THICKNESS", "Толщина крыши должна быть положительным конечным числом.")
@@ -52,12 +57,14 @@ def build_roof_shell(surface: RoofSurface, thickness: float,
     boundary_edges = validate_surface_boundary_edges(
         surface.vertices, surface.faces, surface.boundary_xy, tolerance * 5.0
     )
-
-    top_count = len(surface.faces)
     vertex_count = len(surface.vertices)
-    vertices = tuple(surface.vertices) + tuple(
-        (x, y, z - thickness) for x, y, z in surface.vertices
-    )
+    if extrude_up:
+        top_vertices = tuple((x, y, z + thickness) for x, y, z in surface.vertices)
+        bottom_vertices = tuple(surface.vertices)
+    else:
+        top_vertices = tuple(surface.vertices)
+        bottom_vertices = tuple((x, y, z - thickness) for x, y, z in surface.vertices)
+    vertices = top_vertices + bottom_vertices
     top_faces = [tuple(face) for face in surface.faces]
     bottom_faces = [
         tuple(index + vertex_count for index in reversed(face))
@@ -73,12 +80,12 @@ def build_roof_shell(surface: RoofSurface, thickness: float,
     if diagnostics:
         first = diagnostics[0]
         raise GeometryInputError(first.code, first.message)
-
     return RoofShell(
         vertices=vertices,
         faces=faces,
-        top_face_count=top_count,
-        bottom_face_count=top_count,
+        top_face_count=len(top_faces),
+        bottom_face_count=len(bottom_faces),
         side_face_count=len(side_faces),
         thickness=thickness,
+        extrude_up=bool(extrude_up),
     )
