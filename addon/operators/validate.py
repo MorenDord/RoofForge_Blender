@@ -1,10 +1,8 @@
-"""Validate the complete roof build before creating Blender datablocks."""
+"""Validate the same geometry path used by Create / Update Roof."""
 import bpy
 
 from ..adapters.mesh_io import read_object_boundary
-from ...core.geometry import GeometryInputError
-from ...core.mesh import build_roof_surface
-from ...core.shell import build_roof_shell
+from ..roof_build import build_roof_payload, pitch_values, sync_slope_settings
 
 
 class ROOFFORGE_OT_validate_input(bpy.types.Operator):
@@ -17,27 +15,27 @@ class ROOFFORGE_OT_validate_input(bpy.types.Operator):
         return context.object is not None and context.object.type == "MESH"
 
     def execute(self, context):
-        try:
-            points = read_object_boundary(context.object)
-        except ValueError as exc:
-            self.report({"ERROR"}, str(exc))
-            return {"CANCELLED"}
-
         settings = context.scene.roof_forge
         try:
-            pitches = [settings.pitch_default] * len(points)
-            surface = build_roof_surface(points, pitches)
-            shell = build_roof_shell(surface, settings.thickness)
-        except GeometryInputError as exc:
-            self.report({"ERROR"}, exc.message)
-            return {"CANCELLED"}
-        except ValueError as exc:
-            self.report({"ERROR"}, str(exc))
+            points = read_object_boundary(context.object)
+            sync_slope_settings(settings, context.object, len(points))
+            pitches = pitch_values(settings, len(points))
+            surface, shell, solver = build_roof_payload(
+                points, pitches, settings.thickness
+            )
+        except Exception as exc:
+            message = getattr(exc, "message", str(exc))
+            settings.last_status = f"Проверка не пройдена: {message}"
+            self.report({"ERROR"}, message)
             return {"CANCELLED"}
 
+        settings.last_status = (
+            f"Проверка пройдена: {len(points)} скатов, "
+            f"{len(surface.faces)} верхних граней ({solver})."
+        )
         self.report(
             {"INFO"},
             f"Проверка пройдена: верх {len(surface.faces)} граней, "
-            f"оболочка {len(shell.faces)} граней; manifold и границы корректны."
+            f"оболочка {len(shell.faces)} граней; {solver}."
         )
         return {"FINISHED"}
