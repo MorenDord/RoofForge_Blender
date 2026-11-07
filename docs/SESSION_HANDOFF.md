@@ -4,12 +4,12 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Installable code/package snapshot:** pending alpha.5 CI.  
+**Installable code/package snapshot:** `0a45005bcd8196728b39dd433fff94d36d8939a0` (code/package); docs updated in following commit.  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
-**Installable build:** pending alpha.5 CI.  
-**Outer artifact:** pending alpha.5 CI upload.  
-**Inner ZIP SHA-256:** pending alpha.5 build.  
-**Latest CI:** pending alpha.5 push/PR workflows.  
+**Installable build:** `roof_forge-0.2.0-alpha.6.zip`, from CI artifact `roof_forge-0.2.0-alpha.6-blender-5.0.1` (artifact ID `13558559927`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42335026739/artifacts/13558559927).  
+**Inner ZIP SHA-256:** `6fbf08dff5853ff9b6a56a57b729aae01e2a8265b5e074b6e7c7e60f2eebd14a`.  
+**Latest CI:** [Push run 42335026739](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42335026739) and [PR run 42335029848](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42335029848) both passed.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -19,7 +19,7 @@
 - One independent pitch angle per boundary edge.
 - Live rebuild on pitch/thickness/overhang change with a 0–1000 ms delay slider (default 0); retain the last valid generated roof on failure. Thickness-only rebuilds reuse the cached roof surface.
 - Preserve source XYZ; do not silently flatten mixed-height contours.
-- Provide Eave Overhang in centimeters. The expanded lower-envelope offset supports individual pitch on tested convex and concave L/U contours, and mixed-Z convex contours. Self-intersecting or collapsed offsets are rejected.
+- Provide Eave Overhang in centimeters. Each edge strip stays on its source support plane; adjacent strips are welded along the exact shared 3D ridge, with a single remaining outer ridge connector. Tested convex and concave L/U contours support individual pitch; mixed-Z convex contours are also covered. Self-intersecting or collapsed offsets are rejected.
 - Keep a compact simple per-edge UI; no need for a pitch-map preview yet.
 
 ## What is now packaged in 0.2.0-alpha.6
@@ -49,7 +49,7 @@
 - Renaming the source object or generated roof object stops automatic updates. The already generated geometry remains in the scene.
 - If topology edge count changes, the user must use `Load / Refresh Slope Angles` and verify the mapping.
 
-## Overhang and delete/recreate additions in alpha.5
+## Overhang and delete/recreate additions in alpha.6
 
 - `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` intersects adjacent offset boundary lines and creates one shared miter vertex per convex corner. Each source segment gets one parallel outer segment. No separate triangular corner fan is emitted; coverage and shell-manifold checks remain enabled.
 - Incoming/outgoing support planes must agree in height at each miter. Differing adjacent pitches that create a height mismatch are rejected as `OVERHANG_PITCH_DISCONTINUITY` rather than generating a broken seam.
@@ -81,9 +81,10 @@
 ## CI evidence for the packaged commit
 
 Both complete workflows on head `a2b85ad189f019a1310ad46a6bfe69f94ef17361` passed:
-- Python 3.11 and 3.13 CI: pending alpha.5.
-- Blender 5.0.1 background smoke: pending alpha.5 run.
-- Clean Extension ZIP, official Extension Validator and geometry/solver benchmarks: pending alpha.5 run.
+- Python 3.11 and 3.13 CI: passed.
+- Blender 5.0.1 background smoke: passed.
+- Clean Extension ZIP and official Extension Validator: passed.
+- Geometry benchmark, Rust diagnostics, legacy spatial benchmark and 64-edge profile: passed.
 
 This is background CI evidence. User's visual viewport QA is still required.
 
@@ -125,8 +126,8 @@ For each issue, record Blender version, OS, contour points/edge count, per-edge 
 
 ## Important links
 - [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6)
-- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325221484)
-- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42325226147)
+- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42335026739)
+- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42335029848)
 - [Implementation plan](https://github.com/MorenDord/RoofForge_Blender/blob/feature/0.2.0-arbitrary-contours-live-pitch/docs/PLAN_0.2.0_RU.md)
 
 ## Local checks

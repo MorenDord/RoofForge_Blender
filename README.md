@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.6.** This is an early user-test build, not a finished 1.0 release. It rebuilds eaves as an expanded lower-envelope surface, fixing protruding joins and enabling concave L/U overhangs with individual pitches in the tested cases.
+> **Current test build: 0.2.0-alpha.6.** This is an early user-test build, not a finished 1.0 release. It rebuilds each eave strip on its own support plane and welds adjacent strips along their exact 3D roof-ridge intersection, fixing protruding ends and enabling tested concave L/U overhangs with individual pitches.
 
 ## Project documents
 
@@ -20,8 +20,8 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- Eaves are built by offsetting the entire contour and recomputing one restricted lower envelope from the original support planes. Neighbouring planes meet on their exact 3D intersection, so independent strips cannot protrude past one another.
-- The offset works for convex and concave simple contours, with individual per-edge pitch; offsets that collapse or self-intersect are rejected.
+- Each eave strip stays on the support plane of its own source edge. Adjacent strips meet on their exact shared 3D ridge: the overlapping ridge segment is welded by splitting the longer strip side, and any remaining ridge segment is the single outer corner connector. No independent strip tail or corner fan is emitted.
+- The miter offset accepts convex and reflex turns on simple contours. Self-intersecting, collapsed or excessive offsets are rejected before the shell is changed.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm and newly prepared pitches default to 30°.
 - No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
 - Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
@@ -54,7 +54,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is supported for convex and concave simple contours, including L/U, with individual edge pitches when the requested offset remains a simple polygon and the roof solver accepts the event sequence. The same plane-envelope extension path also applies to mixed-height XYZ contours. Narrow notches or excessive overhangs that collapse/self-intersect are rejected.
+- Nonzero overhang is supported for tested convex and concave simple contours, including L/U, with individual edge pitches. Mixed-height convex XYZ contours are also covered. The eave stage supports reflex corners when the offset remains simple; the underlying weighted-wavefront solver still has known simultaneous-event/multi-notch limitations, and arbitrary concave mixed-height XYZ is not yet guaranteed.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## Installation and test build
