@@ -5,10 +5,12 @@ from collections import OrderedDict
 from math import isfinite
 
 import bpy
+import bmesh
 
-from ..core.geometry import GeometryInputError
-from ..core.mesh import build_roof_surface
+from ..core.geometry import GeometryInputError, signed_area
+from ..core.mesh import build_roof_surface, build_roof_surface_from_planes
 from ..core.overhang import offset_contour_outward
+from ..core.planes import build_boundary_planes, boundary_envelope_conflicts
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -67,23 +69,30 @@ def _cache_owner_id(owner) -> int | None:
 
 
 def _build_roof_surface(points, pitches, overhang):
-    # Eaves are part of the source contour now. Offset the contour once, then
-    # build the entire roof from that one new closed boundary. No strips or
-    # corner patches are appended to a previously generated roof.
-    build_points = (
-        offset_contour_outward(points, overhang)
-        if overhang > 0.0
-        else tuple(tuple(float(value) for value in point) for point in points)
-    )
-    if is_flat_eave_contour(build_points):
-        surface = build_wavefront_roof_surface(build_points, pitches)
-        solver = "WEIGHTED_WAVEFRONT_FLAT_EAVE"
-    else:
-        surface = build_roof_surface(build_points, pitches)
-        solver = "SUPPORT_PLANE_ENVELOPE_3D"
+    authored_points = tuple(tuple(float(value) for value in point) for point in points)
     if overhang > 0.0:
-        solver = f"{solver}_OFFSET_CONTOUR"
-    return surface, solver
+        # The user contour is the underside support/eave line. Build each
+        # pitched plane through those original 3D edges, then extend only the
+        # competing domain outward. The planes themselves are not re-anchored
+        # to the expanded contour.
+        expanded = offset_contour_outward(authored_points, overhang)
+        planes = build_boundary_planes(authored_points, pitches)
+        conflicts = boundary_envelope_conflicts(
+            authored_points, planes, active_contour=expanded
+        )
+        if conflicts:
+            first = conflicts[0]
+            raise GeometryInputError(first.code, first.message)
+        domain = [(point[0], point[1]) for point in expanded]
+        original_area = abs(signed_area([(point[0], point[1]) for point in authored_points]))
+        surface = build_roof_surface_from_planes(
+            domain, planes, source_area_xy=original_area
+        )
+        return surface, "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
+
+    if is_flat_eave_contour(authored_points):
+        return build_wavefront_roof_surface(authored_points, pitches), "WEIGHTED_WAVEFRONT_FLAT_EAVE"
+    return build_roof_surface(authored_points, pitches), "SUPPORT_PLANE_ENVELOPE_3D"
 
 
 def build_roof_payload(
@@ -132,7 +141,7 @@ def build_roof_payload(
             while len(_SURFACE_CACHE) > _SURFACE_CACHE_LIMIT:
                 _SURFACE_CACHE.popitem(last=False)
 
-    shell = build_roof_shell(surface, thickness)
+    shell = build_roof_shell(surface, thickness, extrude_up=overhang > 0.0)
     return surface, shell, solver
 
 
@@ -141,35 +150,108 @@ def clear_surface_cache() -> None:
     _SURFACE_CACHE.clear()
 
 
+def _dissolve_coplanar_edges(mesh) -> None:
+    """Remove internal BMesh edges whose two linked faces share one plane."""
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        bm.normal_update()
+        coordinates = [vertex.co for vertex in bm.verts]
+        if coordinates:
+            span = max(
+                max(v.x for v in coordinates) - min(v.x for v in coordinates),
+                max(v.y for v in coordinates) - min(v.y for v in coordinates),
+                max(v.z for v in coordinates) - min(v.z for v in coordinates),
+                1.0,
+            )
+        else:
+            span = 1.0
+        distance_tolerance = span * 1.0e-7
+        angular_tolerance = 1.0e-8
+        dissolve = []
+        for edge in bm.edges:
+            if len(edge.link_faces) != 2:
+                continue
+            first, second = edge.link_faces
+            if first.normal.dot(second.normal) < 1.0 - angular_tolerance:
+                continue
+            origin = first.verts[0].co
+            if all(
+                abs(first.normal.dot(vertex.co - origin)) <= distance_tolerance
+                for vertex in second.verts
+            ):
+                dissolve.append(edge)
+        if dissolve:
+            bmesh.ops.dissolve_edges(
+                bm, edges=dissolve, use_verts=False, use_face_split=False
+            )
+        bm.normal_update()
+        bm.to_mesh(mesh)
+    finally:
+        bm.free()
+    mesh.update(calc_edges=True)
+
+
+def _roof_face_metadata(mesh, surface, shell):
+    """Rebuild face attributes after coplanar BMesh dissolves."""
+    scale = max(
+        1.0,
+        max(v.co.x for v in mesh.vertices) - min(v.co.x for v in mesh.vertices),
+        max(v.co.y for v in mesh.vertices) - min(v.co.y for v in mesh.vertices),
+        max(v.co.z for v in mesh.vertices) - min(v.co.z for v in mesh.vertices),
+    )
+    tolerance = scale * 2.0e-6
+    component_values = []
+    slope_values = []
+    for polygon in mesh.polygons:
+        if polygon.normal.z > 1.0e-6:
+            component = 0
+            z_adjust = -shell.thickness if shell.extrude_up else 0.0
+        elif polygon.normal.z < -1.0e-6:
+            component = 1
+            z_adjust = 0.0 if shell.extrude_up else shell.thickness
+        else:
+            component = 2
+            z_adjust = 0.0
+
+        matched_slope = -1
+        if component != 2:
+            polygon_points = [
+                mesh.vertices[index].co for index in polygon.vertices
+            ]
+            for slope_index, plane in enumerate(surface.planes):
+                if all(
+                    abs(
+                        vertex.z + z_adjust
+                        - plane.height(vertex.x, vertex.y)
+                    ) <= tolerance
+                    for vertex in polygon_points
+                ):
+                    matched_slope = slope_index
+                    break
+            if matched_slope < 0:
+                component = 2
+        component_values.append(component)
+        slope_values.append(matched_slope if component != 2 else -1)
+
+    component = mesh.attributes.new(
+        name="roof_forge_component", type="INT", domain="FACE"
+    )
+    slope = mesh.attributes.new(
+        name="roof_forge_slope_index", type="INT", domain="FACE"
+    )
+    component.data.foreach_set("value", component_values)
+    slope.data.foreach_set("value", slope_values)
+
+
 def create_roof_mesh_data(name: str, surface, shell):
-    """Serialize a validated shell into a new Blender mesh datablock."""
+    """Serialize a closed shell, dissolving coplanar seams in the actual mesh."""
     mesh = bpy.data.meshes.new(name)
     try:
         mesh.from_pydata(shell.vertices, [], shell.faces)
         mesh.update(calc_edges=True)
-        if len(mesh.polygons) != len(shell.faces):
-            raise RuntimeError(
-                "Blender изменил количество граней при создании сетки."
-            )
-
-        component = mesh.attributes.new(
-            name="roof_forge_component", type="INT", domain="FACE"
-        )
-        slope = mesh.attributes.new(
-            name="roof_forge_slope_index", type="INT", domain="FACE"
-        )
-        component_values = (
-            [0] * shell.top_face_count
-            + [1] * shell.bottom_face_count
-            + [2] * shell.side_face_count
-        )
-        slope_values = (
-            list(surface.face_slope_indices)
-            + list(surface.face_slope_indices)
-            + [-1] * shell.side_face_count
-        )
-        component.data.foreach_set("value", component_values)
-        slope.data.foreach_set("value", slope_values)
+        _dissolve_coplanar_edges(mesh)
+        _roof_face_metadata(mesh, surface, shell)
         return mesh
     except Exception:
         bpy.data.meshes.remove(mesh)
@@ -221,6 +303,9 @@ def apply_shell_metadata(
     )
     roof_object["roof_forge_thickness"] = float(shell.thickness)
     roof_object["roof_forge_overhang"] = float(overhang)
+    roof_object["roof_forge_overhang_support"] = (
+        "SOURCE_CONTOUR_UNDERSIDE" if overhang > 0.0 else "STANDARD_TOP_SURFACE"
+    )
     if thickness_cm is not None:
         roof_object["roof_forge_thickness_cm"] = float(thickness_cm)
     if overhang_cm is not None:
