@@ -9,6 +9,7 @@ from .roof_build import (
     create_roof_mesh_data,
     pitch_values,
     build_roof_payload,
+    centimeters_to_blender_units,
 )
 
 _PENDING_SCENE_NAME: str | None = None
@@ -107,8 +108,14 @@ def _run_pending_update():
             )
             return None
         pitches = pitch_values(settings, len(points))
+        thickness_units = centimeters_to_blender_units(
+            settings.thickness_cm, scene
+        )
+        overhang_units = centimeters_to_blender_units(
+            settings.eave_overhang_cm, scene
+        )
         surface, shell, solver = build_roof_payload(
-            points, pitches, settings.thickness, settings.eave_overhang,
+            points, pitches, thickness_units, overhang_units,
             cache_owner=source,
         )
         new_mesh = create_roof_mesh_data(
@@ -120,7 +127,8 @@ def _run_pending_update():
             roof.matrix_world = source.matrix_world.copy()
             apply_shell_metadata(
                 roof, source, surface, shell, pitches, solver,
-                settings.eave_overhang,
+                overhang_units,
+                settings.thickness_cm, settings.eave_overhang_cm,
             )
         except Exception:
             roof.data = old_mesh

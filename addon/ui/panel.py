@@ -17,7 +17,6 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col = layout.column(align=True)
         col.label(text="Roof boundary")
         col.label(text="Active mesh object; no vertex/edge selection")
-        col.prop(settings, "pitch_default")
         col.operator("roof_forge.prepare_slopes", icon="EDGESEL")
 
         if settings.slope_settings:
@@ -34,8 +33,8 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
 
         col.separator()
         col.label(text="Solid roof shell")
-        col.prop(settings, "thickness")
-        col.prop(settings, "eave_overhang")
+        col.prop(settings, "thickness_cm", text="Thickness (cm)")
+        col.prop(settings, "eave_overhang_cm", text="Eave Overhang (cm)")
         col.prop(settings, "live_update")
         delay_row = col.row()
         delay_row.enabled = settings.live_update
@@ -45,7 +44,6 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         )
         if settings.live_update_delay_ms == 0:
             delay_row.label(text="No debounce", icon="TIME")
-        col.operator("roof_forge.validate_input", icon="CHECKMARK")
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
         if settings.last_status:

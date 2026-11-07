@@ -15,16 +15,42 @@ from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
 def pitch_values(settings, edge_count: int) -> list[float]:
     """Return one validated pitch per ordered source boundary edge."""
-    if len(settings.slope_settings) == edge_count:
-        values = [float(item.pitch) for item in settings.slope_settings]
-    else:
-        values = [float(settings.pitch_default)] * edge_count
+    if len(settings.slope_settings) != edge_count:
+        raise GeometryInputError(
+            "PITCH_COUNT_MISMATCH",
+            "Количество индивидуальных углов не соответствует числу рёбер контура. "
+            "Обнови список скатов.",
+        )
+    values = [float(item.pitch) for item in settings.slope_settings]
     if len(values) != edge_count or any(not isfinite(value) for value in values):
         raise GeometryInputError(
             "PITCH_COUNT_MISMATCH",
             "Количество углов скатов не соответствует количеству рёбер контура. Обнови список скатов."
         )
     return values
+
+
+def centimeters_to_blender_units(value_cm: float, scene) -> float:
+    """Convert a UI centimeter value to Blender's internal local coordinates.
+
+    Blender stores mesh coordinates in internal units. Scene scale_length
+    controls how those units map to physical meters; object scale should be
+    applied for dimensions to remain physically exact in every direction.
+    """
+    value_cm = float(value_cm)
+    scale_length = float(scene.unit_settings.scale_length)
+    if (
+        not isfinite(value_cm)
+        or value_cm < 0.0
+        or not isfinite(scale_length)
+        or scale_length <= 0.0
+    ):
+        raise GeometryInputError(
+            "INVALID_CENTIMETER_VALUE",
+            "Размер в сантиметрах и масштаб единиц сцены должны быть конечными "
+            "неотрицательными значениями.",
+        )
+    return value_cm * 0.01 / scale_length
 
 
 _SURFACE_CACHE: OrderedDict[tuple, tuple[object, str]] = OrderedDict()
@@ -161,7 +187,7 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
         item.edge_index = edge_index
         item.start_vertex_index = edge_index
         item.end_vertex_index = (edge_index + 1) % edge_count
-        item.pitch = float(settings.pitch_default)
+        item.pitch = 30.0
     settings.source_object = source
     settings.source_name_snapshot = source.name
     settings.generated_object = None
@@ -172,7 +198,10 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
     return True
 
 
-def apply_shell_metadata(roof_object, source, surface, shell, pitches, solver, overhang=0.0):
+def apply_shell_metadata(
+    roof_object, source, surface, shell, pitches, solver,
+    overhang=0.0, thickness_cm=None, overhang_cm=None,
+):
     """Write stable links and diagnostic metadata onto the generated object."""
     roof_object["roof_forge_generated"] = True
     roof_object["roof_forge_source_name"] = source.name
@@ -184,4 +213,8 @@ def apply_shell_metadata(roof_object, source, surface, shell, pitches, solver, o
     )
     roof_object["roof_forge_thickness"] = float(shell.thickness)
     roof_object["roof_forge_overhang"] = float(overhang)
+    if thickness_cm is not None:
+        roof_object["roof_forge_thickness_cm"] = float(thickness_cm)
+    if overhang_cm is not None:
+        roof_object["roof_forge_overhang_cm"] = float(overhang_cm)
     roof_object.matrix_world = source.matrix_world.copy()

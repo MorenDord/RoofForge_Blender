@@ -8,6 +8,7 @@ from ..roof_build import (
     create_roof_mesh_data,
     pitch_values,
     sync_slope_settings,
+    centimeters_to_blender_units,
 )
 
 
@@ -32,8 +33,14 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             points = read_object_boundary(source)
             sync_slope_settings(settings, source, len(points))
             pitches = pitch_values(settings, len(points))
+            thickness_units = centimeters_to_blender_units(
+                settings.thickness_cm, context.scene
+            )
+            overhang_units = centimeters_to_blender_units(
+                settings.eave_overhang_cm, context.scene
+            )
             surface, shell, solver = build_roof_payload(
-                points, pitches, settings.thickness, settings.eave_overhang,
+                points, pitches, thickness_units, overhang_units,
                 cache_owner=source,
             )
             new_mesh = create_roof_mesh_data(
@@ -61,7 +68,8 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 try:
                     apply_shell_metadata(
                         roof_object, source, surface, shell, pitches, solver,
-                        settings.eave_overhang,
+                        overhang_units,
+                        settings.thickness_cm, settings.eave_overhang_cm,
                     )
                 except Exception:
                     roof_object.data = old_mesh
@@ -79,7 +87,8 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 roof_object.hide_set(False)
                 apply_shell_metadata(
                     roof_object, source, surface, shell, pitches, solver,
-                    settings.eave_overhang,
+                    overhang_units,
+                    settings.thickness_cm, settings.eave_overhang_cm,
                 )
                 context.view_layer.update()
                 if (
@@ -96,7 +105,8 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             settings.generated_name_snapshot = roof_object.name
             settings.last_status = (
                 f"Готово: {len(points)} скатов, {len(shell.faces)} граней; "
-                f"свес {settings.eave_overhang:g}; {solver}."
+                f"толщина {settings.thickness_cm:g} см; "
+                f"свес {settings.eave_overhang_cm:g} см; {solver}."
             )
             settings.live_update = bool(settings.live_update)
             new_mesh = None  # Ownership transferred to the generated object.

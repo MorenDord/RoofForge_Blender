@@ -11,7 +11,7 @@
 2. Do not require selecting vertices or edges in Edit Mode. Selecting the mesh object is enough; RoofForge discovers one outer boundary from the mesh topology. A face mesh uses its boundary edges; a wire-only mesh uses its closed wire loop.
 3. Give every boundary edge/slope its own pitch angle. Start with a compact list of numeric fields; a numbered top-view pitch map is not in this milestone.
 4. Pitch edits trigger a debounced live rebuild. Keep the last valid roof visible until the replacement is built and validated. Coalesce rapid changes; never regenerate inside a UI draw callback.
-5. Remove eaves/overhang feature generation from this milestone. Keep only the basic boundary side faces required to close a thickness shell; those are not an overhang or decorative eaves feature.
+5. Provide an optional geometric eave overhang in centimeters; extend edge strips along their own support planes and connect corners on the actual 3D intersection ridge. Concave/reflex offset cases may be rejected until a robust offset topology is implemented.
 
 Everything else in the 1.0 roadmap is deferred: ridge/valley/hip profiles, standing seams, UV, LOD, export, complex material handling and detach/relink.
 
@@ -69,7 +69,7 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [x] Changing a pitch causes one coalesced Live Update using the selected 0–1000 ms delay; rapid changes cancel the pending timer and replace it.
 - [ ] A failed update leaves the last valid output unchanged.
 - [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
-- [x] Convex eave overhang uses shared miter corners; incompatible adjacent support planes and reflex L/U contours are rejected rather than creating a broken mesh.
+- [x] Convex overhang uses 3D ridge-line miters; per-edge pitch differences and mixed-height XYZ eaves are supported in the tested cases. Reflex L/U offset self-intersections remain rejected.
 - [x] Live Update delay is adjustable from 0 to 1000 ms, default 0 ms; no intentional debounce at zero. Ridge/valley/hip, seam, UV, LOD or export controls remain out of scope.
 - [ ] Blender 5.0.1 background smoke and official extension package validation pass; manual viewport QA remains a separate gate.
 
@@ -94,9 +94,9 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
 
-### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.4 для flat-Z контуров)
+### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.5 для flat-Z контуров)
 
-Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435) (push) и [42321992476](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476) (PR) прошли полностью на code commit `a2b85ad189f019a1310ad46a6bfe69f94ef17361`: Python 3.11/3.13, miter-свес и несовместимые pitches, Blender 5.0.1 L/U/delete-recreate/Live Update delay smoke, ZIP package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
+Alpha 0.2.0-alpha.5 CI evidence will be recorded after the new ridge-line miter, centimeter conversion and UI regressions pass on Python 3.11/3.13 and Blender 5.0.1.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -138,7 +138,7 @@ Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge
 - Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` использует `build_wavefront_roof_surface()` для flat-Z контуров; mixed-Z остаётся на 3D support-plane envelope path.
-- В 0.2.0-alpha.4 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
+- В 0.2.0-alpha.5 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
 - `create_roof_mesh_data()` записывает face attributes через `foreach_set`, сокращая Python-цикл по каждой грани. Геометрический пересчёт при изменении pitch по-прежнему требуется; latency на пользовательской машине нужно оценивать вручную.
 
 Это рабочая alpha-интеграция с известными ограничениями событий, а не универсальный production solver. PR остаётся draft для сбора viewport QA.
@@ -157,11 +157,11 @@ Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge
 
 
 
-### Blender UI, свес и Live Update — интегрированы в 0.2.0-alpha.4
+### Blender UI, сантиметры, свес и Live Update — интегрированы в 0.2.0-alpha.5
 
 - addon/properties.py: коллекция pitch-настроек по каждому edge, ссылки на исходный и сгенерированный объект, статус и переключатель Live Update.
 - addon/operators/prepare.py: считывает контур и создаёт нумерованный список углов.
-- addon/ui/panel.py: поля Edge NN (Vx→Vy), Thickness, Eave Overhang, Live Update, Validate и Create/Update.
+- addon/ui/panel.py: поля Edge NN (Vx→Vy), Thickness (cm), Eave Overhang (cm), Live Update, Update Delay и Create/Update; Default Pitch и Validate удалены.
 - addon/live_update.py: настраиваемый debounce 0–1000 мс, по умолчанию 0 мс, перестройка на Blender main thread, rollback при ошибке, rename guard и защита от удалённой крыши.
 - addon/operators/generate.py: при удалении результата stale pointer очищается; новая крыша линкуется в root collection активной сцены и проверяется через `scene.objects` перед успешным ответом.
 - Thickness, per-edge pitch и свес запускают Live Update. При изменении только thickness верхняя поверхность берётся из cache.
@@ -173,7 +173,7 @@ Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Пакет 0.2.0-alpha.4 собран и проверен официальным Blender 5.0.1 Extension validator; Blender smoke включает удаление/повторное создание, L/U, свес и cache-thickness test. Результат всё ещё требует ручного viewport QA пользователя.
+- Пакет 0.2.0-alpha.5 будет собран после прохождения Blender smoke и официального Extension Validator; ожидаемое smoke-покрытие включает flat/mixed-Z variable-pitch overhang, centimeter conversion, defaults and removal of Validate/Default Pitch UI. Результат всё ещё требует ручного viewport QA пользователя.
 
 ### Ограничение размера
 
@@ -181,20 +181,20 @@ Alpha 0.2.0-alpha.4 CI runs [42321985435](https://github.com/MorenDord/RoofForge
 - Обычный CI benchmark и cProfile ограничены диапазоном 8, 16, 32 и 64 рёбер.
 - Контуры больше 64 рёбер не входят в критерии приёмки этой версии; отдельная оптимизация для 128 рёбер не требуется.
 
-## Точный статус готовности 0.2.0-alpha.4
+## Точный статус готовности 0.2.0-alpha.5
 
 - [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
 - [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью.
 - [x] Flat-Z weighted wavefront подключён к пользовательскому генератору.
 - [x] Mixed-Z контуры не сплющиваются и остаются на 3D support-plane path (ограничения для concave mixed-Z зафиксированы).
-- [x] Debounced Live Update pitch/Thickness, rollback последней валидной крыши и rename guard.
+- [x] Live Update pitch/Thickness with 0–1000 ms delay slider, rollback last-valid roof and rename guard.
 - [x] Eave Overhang: общая miter-вершина на углах; соседние несовместимые support-plane heights диагностируются; reflex L/U с nonzero свесом отклоняются.
 - [x] Update delay slider 0–1000 ms; default 0 ms (no debounce).
-- [x] Blender 5.0.1 smoke включает L/U pitch, thickness-only cache, delete/recreate и overhang.
-- [x] Чистый Extension ZIP 0.2.0-alpha.4 собран и принят официальным Blender Extension validator.
+- [ ] Blender 5.0.1 smoke covers flat variable-pitch overhang, mixed-Z variable-pitch overhang, centimeter conversions, 30°/1cm defaults, removed Validate/Default Pitch UI and existing delete/recreate cases.
+- [ ] Clean Extension ZIP 0.2.0-alpha.5 built and accepted by the official Blender Extension validator.
 - [x] CI push и PR на commit `a2b85ad...` прошёл; Python 3.11/3.13, geometry/legacy/Rust/profile и Blender package jobs успешны.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
 - [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
 
-Итог: 0.2.0-alpha.4 готова к пользовательской проверке, но не является стабильным 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.
+Итог: 0.2.0-alpha.5 будет готова к пользовательской проверке после зелёного CI; это не стабильный 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.

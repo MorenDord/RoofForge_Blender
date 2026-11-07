@@ -48,6 +48,28 @@ def create_square_object(name: str, with_face: bool = False):
     return obj
 
 
+def create_xyz_rectangle(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.2),
+        (4.0, 3.0, 0.4),
+        (0.0, 3.0, 0.1),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 def matrices_close(first, second, tolerance=1e-6) -> bool:
     return all(
         abs(first[row][column] - second[row][column]) <= tolerance
@@ -147,8 +169,7 @@ def run_case(name: str, edit_mode: bool, with_face: bool = False) -> None:
     source = create_square_object(name, with_face=with_face)
     source_coordinates = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     settings = bpy.context.scene.roof_forge
-    settings.pitch_default = 35.0
-    settings.thickness = 0.12
+    settings.thickness_cm = 1.0
 
     if edit_mode:
         bpy.ops.object.mode_set(mode="EDIT")
@@ -163,8 +184,6 @@ def run_case(name: str, edit_mode: bool, with_face: bool = False) -> None:
         bm.select_flush_mode()
         bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
 
-    validate_result = bpy.ops.roof_forge.validate_input()
-    ensure(validate_result == {"FINISHED"}, f"validation operator failed in {'Edit' if edit_mode else 'Object'} Mode")
     generate_result = bpy.ops.roof_forge.generate_surface()
     ensure(generate_result == {"FINISHED"}, f"generation operator failed in {'Edit' if edit_mode else 'Object'} Mode")
 
@@ -178,6 +197,10 @@ def main() -> None:
     extension.register()
     extension.register()  # Registration must be safe to call twice.
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
+    ensure(
+        not hasattr(bpy.ops.roof_forge, "validate_input"),
+        "Validate Roof operator should no longer be registered",
+    )
 
     # No mesh elements are selected: the add-on must find the contour itself.
     run_case("RoofForge_Smoke_ObjectMode_Wire", edit_mode=False)
@@ -204,20 +227,24 @@ def main() -> None:
         tuple(float(c) for c in vertex.co) for vertex in source.data.vertices
     )
     settings = bpy.context.scene.roof_forge
-    settings.pitch_default = 35.0
-    settings.thickness = 0.12
+    settings.thickness_cm = 1.0
     settings.live_update = True
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare per-edge pitch settings",
     )
     ensure(len(settings.slope_settings) == 6, "expected one pitch setting per L contour edge")
+    ensure(
+        all(abs(item.pitch - 30.0) < 1e-7 for item in settings.slope_settings),
+        "new per-edge pitch fields must default to 30 degrees",
+    )
+    ensure(
+        abs(settings.thickness_cm - 1.0) < 1e-7,
+        "default roof thickness must be 1 cm",
+    )
+    ensure(not hasattr(settings, "pitch_default"), "Default Pitch field should be removed")
     for index, item in enumerate(settings.slope_settings):
         item.pitch = 31.0 + index * 1.5
-    ensure(
-        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
-        "per-edge concave L validation failed",
-    )
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
         "per-edge concave L generation failed",
@@ -242,15 +269,15 @@ def main() -> None:
     # A thickness-only live update must reuse the cached upper surface.
     roof_build = importlib.import_module(f"{extension.__name__}.addon.roof_build")
     original_wavefront_builder = roof_build.build_wavefront_roof_surface
-    old_thickness = settings.thickness
+    old_thickness = settings.thickness_cm
     try:
         roof_build.build_wavefront_roof_surface = lambda *args, **kwargs: (
             (_ for _ in ()).throw(AssertionError("surface solver ran during thickness-only update"))
         )
-        settings.thickness = old_thickness + 0.025
+        settings.thickness_cm = old_thickness + 0.5
         live_update._run_pending_update()
         ensure(
-            abs(float(roof.get("roof_forge_thickness")) - settings.thickness) < 1e-7,
+            abs(float(roof.get("roof_forge_thickness_cm")) - settings.thickness_cm) < 1e-7,
             "thickness-only cached rebuild did not update shell metadata",
         )
     finally:
@@ -306,9 +333,8 @@ def main() -> None:
     clear_scene()
     u_source = create_u_contour("RoofForge_Smoke_Concave_U")
     u_settings = bpy.context.scene.roof_forge
-    u_settings.pitch_default = 35.0
-    u_settings.thickness = 0.12
-    u_settings.eave_overhang = 0.0
+    u_settings.thickness_cm = 1.0
+    u_settings.eave_overhang_cm = 0.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare U contour pitch settings",
@@ -316,10 +342,6 @@ def main() -> None:
     ensure(len(u_settings.slope_settings) == 8, "expected eight U contour slopes")
     for index, item in enumerate(u_settings.slope_settings):
         item.pitch = 30.0 + (index % 4) * 2.5
-    ensure(
-        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
-        "concave U contour did not validate at zero overhang",
-    )
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
         "concave U contour did not generate at zero overhang",
@@ -331,7 +353,24 @@ def main() -> None:
         "concave U generated an empty mesh",
     )
 
-    delay_settings = settings
+    roof_build_for_units = importlib.import_module(
+        f"{extension.__name__}.addon.roof_build"
+    )
+    ensure(
+        abs(roof_build_for_units.centimeters_to_blender_units(1.0, bpy.context.scene) - 0.01) < 1e-9,
+        "1 cm must convert to 0.01 Blender units when scale_length is 1",
+    )
+    original_unit_scale = bpy.context.scene.unit_settings.scale_length
+    try:
+        bpy.context.scene.unit_settings.scale_length = 0.5
+        ensure(
+            abs(roof_build_for_units.centimeters_to_blender_units(1.0, bpy.context.scene) - 0.02) < 1e-9,
+            "centimeter conversion did not honour scene unit scale_length",
+        )
+    finally:
+        bpy.context.scene.unit_settings.scale_length = original_unit_scale
+
+    delay_settings = u_settings
     delay_settings.live_update_delay_ms = 0
     ensure(
         live_update.live_update_delay_seconds(delay_settings) == 0.0,
@@ -348,20 +387,25 @@ def main() -> None:
     clear_scene()
     convex_source = create_square_object("RoofForge_Smoke_Convex_Overhang")
     convex_settings = bpy.context.scene.roof_forge
-    convex_settings.pitch_default = 35.0
-    convex_settings.thickness = 0.12
-    convex_settings.eave_overhang = 0.25
+    convex_settings.thickness_cm = 1.0
+    convex_settings.eave_overhang_cm = 25.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare convex overhang pitch settings",
     )
     ensure(
-        bpy.ops.roof_forge.validate_input() == {"FINISHED"},
-        "convex contour with eave overhang did not validate",
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare individual convex pitches",
     )
     ensure(
+        len(convex_settings.slope_settings) == 4,
+        "expected four individual convex pitches",
+    )
+    for item, pitch in zip(convex_settings.slope_settings, (30.0, 35.0, 40.0, 32.0)):
+        item.pitch = pitch
+    ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "convex contour with eave overhang did not generate",
+        "convex contour with individual pitch and eave overhang did not generate",
     )
     convex_roof = convex_settings.generated_object
     ensure(convex_roof is not None, "convex overhang roof pointer missing")
@@ -392,17 +436,44 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
+    # The same miter algorithm must work on non-flat XYZ eaves.
+    clear_scene()
+    xyz_source = create_xyz_rectangle("RoofForge_Smoke_XYZ_Overhang")
+    xyz_settings = bpy.context.scene.roof_forge
+    xyz_settings.thickness_cm = 1.0
+    xyz_settings.eave_overhang_cm = 20.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare non-flat contour pitch settings",
+    )
+    for item, pitch in zip(xyz_settings.slope_settings, (38.0, 40.0, 42.0, 39.0)):
+        item.pitch = pitch
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "non-flat contour with individual pitch and overhang did not generate",
+    )
+    xyz_roof = xyz_settings.generated_object
+    ensure(xyz_roof is not None, "non-flat overhang roof pointer missing")
+    ensure(
+        xyz_roof.get("roof_forge_solver") == "SUPPORT_PLANE_ENVELOPE_3D",
+        "non-flat contour did not use the XYZ support-plane solver",
+    )
+    ensure(
+        abs(float(xyz_roof.get("roof_forge_overhang_cm")) - 20.0) < 1e-7,
+        "non-flat overhang centimeters were not preserved in metadata",
+    )
+
     # The same nonzero overhang is intentionally rejected on an L contour.
     clear_scene()
     concave_source = create_l_contour("RoofForge_Smoke_Concave_Overhang_Reject")
     concave_settings = bpy.context.scene.roof_forge
-    concave_settings.eave_overhang = 0.2
+    concave_settings.eave_overhang_cm = 20.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare concave overhang pitch settings",
     )
     ensure(
-        bpy.ops.roof_forge.validate_input() == {"CANCELLED"},
+        bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
         "reflex contour unexpectedly accepted nonzero overhang",
     )
     ensure(

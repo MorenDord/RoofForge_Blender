@@ -1,15 +1,15 @@
-# RoofForge 0.2.0-alpha.4 — Session Handoff
+# RoofForge 0.2.0-alpha.5 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Installable code/package snapshot:** `a2b85ad189f019a1310ad46a6bfe69f94ef17361`.  
+**Installable code/package snapshot:** pending alpha.5 CI.  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
-**Installable build:** `roof_forge-0.2.0-alpha.4.zip`, from CI artifact `roof_forge-0.2.0-alpha.4-blender-5.0.1` (artifact ID `13552943327`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435/artifacts/13552943327).  
-**Inner ZIP SHA-256:** `185186234319dc31dfc03c592ba3d40aded78ed5ed47d55d7f456f1d1270aa57`.  
-**Latest CI:** [Push run 42321985435](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435) and [PR run 42321992476](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476) both passed.  
+**Installable build:** pending alpha.5 CI.  
+**Outer artifact:** pending alpha.5 CI upload.  
+**Inner ZIP SHA-256:** pending alpha.5 build.  
+**Latest CI:** pending alpha.5 push/PR workflows.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -17,12 +17,12 @@
 - One simple closed boundary loop, convex or concave, with up to 64 edges.
 - Active mesh object only; no vertex/edge selection required.
 - One independent pitch angle per boundary edge.
-- Debounced live rebuild on pitch/thickness/overhang change; retain the last valid generated roof on failure. Thickness-only rebuilds reuse the cached roof surface.
+- Live rebuild on pitch/thickness/overhang change with a 0–1000 ms delay slider (default 0); retain the last valid generated roof on failure. Thickness-only rebuilds reuse the cached roof surface.
 - Preserve source XYZ; do not silently flatten mixed-height contours.
-- Provide Eave Overhang in scene units: nonzero is supported for convex contours; concave L/U reflex corners require zero overhang.
+- Provide Eave Overhang in centimeters. The 3D ridge-line miter supports individual pitch and mixed-Z convex contours; reflex L/U contours require zero overhang.
 - Keep a compact simple per-edge UI; no need for a pitch-map preview yet.
 
-## What is now packaged in 0.2.0-alpha.4
+## What is now packaged in 0.2.0-alpha.5
 
 ### Automatic boundary detection
 - Detects one outer loop from a wire-only mesh or a face mesh with one boundary loop.
@@ -63,6 +63,12 @@
 - `live_update_delay_seconds(settings)` converts the setting and `schedule_live_update()` passes it as Blender timer `first_interval`.
 - Zero means no intentional debounce: callback is scheduled on the next Blender timer tick, not synchronously inside the property callback. Geometry still runs on the main thread, so solver runtime remains measurable.
 
+## UI simplification and defaults
+
+- Removed the separate Validate Roof operator from registration and the panel. Create / Update performs validation before replacing/creating the mesh.
+- Removed the Default Pitch field. New per-edge pitch entries default to 30 degrees.
+- Default shell thickness is 1 cm. Thickness and overhang inputs are explicitly labelled in centimeters.
+
 ## Explicit alpha limitations
 
 - This is not a claim that every possible simple polygon is already supported.
@@ -75,11 +81,9 @@
 ## CI evidence for the packaged commit
 
 Both complete workflows on head `a2b85ad189f019a1310ad46a6bfe69f94ef17361` passed:
-- Python 3.11 and 3.13: 70 tests run, 2 known multi-notch limitations skipped.
-- Blender 5.0.1 background smoke: registration, wire/surface boundary extraction in Object/Edit Mode with all elements deselected, concave L/U with per-edge pitch, shared miter corners with no fan faces, incompatible pitch diagnostic, configurable 0/230 ms delay, thickness-only cache, pitch rebuild, source immutability and delete/recreate.
-- Clean Extension ZIP built by `tools/build_extension.py`.
-- Official `blender --command extension validate` accepted the package.
-- Geometry benchmark, Rust diagnostic benchmark, legacy spatial benchmark and 64-edge profile jobs passed.
+- Python 3.11 and 3.13 CI: pending alpha.5.
+- Blender 5.0.1 background smoke: pending alpha.5 run.
+- Clean Extension ZIP, official Extension Validator and geometry/solver benchmarks: pending alpha.5 run.
 
 This is background CI evidence. User's visual viewport QA is still required.
 
@@ -131,5 +135,5 @@ python -m compileall -q core addon __init__.py
 python -m unittest discover -s tests -v
 blender --background --factory-startup --python tests/blender_smoke.py
 python tools/build_extension.py --output-dir dist
-blender --command extension validate dist/roof_forge-0.2.0-alpha.4.zip
+blender --command extension validate dist/roof_forge-0.2.0-alpha.5.zip
 ```

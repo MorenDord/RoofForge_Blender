@@ -23,7 +23,7 @@ class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
     pitch: bpy.props.FloatProperty(
         name="Pitch",
         description="Inclination angle for this boundary edge",
-        default=35.0,
+        default=30.0,
         min=1.0,
         max=85.0,
         precision=1,
@@ -32,29 +32,22 @@ class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
 
 
 class RoofForgeSettings(bpy.types.PropertyGroup):
-    pitch_default: bpy.props.FloatProperty(
-        name="Default Pitch",
-        description="Default angle used when a new contour is loaded",
-        default=35.0,
-        min=1.0,
-        max=85.0,
-        precision=1,
-    )
-    thickness: bpy.props.FloatProperty(
+    thickness_cm: bpy.props.FloatProperty(
         name="Thickness",
-        default=0.12,
-        min=0.001,
-        soft_max=1.0,
-        unit="LENGTH",
+        description="Roof shell thickness in centimeters",
+        default=1.0,
+        min=0.01,
+        soft_max=100.0,
+        precision=2,
         update=_settings_changed,
     )
-    eave_overhang: bpy.props.FloatProperty(
+    eave_overhang_cm: bpy.props.FloatProperty(
         name="Eave Overhang",
-        description="Horizontal extension of the roof beyond a convex source boundary",
+        description="Horizontal roof extension in centimeters",
         default=0.0,
         min=0.0,
-        soft_max=1.0,
-        unit="LENGTH",
+        soft_max=100.0,
+        precision=2,
         update=_settings_changed,
     )
     live_update_delay_ms: bpy.props.IntProperty(

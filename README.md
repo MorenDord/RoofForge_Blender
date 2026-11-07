@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.0-alpha.4.** This is an early user-test build, not a finished 1.0 release. It adds a convex eave-overhang control, safer delete-and-recreate handling, and a cached surface path for faster thickness-only live updates.
+> **Current test build: 0.2.0-alpha.5.** This is an early user-test build, not a finished 1.0 release. It adds 3D ridge-line miters for eaves with individual pitches and non-flat XYZ contours, centimeter-based length controls, and simplified roof creation UI.
 
 ## Project documents
 
@@ -20,7 +20,9 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- Horizontal eave overhang for convex contours with one shared miter vertex per corner; no separate triangular corner fan.
+- 3D eave miters are calculated from the intersection line of adjacent roof support planes, allowing individual pitches and mixed-height XYZ eaves without a corner fan.
+- Length controls are displayed in centimeters; default shell thickness is 1 cm and newly prepared pitches default to 30°.
+- No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
 - Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
 - Keep the last valid roof mesh if a requested live rebuild fails.
 - Stop automatic updating if the source object or generated roof object is renamed.
@@ -50,13 +52,13 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Exactly one simple closed boundary loop is supported. Multiple disconnected loops and holes are not.
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
-- Non-uniform object scale can change world-space pitch. Apply object scale for predictable world-space results.
-- Nonzero overhang is supported for convex contours with compatible adjacent support-plane heights at miter corners. Differing neighbouring pitches that separate those planes are rejected explicitly. For concave contours with reflex corners (including L/U), set overhang to 0.
+- Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
+- Nonzero overhang is supported for convex contours with individual edge pitches and mixed-height XYZ eaves. Adjacent strips meet along the actual 3D intersection line of their support planes. Concave contours with reflex corners (including L/U) still require overhang = 0; overhang offset self-intersections and unstable/parallel miter cases are rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.0-alpha.4-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.4.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.0-alpha.5-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.5.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -70,7 +72,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke also checks shared miter corners, incompatible pitch rejection, configurable debounce values, concave L/U without overhang, thickness-only cached rebuild, and deleting/re-creating the generated object from the same source contour. A 0 ms debounce removes the scheduled wait; actual geometry computation still runs on Blender's main thread. Manual viewport QA is still required.
+Blender 5.0.1 background smoke also checks variable-pitch flat eaves, variable-pitch mixed-Z eaves, centimeter conversion, 30° pitch and 1 cm thickness defaults, the simplified UI operator set, configurable debounce, concave L/U without overhang, thickness-only cache and delete/recreate. Manual viewport QA is still required.
 
 ## License
 
