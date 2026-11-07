@@ -209,8 +209,6 @@ def extend_convex_roof_surface(
     return build_roof_surface_from_planes(
         offset_boundary,
         surface.planes,
-        activation_boundary=source_boundary,
-        exterior_distance=distance,
         source_area_xy=surface.source_area_xy,
         eps=eps,
     )

@@ -67,14 +67,19 @@ def _cache_owner_id(owner) -> int | None:
 
 
 def _build_roof_surface(points, pitches, overhang):
-    if is_flat_eave_contour(points):
+    # The global plane envelope is required when expanding an eave: it creates
+    # a single continuous surface over the new outer contour. The weighted
+    # wavefront remains the preferred fast path for flat-Z roofs without eaves.
+    if overhang > 0.0:
+        surface = build_roof_surface(points, pitches)
+        solver = "SUPPORT_PLANE_ENVELOPE_EAVE"
+        surface = extend_convex_roof_surface(surface, overhang)
+    elif is_flat_eave_contour(points):
         surface = build_wavefront_roof_surface(points, pitches)
         solver = "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     else:
         surface = build_roof_surface(points, pitches)
         solver = "SUPPORT_PLANE_ENVELOPE_3D"
-    if overhang > 0.0:
-        surface = extend_convex_roof_surface(surface, overhang)
     return surface, solver
 
 

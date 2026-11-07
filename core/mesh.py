@@ -7,7 +7,7 @@ from typing import Sequence
 
 from .geometry import GeometryInputError, PlaneZ, _bbox_scale, signed_area
 from .planes import boundary_envelope_conflicts, build_boundary_planes
-from .envelope import lower_envelope_restricted_cells
+from .envelope import lower_envelope_cells, lower_envelope_restricted_cells
 
 Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
@@ -145,24 +145,19 @@ def build_roof_surface_from_planes(
     domain: Sequence[Point2],
     planes: Sequence[PlaneZ],
     *,
-    activation_boundary: Sequence[Point2] | None = None,
-    exterior_distance: float = 0.0,
     source_area_xy: float | None = None,
     eps: float = 1e-9,
 ) -> RoofSurface:
-    """Assemble a roof over a simple domain from existing support planes.
+    """Assemble a continuous lower envelope over a simple expanded domain.
 
-    Used for eave overhang: the contour is expanded in XY, while each original
-    edge plane is allowed to compete in an outward band around its own source
-    edge. Lower-envelope cells join adjacent planes along their exact 3D
-    intersection and provide a continuous, manifold roof top.
+    All source planes compete over the expanded contour. Their equality lines
+    define the roof ridges automatically, avoiding artificial cutoff edges
+    between neighbouring overhang strips. The source-plane set is unchanged.
     """
-    if activation_boundary is None:
-        activation_boundary = domain
-    if len(activation_boundary) != len(planes):
+    if len(planes) < 3:
         raise GeometryInputError(
             "PLANE_COUNT",
-            "Для каждого исходного ребра контура нужна одна плоскость ската.",
+            "Для расширенной поверхности нужны минимум три плоскости скатов.",
         )
     if len(domain) < 3 or len(planes) < 3:
         raise GeometryInputError(
@@ -176,28 +171,20 @@ def build_roof_surface_from_planes(
             "DEGENERATE_DOMAIN",
             "Расширенный контур имеет нулевую площадь.",
         )
-    activation_area = abs(signed_area(activation_boundary))
-    if activation_area <= eps:
-        raise GeometryInputError(
-            "DEGENERATE_SOURCE_DOMAIN",
-            "Исходный контур имеет нулевую площадь.",
-        )
+    activation_area = (
+        float(source_area_xy)
+        if source_area_xy is not None
+        else domain_area
+    )
 
     scale = max(
         1.0,
         _bbox_scale(domain),
-        _bbox_scale(activation_boundary),
     )
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = eps * scale * scale
 
-    cells_by_slope = lower_envelope_restricted_cells(
-        domain,
-        planes,
-        eps,
-        activation_boundary=activation_boundary,
-        exterior_distance=exterior_distance,
-    )
+    cells_by_slope = lower_envelope_cells(domain, planes, eps)
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []
@@ -271,11 +258,7 @@ def build_roof_surface_from_planes(
         faces=tuple(faces),
         face_slope_indices=tuple(face_slope_indices),
         planes=tuple(planes),
-        source_area_xy=(
-            float(source_area_xy)
-            if source_area_xy is not None
-            else activation_area
-        ),
+        source_area_xy=activation_area,
         surface_area_xy=surface_area_xy,
         boundary_xy=tuple(domain),
     )

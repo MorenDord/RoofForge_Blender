@@ -5,7 +5,6 @@ from core.mesh import build_roof_surface
 from core.overhang import extend_convex_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
-from core.wavefront import build_wavefront_roof_surface
 
 
 FLAT_RECTANGLE = [
@@ -50,7 +49,7 @@ class RoofOverhangTests(unittest.TestCase):
         return extended
 
     def test_equal_pitch_flat_contour_has_exact_miter_offset(self):
-        surface = build_wavefront_roof_surface(FLAT_RECTANGLE, [35.0] * 4)
+        surface = build_roof_surface(FLAT_RECTANGLE, [35.0] * 4)
         extended = self._assert_extended_shell(surface, 0.25)
         expected = {
             (-0.25, -0.25),
@@ -91,13 +90,13 @@ class RoofOverhangTests(unittest.TestCase):
 
     def test_concave_l_with_individual_pitch_supports_overhang(self):
         pitches = [31.0, 32.5, 34.0, 35.5, 37.0, 38.5]
-        surface = build_wavefront_roof_surface(CONCAVE_L, pitches)
+        surface = build_roof_surface(CONCAVE_L, pitches)
         extended = self._assert_extended_shell(surface, 0.15)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
 
     def test_concave_u_with_individual_pitch_supports_overhang(self):
         pitches = [30.0, 32.5, 35.0, 37.5, 30.0, 32.5, 35.0, 37.5]
-        surface = build_wavefront_roof_surface(CONCAVE_U, pitches)
+        surface = build_roof_surface(CONCAVE_U, pitches)
         extended = self._assert_extended_shell(surface, 0.1)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
 
