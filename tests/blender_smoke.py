@@ -179,13 +179,12 @@ def main() -> None:
 
     # Execute the scheduled timer callback directly in background mode; GUI
     # sessions run the same callback after the normal debounce interval.
-    from extension.addon.live_update import (
-        _run_pending_update,
-        cancel_pending_live_update,
+    live_update = importlib.import_module(
+        f"{extension.__name__}.addon.live_update"
     )
     settings.slope_settings[0].pitch += 2.0
-    _run_pending_update()
-    cancel_pending_live_update()
+    live_update._run_pending_update()
+    live_update.cancel_pending_live_update()
     after_update = tuple(tuple(float(c) for c in vertex.co) for vertex in roof.data.vertices)
     ensure(before_update != after_update, "live pitch edit did not rebuild the generated mesh")
     ensure(
