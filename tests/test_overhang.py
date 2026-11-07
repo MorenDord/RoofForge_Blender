@@ -45,23 +45,32 @@ class RoofOverhangTests(unittest.TestCase):
     def _assert_extended_shell(self, surface, overhang):
         extended = extend_convex_roof_surface(surface, overhang)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
-        self.assertEqual(len(extended.boundary_xy), len(surface.boundary_xy))
-        # Every outer eave segment must terminate on its own source slope plane.
-        # This prevents the global envelope from silently assigning a neighbour's
-        # lower plane to an offset edge, which was the visible protruding-eave bug.
-        for edge_index, point_xy in enumerate(extended.boundary_xy):
-            plane = surface.planes[edge_index]
-            matches = [
-                vertex for vertex in extended.vertices
-                if abs(vertex[0] - point_xy[0]) < 1e-7
-                and abs(vertex[1] - point_xy[1]) < 1e-7
-            ]
-            self.assertTrue(matches, f"missing outer miter vertex {edge_index + 1}")
-            self.assertTrue(
-                any(abs(plane.height(point_xy[0], point_xy[1]) - vertex[2]) < 1e-6
-                    for vertex in matches),
-                f"outer miter vertex {edge_index + 1} does not continue source plane {edge_index + 1}",
-            )
+        self.assertGreaterEqual(len(extended.boundary_xy), len(surface.boundary_xy))
+        added_faces = list(zip(
+            extended.faces[len(surface.faces):],
+            extended.face_slope_indices[len(surface.faces):],
+        ))
+        strips = [
+            (face, slope_id) for face, slope_id in added_faces
+            if slope_id >= 0
+        ]
+        caps = [
+            (face, slope_id) for face, slope_id in added_faces
+            if slope_id == -1
+        ]
+        self.assertEqual(
+            len(strips), len(surface.boundary_xy),
+            "there must be exactly one plane-preserving strip per boundary edge",
+        )
+        for face, slope_id in strips:
+            plane = surface.planes[slope_id]
+            for vertex_id in face:
+                x, y, z = extended.vertices[vertex_id]
+                self.assertAlmostEqual(plane.height(x, y), z, places=7)
+        self.assertTrue(
+            all(len(face) == 4 for face, _slope_id in caps),
+            "custom-angle joins must use one quad cap, not a fan of spokes",
+        )
         shell = build_roof_shell(extended, 0.01)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
         return extended
@@ -85,17 +94,32 @@ class RoofOverhangTests(unittest.TestCase):
         surface = build_wavefront_roof_surface(FLAT_RECTANGLE, [30.0, 35.0, 40.0, 32.0])
         extended = self._assert_extended_shell(surface, 0.2)
         self.assertGreater(extended.surface_area_xy, surface.surface_area_xy)
-        for index, start in enumerate(FLAT_RECTANGLE):
-            end = FLAT_RECTANGLE[(index + 1) % len(FLAT_RECTANGLE)]
-            outer_start = extended.boundary_xy[index]
+        strip_faces = [
+            (face, slope_id)
+            for face, slope_id in zip(
+                extended.faces[len(surface.faces):],
+                extended.face_slope_indices[len(surface.faces):],
+            )
+            if slope_id >= 0
+        ]
+        for face, slope_id in strip_faces:
+            start = FLAT_RECTANGLE[slope_id]
+            end = FLAT_RECTANGLE[(slope_id + 1) % len(FLAT_RECTANGLE)]
             dx = end[0] - start[0]
             dy = end[1] - start[1]
             length = (dx * dx + dy * dy) ** 0.5
-            signed_distance = (
-                dx * (outer_start[1] - start[1])
-                - dy * (outer_start[0] - start[0])
-            ) / length
-            self.assertAlmostEqual(signed_distance, -0.2, places=7)
+            offset_vertices = []
+            for vertex_id in face:
+                x, y, _z = extended.vertices[vertex_id]
+                signed_distance = (
+                    dx * (y - start[1]) - dy * (x - start[0])
+                ) / length
+                if abs(signed_distance + 0.2) < 1e-6:
+                    offset_vertices.append((x, y))
+            self.assertEqual(len(offset_vertices), 2)
+            outer_dx = offset_vertices[1][0] - offset_vertices[0][0]
+            outer_dy = offset_vertices[1][1] - offset_vertices[0][1]
+            self.assertAlmostEqual(dx * outer_dy - dy * outer_dx, 0.0, places=6)
 
     def test_mixed_z_contour_supports_individual_pitch_overhang(self):
         surface = build_roof_surface(MIXED_Z_RECTANGLE, [38.0, 40.0, 42.0, 39.0])
