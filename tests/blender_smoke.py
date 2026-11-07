@@ -228,6 +228,7 @@ def main() -> None:
     )
     settings = bpy.context.scene.roof_forge
     settings.thickness_cm = 1.0
+    settings.eave_overhang_cm = 15.0
     settings.live_update = True
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
@@ -334,7 +335,7 @@ def main() -> None:
     u_source = create_u_contour("RoofForge_Smoke_Concave_U")
     u_settings = bpy.context.scene.roof_forge
     u_settings.thickness_cm = 1.0
-    u_settings.eave_overhang_cm = 0.0
+    u_settings.eave_overhang_cm = 10.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare U contour pitch settings",
@@ -463,22 +464,22 @@ def main() -> None:
         "non-flat overhang centimeters were not preserved in metadata",
     )
 
-    # The same nonzero overhang is intentionally rejected on an L contour.
+    # A concave overhang that collapses a notch must be rejected safely.
     clear_scene()
-    concave_source = create_l_contour("RoofForge_Smoke_Concave_Overhang_Reject")
+    concave_source = create_l_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
     concave_settings = bpy.context.scene.roof_forge
-    concave_settings.eave_overhang_cm = 20.0
+    concave_settings.eave_overhang_cm = 300.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare concave overhang pitch settings",
     )
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
-        "reflex contour unexpectedly accepted nonzero overhang",
+        "oversized concave overhang unexpectedly accepted a collapsed offset",
     )
     ensure(
-        "выпуклых" in concave_settings.last_status,
-        "concave overhang error did not explain the current limitation",
+        "не выполнено" in concave_settings.last_status,
+        "invalid concave offset did not produce an actionable diagnostic",
     )
 
     extension.unregister()
@@ -486,7 +487,7 @@ def main() -> None:
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, per-edge pitch, L contour, live rebuild, Object/Edit Mode"
+        "automatic boundary detection, per-edge pitch, L/U concave overhang, live rebuild, Object/Edit Mode"
     )
 
 

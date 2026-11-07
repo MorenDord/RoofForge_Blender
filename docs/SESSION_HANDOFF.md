@@ -1,4 +1,4 @@
-# RoofForge 0.2.0-alpha.5 — Session Handoff
+# RoofForge 0.2.0-alpha.6 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
@@ -19,10 +19,10 @@
 - One independent pitch angle per boundary edge.
 - Live rebuild on pitch/thickness/overhang change with a 0–1000 ms delay slider (default 0); retain the last valid generated roof on failure. Thickness-only rebuilds reuse the cached roof surface.
 - Preserve source XYZ; do not silently flatten mixed-height contours.
-- Provide Eave Overhang in centimeters. The 3D ridge-line miter supports individual pitch and mixed-Z convex contours; reflex L/U contours require zero overhang.
+- Provide Eave Overhang in centimeters. The expanded lower-envelope offset supports individual pitch on tested convex and concave L/U contours, and mixed-Z convex contours. Self-intersecting or collapsed offsets are rejected.
 - Keep a compact simple per-edge UI; no need for a pitch-map preview yet.
 
-## What is now packaged in 0.2.0-alpha.5
+## What is now packaged in 0.2.0-alpha.6
 
 ### Automatic boundary detection
 - Detects one outer loop from a wire-only mesh or a face mesh with one boundary loop.
@@ -135,5 +135,5 @@ python -m compileall -q core addon __init__.py
 python -m unittest discover -s tests -v
 blender --background --factory-startup --python tests/blender_smoke.py
 python tools/build_extension.py --output-dir dist
-blender --command extension validate dist/roof_forge-0.2.0-alpha.5.zip
+blender --command extension validate dist/roof_forge-0.2.0-alpha.6.zip
 ```
