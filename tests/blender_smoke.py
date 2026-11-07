@@ -458,12 +458,12 @@ def main() -> None:
     )
 
 
-    # Concave U contour with per-edge pitch and a nonzero eave offset.
+    # Concave U contour without overhang: preserve the established solver.
     clear_scene()
     u_source = create_u_contour("RoofForge_Smoke_Concave_U")
     u_settings = bpy.context.scene.roof_forge
     u_settings.thickness_cm = 1.0
-    u_settings.eave_overhang_cm = 10.0
+    u_settings.eave_overhang_cm = 0.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare U contour pitch settings",
@@ -473,7 +473,7 @@ def main() -> None:
         item.pitch = 30.0 + (index % 4) * 2.5
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "concave U contour did not generate from its expanded eave contour",
+        "concave U contour did not generate with overhang disabled",
     )
     u_roof = u_settings.generated_object
     ensure(u_roof is not None, "concave U generated roof pointer missing")
@@ -626,7 +626,7 @@ def main() -> None:
         "non-flat overhang centimeters were not preserved in metadata",
     )
 
-    # A U-notch that is narrower than twice the requested eave must be rejected.
+    # Concave contours are explicitly rejected for the source-anchored overhang mode.
     clear_scene()
     concave_source = create_u_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
     concave_settings = bpy.context.scene.roof_forge
@@ -643,11 +643,11 @@ def main() -> None:
         item.pitch = pitch
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
-        "oversized concave overhang unexpectedly accepted a collapsed offset",
+        "concave overhang unexpectedly bypassed the safe-mode restriction",
     )
     ensure(
         "не выполнено" in concave_settings.last_status,
-        "invalid concave offset did not produce an actionable diagnostic",
+        "unsupported concave overhang did not produce an actionable diagnostic",
     )
 
     extension.unregister()
@@ -655,7 +655,7 @@ def main() -> None:
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, numbered contour plan, per-edge pitch, L/U concave overhang, live rebuild"
+        "automatic boundary detection, transparent facet plan, convex source-aligned overhang, concave no-overhang and live rebuild"
     )
 
 
