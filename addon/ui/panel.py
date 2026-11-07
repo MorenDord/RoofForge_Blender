@@ -25,7 +25,10 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             box.label(text=f"Individual slope pitch ({len(settings.slope_settings)})")
             for item in settings.slope_settings:
                 row = box.row(align=True)
-                row.label(text=f"Edge {item.edge_index + 1:02d}")
+                row.label(
+                    text=f"Edge {item.edge_index + 1:02d} "
+                         f"(V{item.start_vertex_index + 1}→V{item.end_vertex_index + 1})"
+                )
                 row.prop(item, "pitch", text="°")
             box.label(text="Order follows the detected closed boundary")
 
