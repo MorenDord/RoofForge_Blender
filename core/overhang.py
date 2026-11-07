@@ -228,7 +228,7 @@ def build_source_anchored_overhang_surface(
     expanded = offset_contour_outward(source, distance)
     planes = build_boundary_planes(source, pitches_degrees)
     conflicts = boundary_envelope_conflicts(
-        source, planes, active_contour=expanded
+        source, planes, active_contour=source
     )
     if conflicts:
         first = conflicts[0]
@@ -237,7 +237,8 @@ def build_source_anchored_overhang_surface(
     domain = [(point[0], point[1]) for point in expanded]
     source_area = abs(signed_area([(point[0], point[1]) for point in source]))
     return build_roof_surface_from_planes(
-        domain, planes, source_area_xy=source_area
+        domain, planes, source_area_xy=source_area,
+        active_contour=[(point[0], point[1]) for point in source],
     )
 
 
