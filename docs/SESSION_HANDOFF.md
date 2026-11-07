@@ -4,9 +4,11 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Feature commit:** `891dae5ae7558a9d5972f5f2779f3ce68481412e`  
-**Versioned package commit:** pending alpha.8 version-bump commit  
+**Versioned package commit:** `abe50c9cd7d9860a3be494d0f9af7ae262ec881a`  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Alpha.8 artifact / SHA-256:** pending versioned package CI.  
+**Installable build:** `roof_forge-0.2.0-alpha.8.zip`, from CI artifact `roof_forge-0.2.0-alpha.8-blender-5.0.1` (artifact ID `13576552379`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378167294/artifacts/13576552379).  
+**Inner ZIP SHA-256:** `0b25ddcd1bcc5eb302215e88f5dafeca3aeccc9bc2334690a4d597a5570a45f8`.  
 **Important:** `main` and `develop` must remain unchanged.
 
 ## Selected milestone: per-edge Pitch → source boundary edge mapping
@@ -34,13 +36,13 @@ Alpha.8 implements a discrete UI milestone from the 0.2.0 plan: the user can sel
 
 ## Verification on feature commit
 
-Push run [42377945648](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42377945648) and PR run [42377948831](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42377948831) both passed on feature commit `891dae5ae7558a9d5972f5f2779f3ce68481412e`:
+Push run [42378167294](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378167294) and PR run [42378171463](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42378171463) both passed on versioned package commit `abe50c9cd7d9860a3be494d0f9af7ae262ec881a`:
 - Python 3.11 and 3.13 compile/tests.
 - Blender 5.0.1 background smoke including the new Show operator tests.
 - Clean package ZIP and official Blender Extension Validator.
 - Geometry benchmark, legacy spatial benchmark, Rust candidate diagnostics and legacy cProfile.
 
-Those code-commit runs still label their package alpha.7. The next manifest/workflow bump generates the versioned alpha.8 package; record its artifact ID and SHA-256 after completion.
+The versioned alpha.8 ZIP was downloaded from GitHub Actions, the embedded checksum file was checked against the inner ZIP bytes, and the manifest inside the archive was confirmed as `0.2.0-alpha.8`.
 
 ## Existing features retained
 

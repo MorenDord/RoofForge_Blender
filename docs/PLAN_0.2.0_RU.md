@@ -177,7 +177,7 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Пакет 0.2.0-alpha.8 будет собран после прохождения Blender smoke и официального Extension Validator; ожидаемое smoke-покрытие включает flat/mixed-Z variable-pitch overhang, centimeter conversion, defaults and removal of Validate/Default Pitch UI. Результат всё ещё требует ручного viewport QA пользователя.
+- Пакет 0.2.0-alpha.8 собран и принят официальным Blender 5.0.1 Extension Validator. CI: push `42378167294`, PR `42378171463`; smoke включает Show selection для wire/face contours, Object/Edit Mode, source topology preservation и предыдущие geometry/UI regressions. Ручной viewport QA всё ещё нужен.
 
 ### Ограничение размера
 
@@ -196,8 +196,8 @@ Versioned alpha.7 CI runs [42370549428](https://github.com/MorenDord/RoofForge_B
 - [x] Live Update с задержкой 0–1000 мс, default 0 мс, rollback last-valid roof и rename guard.
 - [x] Single offset-contour eaves: flat variable-pitch convex, mixed-Z variable-pitch convex, concave L/U variable-pitch rebuild проходят Python/Blender smoke; self-intersect/collapsed offset отклоняется.
 - [x] Blender 5.0.1 smoke: cm conversion, 30°/1 cm defaults, per-edge Show selection on wire/face meshes, flat and mixed-Z offset-contour rebuild, concave L/U offset-contour rebuild, oversized U offset rejection, cache and delete/recreate.
-- [x] Clean Extension ZIP 0.2.0-alpha.8 собран и принят официальным Blender Extension Validator.
-- [x] Pitch-row Show operator selects the exact contour edge in Object/Edit Mode; Blender smoke covers wire and face boundary meshes and checks that source coordinates/topology remain unchanged.
+- [x] Clean Extension ZIP 0.2.0-alpha.8 собран и принят официальным Blender Extension Validator (artifact `13576552379`; SHA-256 `0b25ddcd1bcc5eb302215e88f5dafeca3aeccc9bc2334690a4d597a5570a45f8`).
+- [x] Pitch-row Show operator selects the exact contour edge in Object/Edit Mode; Blender smoke covers wire and face boundary meshes and checks that source coordinates/topology remain unchanged. Versioned alpha.8 push/PR CI runs `42378167294` and `42378171463` passed all jobs.
 - [x] Alpha.7 push run `42370549428` and PR run `42370553763` passed all Python, Blender, package, geometry, legacy, Rust and profile jobs.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
