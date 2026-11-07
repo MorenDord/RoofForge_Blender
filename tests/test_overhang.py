@@ -133,18 +133,18 @@ class RoofOverhangTests(unittest.TestCase):
         _offset, surface, _shell = self._build_offset_roof(MIXED_Z_RECTANGLE, [45.0] * 4, 0.2)
         self._assert_support_planes(MIXED_Z_RECTANGLE, surface)
 
-    def test_concave_l_contour_supports_custom_pitch_and_source_anchoring(self):
+    def test_concave_l_overhang_is_rejected_without_moving_support_edges(self):
         pitches = [31.0, 32.5, 34.0, 35.5, 37.0, 38.5]
-        offset, surface, _shell = self._build_offset_roof(CONCAVE_L, pitches, 0.15)
-        self._assert_offset_edge_geometry(CONCAVE_L, offset, 0.15)
-        self._assert_support_planes(CONCAVE_L, surface)
+        with self.assertRaises(GeometryInputError) as context:
+            build_source_anchored_overhang_surface(CONCAVE_L, pitches, 0.15)
+        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_UNSUPPORTED")
 
-    def test_concave_u_contour_supports_custom_pitch_and_source_anchoring(self):
+    def test_concave_u_overhang_is_rejected_without_moving_support_edges(self):
         speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6]
         pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
-        offset, surface, _shell = self._build_offset_roof(CONCAVE_U, pitches, 0.1)
-        self._assert_offset_edge_geometry(CONCAVE_U, offset, 0.1)
-        self._assert_support_planes(CONCAVE_U, surface)
+        with self.assertRaises(GeometryInputError) as context:
+            build_source_anchored_overhang_surface(CONCAVE_U, pitches, 0.1)
+        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_UNSUPPORTED")
 
     def test_too_large_u_offset_is_rejected(self):
         with self.assertRaises(GeometryInputError):
