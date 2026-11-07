@@ -1,61 +1,73 @@
 # RoofForge
 
-Procedural roof generation for Blender 5.0+, designed for environment artists and game-ready asset workflows.
+Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Test build:** 0.1.0 alpha. The current Blender UI supports one selected closed edge loop, one pitch value shared by all edges, validation, and a separate closed shell. It is not yet a parametric roof editor. A Blender 5.0.1 background smoke test is included in CI; interactive GUI behavior still needs user verification.
+> **Current test build: 0.2.0-alpha.1.** This is an early user-test build, not a finished 1.0 release. It adds automatic object-boundary detection, per-edge pitch fields, a debounced live rebuild and a tested flat-eave weighted wavefront path. The geometry engine still has explicit scope limits described below.
 
 ## Project documents
-- Technical specification: docs/SPECIFICATION.md
-- Architecture: docs/ARCHITECTURE.md
-- Development roadmap: docs/ROADMAP.md
-- Session handoff / restart instructions: docs/SESSION_HANDOFF.md
 
-## Current implementation
-- Blender Extension manifest, registration scaffold and 3D View sidebar panel.
-- Edit Mode and Object Mode selected closed-edge-loop adapter, preserving local XYZ.
-- 3D slope plane construction from pitch angle, eave edge grade and polygon winding.
-- Deterministic ear clipping and an experimental concave-domain arrangement (production path rejects discontinuities).
-- Experimental finite-segment distance field for continuous closed L/U comparison meshes; corner transitions are approximated and are not the production planar-facet solver.
-- Lower-envelope roof surface assembly, 3D vertex welding and projected domain-coverage validation.
-- Closed roof shell for contours whose upper surface is continuous, with thickness extruded along roof-local global -Z.
-- Separate FACE attributes for top/bottom/eave-wall categories and source slope IDs.
-- Closed-mesh validator for edge incidence, face winding, connected components and vertex links.
-- Weighted wavefront alpha for constant-height eaves: global multi-loop event stepping, tested split/collapse fixtures, L/U cross-needle nodes and welded RoofSurface assembly. This is not connected to the Blender UI.
-- Pure-Python end-to-end geometry fixtures for rectangle, V-notch, constrained L/U shapes and selected asymmetric event cases.
+- Technical specification: `docs/SPECIFICATION.md`
+- Architecture: `docs/ARCHITECTURE.md`
+- Development roadmap: `docs/ROADMAP.md`
+- 0.2.0 plan: `docs/PLAN_0.2.0_RU.md`
+- Session handoff / restart instructions: `docs/SESSION_HANDOFF.md`
 
-## Test build installation
-Download the outer roof_forge-0.1.0-blender-5.0.1.zip artifact from the latest successful **RoofForge tests** workflow and extract it once. Install the inner roof_forge-0.1.0.zip (do not extract that inner ZIP) using Preferences → Get Extensions → Install from Disk. Do not use the repository ZIP: it contains development files and legacy archives. Russian installation and QA steps are included in INSTALL_TEST_RU.md inside the extension package.
+## 0.2.0 alpha features
 
-The generated object is separate from the source and inherits its world transform. The source mesh is not modified.
+- Select a mesh object; no vertex or edge selection is needed.
+- Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
+- Show one numbered pitch field for each ordered boundary edge.
+- Generate and update a separate closed roof shell.
+- Debounced Live Update for per-edge pitch and thickness changes.
+- Keep the last valid roof mesh if a requested live rebuild fails.
+- Stop automatic updating if the source object or generated roof object is renamed.
+- Preserve source mesh coordinates and the source object's world transform.
+- Store face attributes for roof component and source slope index.
 
-## Run pure Python tests
+The angle fields are numbered in the deterministic contour traversal order. There is not yet an in-viewport edge highlight or roof-top preview diagram.
+
+## Geometry paths and limitations
+
+### Flat-height eaves
+
+When every boundary vertex has the same Z height, RoofForge uses the Python weighted wavefront solver. It supports per-edge pitch and has passing CI fixtures for:
+- convex and concave radial contours through 64 edges;
+- concave L/U contours with wavy boundaries and individual pitches;
+- a multi-notch concave contour;
+- selected simultaneous split/collapse and needle events.
+
+This is a tested family of cases, not a proof for every possible simple polygon. A geometric/event configuration outside the solver's supported event set is rejected with an error; the previous generated roof is kept during live update.
+
+### Mixed-height 3D eaves
+
+If boundary vertices have different Z heights, RoofForge keeps the original XYZ coordinates and uses the existing 3D support-plane envelope solver. It does not flatten the boundary. That path is useful for supported 3D contours, but concave mixed-height contours are not yet a general guaranteed case and may be rejected by plane-continuity or coverage validation.
+
+### Other current limits
+
+- Exactly one simple closed boundary loop is supported. Multiple disconnected loops and holes are not.
+- Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
+- 64 edges is the target maximum for this milestone.
+- Non-uniform object scale can change world-space pitch. Apply object scale for predictable world-space results.
+- No optional overhang/eaves generation, ridge/valley/hip profiles, standing seams, UVs, LOD or export automation.
+
+## Installation and test build
+
+Download the **outer** `roof_forge-0.2.0-alpha.1-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.0-alpha.1.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+
+Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
+
+## Development tests
+
 From the repository root:
 
-    python -m compileall -q core addon __init__.py
-    python -m unittest discover -s tests -v
+```bash
+python -m compileall -q core addon __init__.py
+python -m unittest discover -s tests -v
+python tests/benchmark_geometry.py --repeats 3
+```
 
-## Not implemented yet
-- Per-slope pitch map and independent pitch values (the current test UI uses one global pitch).
-- Eaves overhang, fascia and soffit.
-- Live Update, Detach, relink and lifecycle handlers.
-- Ridge, valley and hip profiles and junction patches.
-- Standing seams, UVs, material assignment, LOD and export automation.
-- Geometric self-intersection detection and its Blender UI diagnostics.
-
-## Known geometry limitations
-- Input must be one simple closed loop in XY.
-- Collinear contour vertices and projected-vertical edges are rejected.
-- The production Blender operator still uses the existing plane/envelope path. The weighted wavefront path is a separate pure-Python alpha and has not been connected to the UI. Do not treat L/U solver tests as proof of concave Blender generation.
-- The current 2D wavefront path requires a constant-Z eave loop. Mixed-height eaves require another formulation. `docs/CONCAVE_GEOMETRY.md` records the algorithm state and remaining event classes.
-- Pure geometry has unit coverage. Blender 5.0.1 background checks cover registration, Object Mode/Edit Mode boundary reads, validation and shell creation; manual interactive GUI QA is still required.
-- Non-uniform object scale can change world-space pitch because geometry is generated in source-local coordinates; apply scale before generation for predictable world-space pitch.
-
-## Development principles
-- Source geometry is immutable.
-- Build and validate output before linking it into the scene.
-- Stable slope indices/UUIDs identify generated regions.
-- Pure geometry code must be testable outside Blender.
-- Blender datablock changes happen on Blender's main thread.
+Blender 5.0.1 background smoke also checks object-boundary acquisition, per-edge pitch on a concave L contour, closed shell creation and a debounced live rebuild. Manual viewport QA is still required.
 
 ## License
+
 GPL-3.0-or-later.
