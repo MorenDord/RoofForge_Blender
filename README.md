@@ -20,7 +20,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- **Source-anchored eaves:** the pitch planes are constructed through the original 3D source edges. The outward offset contour extends the XY build domain only; it does not move or re-anchor the support planes.
+- **Source-anchored eaves:** for convex contours, the pitch planes are constructed through the original 3D source edges. The outward offset contour extends the XY build domain only; it does not move or re-anchor the support planes. Concave contours still generate normally with zero overhang; the new source-anchored overhang mode currently rejects concave contours rather than producing an unreliable open shell.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
 - Coplanar internal edges are dissolved from the generated Blender mesh, while true ridges and the outer boundary remain.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm and newly prepared pitches default to 30°.
