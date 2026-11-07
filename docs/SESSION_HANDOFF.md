@@ -4,12 +4,12 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Current branch / PR head:** `1f677f7509f6f61c94b10370468691cadd001e2d`  
+**Installable code/package snapshot:** `1f677f7509f6f61c94b10370468691cadd001e2d` (latest commits after this snapshot are documentation/PR metadata only).  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
 **Installable build:** `roof_forge-0.2.0-alpha.1.zip`, from CI artifact `roof_forge-0.2.0-alpha.1-blender-5.0.1` (artifact ID `13551363130`).  
 **Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486/artifacts/13551363130).  
 **Inner ZIP SHA-256:** `3a068a9f25fc84bcb3835d8005ec02f0062b9e8c3a3746f6b51d33f5f6de9afb`.  
-**Latest CI:** [Push run 42317727266](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317727266) and [PR run 42317734486](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486) both passed.  
+**Latest CI:** [Push run 42317727266](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317727266) and [PR run 42317734486](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42317734486) both passed on the package snapshot.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
