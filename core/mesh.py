@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from math import floor
 from typing import Sequence
 
-from .geometry import GeometryInputError, PlaneZ, signed_area
+from .geometry import GeometryInputError, PlaneZ, _bbox_scale, signed_area
 from .planes import boundary_envelope_conflicts, build_boundary_planes
-from .envelope import lower_envelope_restricted_cells
+from .envelope import lower_envelope_cells, lower_envelope_restricted_cells
 
 Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
@@ -140,6 +140,129 @@ def validate_surface_boundary_edges(vertices: Sequence[Point3], faces: Sequence[
                 f"{covered[index]:.8g} из {expected:.8g}."
             )
     return open_edges
+
+def build_roof_surface_from_planes(
+    domain: Sequence[Point2],
+    planes: Sequence[PlaneZ],
+    *,
+    source_area_xy: float | None = None,
+    eps: float = 1e-9,
+) -> RoofSurface:
+    """Assemble a continuous lower envelope over a simple expanded domain.
+
+    All source planes compete over the expanded contour. Their equality lines
+    define the roof ridges automatically, avoiding artificial cutoff edges
+    between neighbouring overhang strips. The source-plane set is unchanged.
+    """
+    if len(planes) < 3:
+        raise GeometryInputError(
+            "PLANE_COUNT",
+            "Для расширенной поверхности нужны минимум три плоскости скатов.",
+        )
+    if len(domain) < 3 or len(planes) < 3:
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Для построения поверхности нужны минимум три вершины и три плоскости.",
+        )
+
+    domain_area = abs(signed_area(domain))
+    if domain_area <= eps:
+        raise GeometryInputError(
+            "DEGENERATE_DOMAIN",
+            "Расширенный контур имеет нулевую площадь.",
+        )
+    activation_area = (
+        float(source_area_xy)
+        if source_area_xy is not None
+        else domain_area
+    )
+
+    scale = max(
+        1.0,
+        _bbox_scale(domain),
+    )
+    weld_tolerance = max(1e-12, eps * scale * 100.0)
+    area_tolerance = eps * scale * scale
+
+    cells_by_slope = lower_envelope_cells(domain, planes, eps)
+    registry = _VertexRegistry(weld_tolerance)
+    faces: list[Face] = []
+    face_slope_indices: list[int] = []
+    face_keys: set[tuple[int, ...]] = set()
+
+    for slope_index, cells in enumerate(cells_by_slope):
+        plane = planes[slope_index]
+        for cell in cells:
+            if len(cell) < 3 or abs(signed_area(cell)) <= area_tolerance:
+                continue
+            face_indices = [
+                registry.add((x, y, plane.height(x, y)))
+                for x, y in cell
+            ]
+            compact: list[int] = []
+            for vertex_index in face_indices:
+                if not compact or compact[-1] != vertex_index:
+                    compact.append(vertex_index)
+            if len(compact) > 1 and compact[0] == compact[-1]:
+                compact.pop()
+            if len(set(compact)) < 3:
+                continue
+            if signed_area(cell) < 0.0:
+                compact.reverse()
+            key = tuple(sorted(compact))
+            if key in face_keys:
+                continue
+            face_keys.add(key)
+            faces.append(tuple(compact))
+            face_slope_indices.append(slope_index)
+
+    if not faces:
+        raise GeometryInputError(
+            "EMPTY_ROOF",
+            "Нижняя огибающая не создала ни одной области расширенной крыши.",
+        )
+
+    surface_area_xy = sum(
+        abs(signed_area([
+            (registry.vertices[index][0], registry.vertices[index][1])
+            for index in face
+        ]))
+        for face in faces
+    )
+    if abs(surface_area_xy - domain_area) > max(
+        area_tolerance * 100.0, domain_area * 1e-7
+    ):
+        raise GeometryInputError(
+            "DOMAIN_COVERAGE_MISMATCH",
+            f"Области расширенной крыши покрывают {surface_area_xy:.9g} "
+            f"из {domain_area:.9g} квадратных единиц внешнего контура.",
+        )
+
+    edge_usage = _mesh_edge_usage(faces)
+    non_manifold_edges = [
+        edge for edge, count in edge_usage.items() if count > 2
+    ]
+    if non_manifold_edges:
+        raise GeometryInputError(
+            "NON_MANIFOLD_SURFACE",
+            f"При сборке расширенной поверхности обнаружено рёбер с более чем "
+            f"двумя гранями: {len(non_manifold_edges)}.",
+        )
+
+    validate_surface_boundary_edges(
+        registry.vertices, faces, domain, weld_tolerance * 5.0
+    )
+
+    return RoofSurface(
+        vertices=tuple(registry.vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_slope_indices),
+        planes=tuple(planes),
+        source_area_xy=activation_area,
+        surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(domain),
+    )
+
 
 def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> RoofSurface:

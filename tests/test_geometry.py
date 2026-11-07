@@ -17,7 +17,7 @@ from core.wavefront import (
     advance_wavefront_state, apply_split_event, build_moving_lines,
     build_wavefront_roof_surface,
     collect_loop_events, create_wavefront_state, find_split_candidates,
-    run_weighted_wavefront,
+    run_weighted_wavefront, is_flat_eave_contour,
     simulate_convex_wavefront, _line_intersection, _resolve_edge_collapse_group,
 )
 
@@ -212,6 +212,42 @@ class PolygonTests(unittest.TestCase):
         diagnostics = validate_closed_mesh(vertices, [(0, 1, 2)])
         self.assertIn("BOUNDARY_EDGE", {item.code for item in diagnostics})
 
+    def test_closed_mesh_validator_uses_local_face_scale_for_area(self):
+        # A small but well-shaped base triangle remains numerically resolvable
+        # even though the complete closed tetrahedron spans a much larger range.
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (0.0004, 0.0, 0.0),
+            (0.0002, 0.0003464101615, 0.0),
+            (10.0, 10.0, 10.0),
+        ]
+        faces = [
+            (1, 2, 3),
+            (0, 3, 2),
+            (0, 1, 3),
+            (0, 2, 1),
+        ]
+        self.assertEqual(validate_closed_mesh(vertices, faces, eps=1e-9), [])
+
+    def test_closed_mesh_validator_rejects_sliver_below_coordinate_tolerance(self):
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.5, 1e-10, 0.0),
+            (10.0, 10.0, 10.0),
+        ]
+        faces = [
+            (1, 2, 3),
+            (0, 3, 2),
+            (0, 1, 3),
+            (0, 2, 1),
+        ]
+        codes = {
+            item.code
+            for item in validate_closed_mesh(vertices, faces, eps=1e-9)
+        }
+        self.assertIn("ZERO_AREA_FACE", codes)
+
     def test_closed_mesh_validator_detects_bow_tie_vertex(self):
         vertices = [
             (0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1),
@@ -321,6 +357,22 @@ class PolygonTests(unittest.TestCase):
                   (4.0, 2.0, 0.5), (0.0, 2.0, 0.0)]
         with self.assertRaises(GeometryInputError) as ctx:
             build_moving_lines(points, [45.0] * 4)
+        self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
+
+    def test_flat_eave_detection_is_independent_of_absolute_z_offset(self):
+        flat = [
+            (0.0, 0.0, 1_000_000_000.0),
+            (4.0, 0.0, 1_000_000_000.0),
+            (4.0, 2.0, 1_000_000_000.0),
+            (0.0, 2.0, 1_000_000_000.0),
+        ]
+        stepped = list(flat)
+        stepped[1] = (stepped[1][0], stepped[1][1], 1_000_000_000.5)
+
+        self.assertTrue(is_flat_eave_contour(flat))
+        self.assertFalse(is_flat_eave_contour(stepped))
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_moving_lines(stepped, [45.0] * 4)
         self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
 
     def test_wavefront_convex_simulation_rejects_reflex_contour(self):
@@ -918,21 +970,227 @@ class PolygonTests(unittest.TestCase):
             shell = build_roof_shell(surface, 0.10)
             self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
-    def test_wavefront_rejects_sub_tolerance_split_collapse_sliver_in_shell(self):
+    def test_wavefront_resolves_symmetric_concave_point_terminations_through_64_edges(self):
+        # Alternating radii create a simple concave star-like contour whose
+        # weighted fronts all converge at the origin at one terminal height.
+        # The event batch contains endpoint hits and edge collapses together.
+        for count in (8, 16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    radius = 10.0 if index % 2 == 0 else 8.6
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                pitches = [35.0] * count
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertEqual(trace.terminal_kind, "POINT")
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_resolves_variable_pitch_concave_contours_through_64_edges(self):
+        # Asymmetric pitches break the single central-point event and force
+        # the solver to process local endpoint-hit/collapse batches.
+        for count in (8, 16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                pitches = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    radius = 10.0 if index % 2 == 0 else 8.6
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                    pitches.append(
+                        32.0 + 4.0 * math.sin(index * 1.371)
+                        + 2.5 * math.cos(index * 0.613)
+                    )
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                self.assertEqual(
+                    len(surface.face_slope_indices), len(surface.faces)
+                )
+
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_asymmetric_reflex_radial_contours_through_64_edges(self):
+        # Break the exact alternating-radius symmetry while retaining a
+        # simple star-shaped contour with many reflex vertices.
+        for count in (16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                pitches = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    base_radius = 10.0 if index % 2 == 0 else 8.6
+                    radius = (
+                        base_radius
+                        + 0.23 * math.sin(index * 0.793)
+                        + 0.17 * math.cos(index * 1.317)
+                    )
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                    pitches.append(
+                        30.0 + 5.0 * math.sin(index * 1.173)
+                        + 2.0 * math.cos(index * 0.537)
+                    )
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_64_edge_wavy_l_contour_with_variable_pitch(self):
+        outline = [
+            (0.0, 0.0), (10.0, 0.0), (10.0, 3.0),
+            (4.0, 3.0), (4.0, 10.0), (0.0, 10.0),
+        ]
+        subdivisions = (11, 11, 10, 11, 10, 11)
+        points = []
+        for edge_index, start in enumerate(outline):
+            end = outline[(edge_index + 1) % len(outline)]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            length = math.hypot(dx, dy)
+            left_normal = (-dy / length, dx / length)
+            for step in range(subdivisions[edge_index]):
+                t = step / subdivisions[edge_index]
+                bend = 0.015 * math.sin(math.pi * t)
+                points.append((
+                    start[0] + dx * t + left_normal[0] * bend,
+                    start[1] + dy * t + left_normal[1] * bend,
+                    0.0,
+                ))
+
+        self.assertEqual(len(points), 64)
+        pitches = [
+            30.0 + 5.0 * math.sin(index * 0.817)
+            + 2.0 * math.cos(index * 0.613)
+            for index in range(len(points))
+        ]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(
+            trace.projected_facet_area,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_64_edge_wavy_u_contour_with_variable_pitch(self):
+        outline = [
+            (0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (3.0, 4.0),
+            (3.0, 1.0), (1.0, 1.0), (1.0, 4.0), (0.0, 4.0),
+        ]
+        points = []
+        for edge_index, start in enumerate(outline):
+            end = outline[(edge_index + 1) % len(outline)]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            length = math.hypot(dx, dy)
+            left_normal = (-dy / length, dx / length)
+            for step in range(8):
+                t = step / 8.0
+                bend = 0.008 * math.sin(math.pi * t)
+                points.append((
+                    start[0] + dx * t + left_normal[0] * bend,
+                    start[1] + dy * t + left_normal[1] * bend,
+                    0.0,
+                ))
+
+        self.assertEqual(len(points), 64)
+        pitches = [
+            31.0 + 4.5 * math.sin(index * 0.917)
+            + 2.5 * math.cos(index * 0.641)
+            for index in range(len(points))
+        ]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(
+            trace.projected_facet_area,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_keeps_small_resolvable_split_collapse_sliver_in_shell(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
             (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
         ]
-        # This perturbation leaves a valid but sub-tolerance terminal sliver.
-        # The upper surface must retain it, while the solid-shell validator
-        # must reject the resulting face rather than weakening its area gate.
+        # This produces a small but locally resolved terminal facet. Its area
+        # is small relative to the whole roof, not relative to its own edges.
         speeds = [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7]
         pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
         surface = build_wavefront_roof_surface(points, pitches)
         self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
-        with self.assertRaises(GeometryInputError) as ctx:
-            build_roof_shell(surface, 0.10)
-        self.assertEqual(ctx.exception.code, "ZERO_AREA_FACE")
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_wavefront_rejects_partial_overlap_as_complete_needle(self):
         points = [

@@ -1,4 +1,4 @@
-"""RoofForge sidebar panel."""
+"""RoofForge 0.2.0 alpha sidebar panel."""
 import bpy
 
 
@@ -12,17 +12,48 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.roof_forge
+        source = context.object
+
         col = layout.column(align=True)
         col.label(text="Roof boundary")
-        col.label(text="Select one closed edge loop in Edit Mode")
-        col.prop(settings, "pitch_default")
+        col.label(text="Active mesh object; no vertex/edge selection")
+        col.operator("roof_forge.prepare_slopes", icon="EDGESEL")
+
+        if settings.slope_settings:
+            box = layout.box()
+            box.label(text=f"Individual slope pitch ({len(settings.slope_settings)})")
+            for item in settings.slope_settings:
+                row = box.row(align=True)
+                row.label(
+                    text=f"Edge {item.edge_index + 1:02d} "
+                         f"(V{item.start_vertex_index + 1}→V{item.end_vertex_index + 1})"
+                )
+                row.prop(item, "pitch", text="°")
+            box.label(text="Order follows the detected closed boundary")
 
         col.separator()
-        col.label(text="Solid shell")
-        col.prop(settings, "thickness")
-        col.operator("roof_forge.validate_input", icon="CHECKMARK")
+        col.label(text="Solid roof shell")
+        col.prop(settings, "thickness_cm", text="Thickness (cm)")
+        col.prop(settings, "eave_overhang_cm", text="Eave Overhang (cm)")
+        col.prop(settings, "live_update")
+        delay_row = col.row()
+        delay_row.enabled = settings.live_update
+        delay_row.prop(
+            settings, "live_update_delay_ms",
+            text="Update delay (ms)", slider=True,
+        )
+        if settings.live_update_delay_ms == 0:
+            delay_row.label(text="No debounce", icon="TIME")
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
-        col.separator()
-        col.label(text="Thickness is extruded along local -Z", icon="INFO")
-        col.label(text="Per-slope pitch map and live link are next")
+        if settings.last_status:
+            status = layout.box()
+            status.label(text=settings.last_status[:110], icon="INFO")
+
+        if source is not None and source.type == "MESH":
+            col.separator()
+            col.label(text="Flat-Z: weighted wavefront")
+            col.label(text="Mixed-Z: 3D plane envelope")
+            col.label(text="Overhang: convex contours only")
+        else:
+            col.label(text="Select a mesh object to begin", icon="INFO")

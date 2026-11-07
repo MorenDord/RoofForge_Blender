@@ -1,9 +1,9 @@
 """Event-driven weighted inward wavefront kinematics.
 
-This first slice deliberately handles strictly convex contours end-to-end.
-For concave contours it provides validated split-event candidate detection,
-but does not yet mutate wavefront topology at split events. It is pure Python
-and does not depend on bpy.
+The solver supports flat-eave contours with per-edge pitch, including strict
+reflex splits and a deliberately limited set of simultaneous topology events.
+Unsupported event combinations and mixed-height eaves are rejected explicitly;
+this module does not depend on bpy.
 
 Line convention:
     n . x = c + speed * t
@@ -13,6 +13,7 @@ obeys t = (n . x - c) / speed and has gradient magnitude tan(theta).
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 from heapq import heappop, heappush
@@ -343,14 +344,30 @@ def _is_convex_loop(vertices: Sequence[KinematicVertex], winding: int, eps: floa
     return True
 
 
+def is_flat_eave_contour(points: Sequence[Point3], eps: float = 1e-9) -> bool:
+    """Return whether all eaves share one Z height within an XY-scale tolerance.
+
+    The test is translation-invariant: moving a roof contour far above the
+    world origin must not make visibly different eave heights appear equal.
+    """
+    if not points or not isfinite(eps) or eps < 0.0:
+        return False
+    if any(not all(isfinite(value) for value in point) for point in points):
+        return False
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    zs = [point[2] for point in points]
+    xy_scale = max(1.0, max(xs) - min(xs), max(ys) - min(ys))
+    return max(zs) - min(zs) <= eps * xy_scale
+
+
 def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> tuple[MovingLine, ...]:
     """Create one positively weighted moving line per ordered contour edge."""
     if len(points) < 3 or len(points) != len(pitches_degrees):
         raise GeometryInputError("INPUT_COUNT", "Нужно минимум три вершины и по одному уклону на каждое ребро.")
     z_values = [point[2] for point in points]
-    z_tolerance = eps * max(1.0, max(z_values) - min(z_values), *(abs(z) for z in z_values))
-    if max(z_values) - min(z_values) > z_tolerance:
+    if not is_flat_eave_contour(points, eps):
         raise GeometryInputError(
             "MIXED_EAVE_HEIGHTS_UNSUPPORTED",
             "Weighted 2D wavefront первой версии поддерживает только контур с постоянной высотой карнизов."
@@ -959,6 +976,222 @@ def _record_wavefront_interval(
 
 
 
+def _resolve_simultaneous_point_termination(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> bool:
+    """Resolve a mixed endpoint/collapse batch only when the whole loop dies at one point.
+
+    Some symmetric concave contours make every active front collapse at the
+    same node. Their event queue contains many endpoint hits as well as edge
+    collapses, which is not a cross-needle. Revalidate the complete geometry
+    at the batch time before accepting this terminal case.
+    """
+    if not events or len(loop.edge_ids) < 3:
+        return False
+    if any(
+        event.kind not in {EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT}
+        or event.loop_id != loop.loop_id
+        or event.loop_generation != loop.generation
+        or event.position is None
+        for event in events
+    ):
+        return False
+
+    edge_ids = set(loop.edge_ids)
+    for event in events:
+        if event.kind == EventKind.EDGE_COLLAPSE:
+            if event.edge_id not in edge_ids:
+                return False
+        else:
+            if (
+                event.edge_id not in edge_ids
+                or event.target_edge_id not in edge_ids
+                or event.vertex_id is None
+                or not 0 <= event.vertex_id < len(loop.edge_ids)
+                or event.edge_id != loop.edge_ids[event.vertex_id]
+            ):
+                return False
+
+    # The event-time tolerance is based on the original contour scale. A
+    # slightly wider spatial tolerance accommodates the time-batch grouping,
+    # but does not allow a finite surviving edge or multiple terminal nodes.
+    tolerance = state.time_tolerance * 10.0
+    vertices = _loop_vertices(loop, state.edges, state.current_time, state.epsilon)
+    anchor = vertices[0].point
+    if any(
+        hypot(vertex.point[0] - anchor[0], vertex.point[1] - anchor[1]) > tolerance
+        for vertex in vertices[1:]
+    ):
+        return False
+
+    if any(
+        hypot(event.position[0] - anchor[0], event.position[1] - anchor[1]) > tolerance
+        for event in events
+    ):
+        return False
+
+    for index in range(len(loop.edge_ids)):
+        _, _, _, length = _edge_segment(
+            loop, index, vertices, state.edges, state.current_time
+        )
+        if abs(length) > tolerance:
+            return False
+
+    state.terminal_loops[loop.loop_id] = "POINT"
+    state.loops.pop(loop.loop_id, None)
+    for edge_id in loop.edge_ids:
+        state.edges.pop(edge_id, None)
+    return True
+
+
+def _resolve_vertex_hit_on_collapsing_edge(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> bool:
+    """Consume endpoint hits that are exactly an endpoint of a collapsing edge.
+
+    A reflex vertex can hit the neighboring edge beyond a collapsing front at
+    the same instant that the front collapses. The hit is not a separate split:
+    removing the collapsed edge already creates that successor vertex.
+    """
+    collapse_events = [
+        event for event in events if event.kind == EventKind.EDGE_COLLAPSE
+    ]
+    hit_events = [
+        event for event in events if event.kind == EventKind.VERTEX_HIT
+    ]
+    if not collapse_events or not hit_events:
+        return False
+    if len(collapse_events) + len(hit_events) != len(events):
+        return False
+
+    collapse_by_edge = {
+        event.edge_id: event for event in collapse_events
+        if event.edge_id is not None
+    }
+    if len(collapse_by_edge) != len(collapse_events):
+        return False
+    loop_edge_ids = loop.edge_ids
+    edge_set = set(loop_edge_ids)
+    if not set(collapse_by_edge).issubset(edge_set):
+        return False
+
+    tolerance = state.time_tolerance * 10.0
+    vertices = _loop_vertices(
+        loop, state.edges, state.current_time, state.epsilon
+    )
+    paired_hits: dict[int, WavefrontEvent] = {}
+
+    for event in hit_events:
+        if (
+            event.edge_id is None
+            or event.edge_id not in edge_set
+            or event.target_edge_id is None
+            or event.target_edge_id not in edge_set
+            or event.position is None
+            or event.vertex_id is None
+            or event.loop_id != loop.loop_id
+            or event.loop_generation != loop.generation
+            or not 0 <= event.vertex_id < len(loop_edge_ids)
+            or loop_edge_ids[event.vertex_id] != event.edge_id
+        ):
+            return False
+
+        vertex_index = event.vertex_id
+        count = len(loop_edge_ids)
+        current_edge = loop_edge_ids[vertex_index]
+        next_edge = loop_edge_ids[(vertex_index + 1) % count]
+        previous_edge = loop_edge_ids[(vertex_index - 1) % count]
+        previous_previous_edge = loop_edge_ids[(vertex_index - 2) % count]
+
+        candidates = []
+        # The hit vertex is the start endpoint of the collapsing current edge.
+        if (
+            current_edge in collapse_by_edge
+            and event.target_edge_id == next_edge
+            and next_edge not in collapse_by_edge
+        ):
+            candidates.append(current_edge)
+        # Or it is the end endpoint of the collapsing previous edge.
+        if (
+            previous_edge in collapse_by_edge
+            and event.target_edge_id == previous_previous_edge
+            and previous_previous_edge not in collapse_by_edge
+        ):
+            candidates.append(previous_edge)
+        if len(candidates) != 1:
+            return False
+
+        collapsed_edge_id = candidates[0]
+        if collapsed_edge_id in paired_hits:
+            return False
+        collapse = collapse_by_edge[collapsed_edge_id]
+        if collapse.position is None:
+            return False
+
+        edge_index = loop_edge_ids.index(collapsed_edge_id)
+        start, end, _, length = _edge_segment(
+            loop, edge_index, vertices, state.edges, state.current_time
+        )
+        if abs(length) > tolerance:
+            return False
+
+        event_point = collapse.position
+        for point in (
+            event.position,
+            vertices[vertex_index].point,
+            start,
+            end,
+        ):
+            if hypot(point[0] - event_point[0], point[1] - event_point[1]) > tolerance:
+                return False
+
+        target = state.edges[event.target_edge_id]
+        residual = (
+            _dot(target.normal, event_point)
+            - target.offset_at(state.current_time)
+        )
+        if abs(residual) > tolerance:
+            return False
+        paired_hits[collapsed_edge_id] = event
+
+    collapsed = set(collapse_by_edge)
+    remaining = tuple(
+        edge_id for edge_id in loop_edge_ids if edge_id not in collapsed
+    )
+    if len(remaining) >= 3:
+        prospective = WavefrontLoop(
+            loop.loop_id, remaining, loop.generation + 1
+        )
+        new_vertices = _loop_vertices(
+            prospective, state.edges, state.current_time, state.epsilon
+        )
+        polygon = [vertex.point for vertex in new_vertices]
+        scale = max(
+            1.0,
+            max(point[0] for point in polygon) - min(point[0] for point in polygon),
+            max(point[1] for point in polygon) - min(point[1] for point in polygon),
+        )
+        area = signed_area(polygon)
+        if (
+            abs(area) <= state.epsilon * scale * scale * 100.0
+            or (1 if area > 0.0 else -1) != state.input_winding
+            or validate_simple_polygon(polygon, state.epsilon)
+        ):
+            return False
+
+    child = _resolve_edge_collapse_group(
+        state, loop, collapse_events
+    )
+    state.loops.pop(loop.loop_id, None)
+    if child is not None:
+        state.loops[child.loop_id] = child
+    return True
+
+
 def _resolve_cross_needle_vertex_hit(
     state: WavefrontSimulationState,
     loop: WavefrontLoop,
@@ -1241,14 +1474,168 @@ def _resolve_split_collapse_batch(
     return tuple(state.loops[key] for key in sorted(trial_state.loops))
 
 
+
+def _resolve_multiple_split_batch(
+    state: WavefrontSimulationState,
+    loop: WavefrontLoop,
+    events: Sequence[WavefrontEvent],
+) -> tuple[WavefrontLoop, ...]:
+    """Resolve several same-time split candidates by repeated revalidation.
+
+    A split replaces its target edge with two instances, so later events from
+    the original queue can become stale by edge ID even though the geometric
+    event is still valid. Recompute candidates after each accepted split and
+    match by authored source-edge IDs plus event position. This allows
+    independent multi-notch splits without accepting stale or ambiguous
+    topology.
+    """
+    if len(events) < 2 or any(event.kind != EventKind.SPLIT_CANDIDATE for event in events):
+        raise GeometryInputError(
+            "MULTI_SPLIT_INVALID_BATCH",
+            "Для multi-split resolver требуется минимум два строгих split-события."
+        )
+
+    original_edges = dict(state.edges)
+    working_edges = dict(state.edges)
+    working_loops: list[WavefrontLoop] = [loop]
+    next_edge_id = state.next_edge_id
+    next_loop_id = state.next_loop_id
+    position_tolerance = state.time_tolerance * 10.0
+
+    ordered_events = sorted(events, key=WavefrontEventQueue._event_key)
+    for original_event in ordered_events:
+        if original_event.edge_id is None or original_event.target_edge_id is None:
+            raise GeometryInputError(
+                "INCOMPLETE_SPLIT_EVENT",
+                "Одновременный split не содержит ID исходной вершины или целевого ребра."
+            )
+        if original_event.position is None:
+            raise GeometryInputError(
+                "INCOMPLETE_SPLIT_EVENT",
+                "Одновременный split не содержит подтверждённую позицию события."
+            )
+        try:
+            original_edge = original_edges[original_event.edge_id]
+            original_target = original_edges[original_event.target_edge_id]
+        except KeyError as exc:
+            raise GeometryInputError(
+                "STALE_SPLIT_EVENT",
+                "Одно из одновременных split-событий уже не имеет исходного ребра."
+            ) from exc
+
+        candidates: list[tuple[WavefrontLoop, WavefrontEvent]] = []
+        for candidate_loop in working_loops:
+            fresh_events = find_split_candidates(
+                candidate_loop,
+                working_edges,
+                state.current_time,
+                state.epsilon,
+            )
+            for fresh_event in fresh_events:
+                if fresh_event.kind != EventKind.SPLIT_CANDIDATE:
+                    continue
+                if fresh_event.position is None:
+                    continue
+                if abs(fresh_event.time - original_event.time) > state.time_tolerance:
+                    continue
+                if (
+                    working_edges[fresh_event.edge_id].source_edge_id
+                    != original_edge.source_edge_id
+                    or working_edges[fresh_event.target_edge_id].source_edge_id
+                    != original_target.source_edge_id
+                ):
+                    continue
+                if hypot(
+                    fresh_event.position[0] - original_event.position[0],
+                    fresh_event.position[1] - original_event.position[1],
+                ) > position_tolerance:
+                    continue
+                candidates.append((candidate_loop, fresh_event))
+
+        if len(candidates) != 1:
+            details = [
+                (
+                    candidate_loop.loop_id,
+                    candidate_event.edge_id,
+                    candidate_event.target_edge_id,
+                    candidate_event.position,
+                    candidate_event.time,
+                )
+                for candidate_loop, candidate_event in candidates
+            ]
+            raise GeometryInputError(
+                "SIMULTANEOUS_SPLIT_AMBIGUOUS",
+                "Одновременный split нельзя однозначно переподтвердить после предыдущих split-событий. "
+                f"Исходное событие: {original_event}; кандидаты: {details}."
+            )
+
+        candidate_loop, fresh_event = candidates[0]
+        result = apply_split_event(
+            candidate_loop,
+            working_edges,
+            fresh_event,
+            next_edge_id=next_edge_id,
+            next_loop_id=next_loop_id,
+            eps=state.epsilon,
+            validate_children=False,
+        )
+        remaining_loops = [
+            candidate
+            for candidate in working_loops
+            if candidate.loop_id != candidate_loop.loop_id
+        ]
+        working_loops = remaining_loops + list(result.loops)
+        working_edges = result.edges
+        next_edge_id = result.next_edge_id
+        next_loop_id = result.next_loop_id
+
+    for child in working_loops:
+        vertices = _loop_vertices(
+            child, working_edges, state.current_time, state.epsilon
+        )
+        polygon = [vertex.point for vertex in vertices]
+        scale = max(
+            1.0,
+            max(point[0] for point in polygon) - min(point[0] for point in polygon),
+            max(point[1] for point in polygon) - min(point[1] for point in polygon),
+        )
+        area = signed_area(polygon)
+        if abs(area) <= state.epsilon * scale * scale * 100.0:
+            raise GeometryInputError(
+                "DEGENERATE_MULTI_SPLIT_CHILD",
+                "Одновременные split-события создали контур нулевой площади."
+            )
+        if (1 if area > 0.0 else -1) != state.input_winding:
+            raise GeometryInputError(
+                "MULTI_SPLIT_WINDING_CHANGED",
+                "После одновременных split-событий изменилась ориентация дочернего контура."
+            )
+        if validate_simple_polygon(polygon, state.epsilon):
+            raise GeometryInputError(
+                "MULTI_SPLIT_CHILD_NOT_SIMPLE",
+                "После одновременных split-событий остался самопересекающийся контур."
+            )
+
+    state.loops.pop(loop.loop_id, None)
+    state.loops.update({child.loop_id: child for child in working_loops})
+    state.edges = working_edges
+    state.next_edge_id = next_edge_id
+    state.next_loop_id = next_loop_id
+    return tuple(
+        state.loops[loop_id]
+        for loop_id in sorted(state.loops)
+        if loop_id in {child.loop_id for child in working_loops}
+    )
+
+
 def advance_wavefront_state(
     state: WavefrontSimulationState,
 ) -> EventBatch | None:
     """Advance all live loops to and process the globally earliest event batch.
 
-    Independent loops may process events at the same time. Events of different
-    kinds on the same loop at the same instant are rejected until a dedicated
-    simultaneous-event resolver is implemented.
+    Independent loops may process events at the same time. A same-loop
+    batch is resolved only when every topology mutation is explicitly
+    revalidated; unsupported mixed event groups fail without partial output.
     """
     if state.is_complete:
         return None
@@ -1288,26 +1675,26 @@ def advance_wavefront_state(
             changed_loops.extend(_resolve_split_collapse_batch(state, loop, loop_events))
 
         elif kinds == {EventKind.SPLIT_CANDIDATE}:
-            if len(loop_events) != 1:
-                raise GeometryInputError(
-                    "SIMULTANEOUS_SPLIT_EVENTS_UNRESOLVED",
-                    "Несколько split-событий одного контура произошли одновременно; требуется общий resolver."
+            if len(loop_events) == 1:
+                result = apply_split_event(
+                    loop,
+                    state.edges,
+                    loop_events[0],
+                    next_edge_id=state.next_edge_id,
+                    next_loop_id=state.next_loop_id,
+                    eps=state.epsilon,
                 )
-            result = apply_split_event(
-                loop,
-                state.edges,
-                loop_events[0],
-                next_edge_id=state.next_edge_id,
-                next_loop_id=state.next_loop_id,
-                eps=state.epsilon,
-            )
-            del state.loops[loop_id]
-            state.edges = result.edges
-            for child in result.loops:
-                state.loops[child.loop_id] = child
-                changed_loops.append(child)
-            state.next_edge_id = result.next_edge_id
-            state.next_loop_id = result.next_loop_id
+                del state.loops[loop_id]
+                state.edges = result.edges
+                for child in result.loops:
+                    state.loops[child.loop_id] = child
+                    changed_loops.append(child)
+                state.next_edge_id = result.next_edge_id
+                state.next_loop_id = result.next_loop_id
+            else:
+                changed_loops.extend(
+                    _resolve_multiple_split_batch(state, loop, loop_events)
+                )
 
         elif kinds == {EventKind.EDGE_COLLAPSE}:
             child = _resolve_edge_collapse_group(state, loop, loop_events)
@@ -1317,9 +1704,15 @@ def advance_wavefront_state(
                 changed_loops.append(child)
 
         elif EventKind.VERTEX_HIT in kinds:
-            if not kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT}) or not _resolve_cross_needle_vertex_hit(
-                state, loop, loop_events
-            ):
+            resolved = (
+                _resolve_simultaneous_point_termination(state, loop, loop_events)
+                or _resolve_vertex_hit_on_collapsing_edge(state, loop, loop_events)
+                or (
+                    kinds.issubset({EventKind.EDGE_COLLAPSE, EventKind.VERTEX_HIT})
+                    and _resolve_cross_needle_vertex_hit(state, loop, loop_events)
+                )
+            )
+            if not resolved:
                 details = [
                     (event.kind.value, event.edge_id, event.vertex_id,
                      event.target_edge_id, event.position, event.time)
@@ -1327,9 +1720,16 @@ def advance_wavefront_state(
                 ]
                 raise GeometryInputError(
                     "SIMULTANEOUS_EVENT_BATCH_UNRESOLVED",
-                    "Смешанный endpoint/edge event не соответствует проверенному cross-needle узлу. "
+                    "Смешанный endpoint/edge event не является ни подтверждённым общим point-termination, "
+                    "ни проверенным cross-needle узлом. "
                     f"Контур {loop_id}, события: {details}."
                 )
+            # The collapse-endpoint resolver can replace the loop in-place.
+            # Its new generation must be rescheduled just like other topology
+            # mutations, otherwise the simulation would run out of events.
+            child_loop = state.loops.get(loop_id)
+            if child_loop is not None and child_loop.generation != loop.generation:
+                changed_loops.append(child_loop)
         else:
             details = [
                 (
@@ -1454,6 +1854,19 @@ def _split_face_edges_at_shared_vertices(
     tolerance_sq = tolerance * tolerance
     output: list[tuple[int, ...]] = []
 
+    # Build one deterministic coordinate index per axis. For each face edge,
+    # query the axis with the narrowest AABB interval, then apply exact 3D
+    # projection/distance checks to this conservative candidate subset.
+    axis_orders: list[list[int]] = []
+    axis_values: list[list[float]] = []
+    for axis in range(3):
+        order = sorted(
+            range(len(vertices)),
+            key=lambda vertex_id: (vertices[vertex_id][axis], vertex_id),
+        )
+        axis_orders.append(order)
+        axis_values.append([vertices[vertex_id][axis] for vertex_id in order])
+
     for face in faces:
         expanded: list[int] = []
         for edge_index, start_id in enumerate(face):
@@ -1469,8 +1882,25 @@ def _split_face_edges_at_shared_vertices(
                 )
 
             points_on_edge: list[tuple[float, int]] = []
-            for candidate_id, candidate in enumerate(vertices):
+            search_axis = min(range(3), key=lambda axis: abs(direction[axis]))
+            lower_value = min(start[search_axis], end[search_axis]) - tolerance
+            upper_value = max(start[search_axis], end[search_axis]) + tolerance
+            axis_values_for_edge = axis_values[search_axis]
+            axis_order_for_edge = axis_orders[search_axis]
+            candidate_start = bisect_left(axis_values_for_edge, lower_value)
+            candidate_end = bisect_right(axis_values_for_edge, upper_value)
+
+            for candidate_position in range(candidate_start, candidate_end):
+                candidate_id = axis_order_for_edge[candidate_position]
                 if candidate_id == start_id or candidate_id == end_id:
+                    continue
+                candidate = vertices[candidate_id]
+                if any(
+                    candidate[axis] < min(start[axis], end[axis]) - tolerance
+                    or candidate[axis] > max(start[axis], end[axis]) + tolerance
+                    for axis in range(3)
+                    if axis != search_axis
+                ):
                     continue
                 relative = tuple(candidate[axis] - start[axis] for axis in range(3))
                 parameter = sum(relative[axis] * direction[axis] for axis in range(3)) / length_sq
@@ -1515,8 +1945,8 @@ def build_wavefront_roof_surface(
 ):
     """Assemble and validate welded roof facets from a completed wavefront trace.
 
-    The result is the same RoofSurface payload used by the existing shell
-    builder. This function remains pure Python and is not yet wired into bpy.
+    The result is the same RoofSurface payload used by the Blender add-on
+    and the existing shell builder. This geometry function remains bpy-free.
     """
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .planes import build_boundary_planes
