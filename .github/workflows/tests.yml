@@ -49,14 +49,14 @@ jobs:
       - name: Build clean Blender Extension ZIP
         run: python3 tools/build_extension.py --output-dir dist
       - name: Validate Extension ZIP with Blender 5.0.1
-        run: blender --command extension validate dist/roof_forge-0.2.0-alpha.10.zip
+        run: blender --command extension validate dist/roof_forge-0.2.0-alpha.11.zip
       - name: Upload installable test build
         uses: actions/upload-artifact@v4
         with:
-          name: roof_forge-0.2.0-alpha.10-blender-5.0.1
+          name: roof_forge-0.2.0-alpha.11-blender-5.0.1
           path: |
-            dist/roof_forge-0.2.0-alpha.10.zip
-            dist/roof_forge-0.2.0-alpha.10.zip.sha256
+            dist/roof_forge-0.2.0-alpha.11.zip
+            dist/roof_forge-0.2.0-alpha.11.zip.sha256
           if-no-files-found: error
           retention-days: 30
   geometry-benchmarks:
