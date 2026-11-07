@@ -57,6 +57,14 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         unit="LENGTH",
         update=_settings_changed,
     )
+    live_update_delay_ms: bpy.props.IntProperty(
+        name="Update Delay",
+        description="Debounce before a live rebuild; 0 runs on the next Blender timer tick",
+        default=0,
+        min=0,
+        max=1000,
+        step=10,
+    )
     live_update: bpy.props.BoolProperty(name="Live Update", default=True)
     slope_settings: bpy.props.CollectionProperty(type=RoofForgeSlopeSettings)
     source_object: bpy.props.PointerProperty(type=bpy.types.Object)

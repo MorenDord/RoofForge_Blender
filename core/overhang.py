@@ -1,15 +1,89 @@
-"""Geometric eave overhang extension for validated convex roof surfaces."""
+"""Mitered horizontal eave extension for convex roof surfaces."""
 from __future__ import annotations
 
-from math import hypot
+from math import hypot, isfinite
 from typing import Sequence
 
 from .geometry import GeometryInputError, signed_area, validate_simple_polygon
-from .mesh import (
-    RoofSurface,
-    _VertexRegistry,
-    validate_surface_boundary_edges,
-)
+from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
+
+Point2 = tuple[float, float]
+Point3 = tuple[float, float, float]
+BoundaryRecord = tuple[int, int, int, int]
+
+
+def _cross2(first: Point2, second: Point2) -> float:
+    return first[0] * second[1] - first[1] * second[0]
+
+
+def _miter_offset_point(
+    previous: Point3,
+    corner: Point3,
+    following: Point3,
+    distance: float,
+    tolerance: float,
+) -> Point2:
+    """Intersect the two adjacent outward-offset boundary lines in XY."""
+    previous_dx = corner[0] - previous[0]
+    previous_dy = corner[1] - previous[1]
+    next_dx = following[0] - corner[0]
+    next_dy = following[1] - corner[1]
+    previous_length = hypot(previous_dx, previous_dy)
+    next_length = hypot(next_dx, next_dy)
+    if previous_length <= tolerance or next_length <= tolerance:
+        raise GeometryInputError(
+            "OVERHANG_ZERO_LENGTH_EDGE",
+            "Внешняя граница содержит ребро нулевой длины.",
+        )
+
+    previous_tangent = (previous_dx / previous_length, previous_dy / previous_length)
+    next_tangent = (next_dx / next_length, next_dy / next_length)
+    # The source boundary is counter-clockwise, so the right normal points out.
+    previous_normal = (previous_tangent[1], -previous_tangent[0])
+    next_normal = (next_tangent[1], -next_tangent[0])
+
+    previous_origin = (
+        corner[0] + previous_normal[0] * distance,
+        corner[1] + previous_normal[1] * distance,
+    )
+    next_origin = (
+        corner[0] + next_normal[0] * distance,
+        corner[1] + next_normal[1] * distance,
+    )
+
+    denominator = _cross2(previous_tangent, next_tangent)
+    parallel_tolerance = 1e-12
+    if abs(denominator) <= parallel_tolerance:
+        alignment = (
+            previous_tangent[0] * next_tangent[0]
+            + previous_tangent[1] * next_tangent[1]
+        )
+        if alignment < 0.0:
+            raise GeometryInputError(
+                "OVERHANG_PARALLEL_BACKTRACK",
+                "Нельзя построить свес на развёрнутом или обратном угле контура.",
+            )
+        # Consecutive collinear edges share one common offset line.
+        return previous_origin
+
+    delta = (
+        next_origin[0] - previous_origin[0],
+        next_origin[1] - previous_origin[1],
+    )
+    parameter = _cross2(delta, next_tangent) / denominator
+    result = (
+        previous_origin[0] + previous_tangent[0] * parameter,
+        previous_origin[1] + previous_tangent[1] * parameter,
+    )
+
+    miter_length = hypot(result[0] - corner[0], result[1] - corner[1])
+    if miter_length > max(distance * 25.0, distance + tolerance * 10.0):
+        raise GeometryInputError(
+            "OVERHANG_MITER_TOO_LONG",
+            "Угол контура слишком острый для безопасного свеса: длина углового "
+            "соединения превышает 25 ширин свеса.",
+        )
+    return result
 
 
 def extend_convex_roof_surface(
@@ -17,15 +91,14 @@ def extend_convex_roof_surface(
     distance: float,
     eps: float = 1e-9,
 ) -> RoofSurface:
-    """Extend each boundary facet outward by a horizontal distance.
+    """Extend the roof using one miter vertex at every convex eave corner.
 
-    The edge strips remain on their authored support planes. Convex corners
-    receive a triangular miter patch between adjacent strips. Reflex corners
-    are intentionally rejected until a non-overlapping concave join strategy
-    is available.
+    Every source boundary segment gets exactly one parallel outer edge. Adjacent
+    strips share the same miter vertex, so no triangular fan or pair of extra
+    corner edges is emitted. If two neighbouring support planes disagree at
+    that shared miter point (for example, because adjacent pitches differ), the
+    requested overhang is rejected rather than introducing a broken seam.
     """
-    from math import isfinite
-
     if not isfinite(distance) or distance < 0.0:
         raise GeometryInputError(
             "INVALID_OVERHANG",
@@ -48,10 +121,8 @@ def extend_convex_roof_surface(
     )
     tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = tolerance * scale * 10.0
-    corner_area_tolerance = tolerance * tolerance * 10.0
+    z_tolerance = max(tolerance * 20.0, eps * scale * 1000.0)
 
-    # Record the unique face adjacent to every mesh edge. An open edge also
-    # carries its source slope ID, which determines the exact extension plane.
     edge_uses: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
     for face_index, face in enumerate(surface.faces):
         for local_index, first in enumerate(face):
@@ -59,8 +130,8 @@ def extend_convex_roof_surface(
             key = (min(first, second), max(first, second))
             edge_uses.setdefault(key, []).append((face_index, first, second))
 
-    records: list[tuple[int, int, int, int]] = []
-    outgoing: dict[int, tuple[int, int, int, int]] = {}
+    records: list[BoundaryRecord] = []
+    outgoing: dict[int, BoundaryRecord] = {}
     for uses in edge_uses.values():
         if len(uses) > 2:
             raise GeometryInputError(
@@ -91,7 +162,6 @@ def extend_convex_roof_surface(
             "Не удалось найти внешнюю границу верхней поверхности для построения свеса.",
         )
 
-    # Order the directed boundary edges into exactly one loop.
     start_record = min(
         records,
         key=lambda item: (
@@ -101,7 +171,7 @@ def extend_convex_roof_surface(
             item[0],
         ),
     )
-    ordered: list[tuple[int, int, int, int]] = []
+    ordered: list[BoundaryRecord] = []
     current = start_record
     seen: set[tuple[int, int]] = set()
     while (current[0], current[1]) not in seen:
@@ -124,31 +194,77 @@ def extend_convex_roof_surface(
         (surface.vertices[record[0]][0], surface.vertices[record[0]][1])
         for record in ordered
     ]
-    contour_area = signed_area(contour_xy)
-    if contour_area <= area_tolerance:
+    if signed_area(contour_xy) <= area_tolerance:
         raise GeometryInputError(
             "OVERHANG_BOUNDARY_WINDING",
             "Не удалось подтвердить положительную ориентацию внешней границы крыши.",
         )
 
-    # The initial alpha join is exact for convex corners. At a reflex corner,
-    # adjacent outward strips overlap; adding a simple triangle would invert
-    # its top-face winding, so reject it instead of generating a folded roof.
+    # Reflex turns are not valid for this offset implementation.
     for index, point in enumerate(contour_xy):
         previous = contour_xy[index - 1]
         following = contour_xy[(index + 1) % len(contour_xy)]
-        turn = (
-            (point[0] - previous[0]) * (following[1] - point[1])
-            - (point[1] - previous[1]) * (following[0] - point[0])
+        turn = _cross2(
+            (point[0] - previous[0], point[1] - previous[1]),
+            (following[0] - point[0], following[1] - point[1]),
         )
         if turn < -area_tolerance:
             raise GeometryInputError(
                 "OVERHANG_REFLEX_UNSUPPORTED",
-                "Свес в этой alpha пока поддерживается только для выпуклых контуров. "
+                "Свес с miter-соединением пока поддерживается только для выпуклых контуров. "
                 "Для вогнутого L/U-контура установи Свес = 0.",
             )
 
-    # Rebuild a deterministic registry while preserving every original index.
+    # The roof boundary may contain intermediate collinear split vertices.
+    # Each one receives the same shared offset point if its adjacent segments
+    # are on one straight line.
+    offset_xy: list[Point2] = []
+    for index, point in enumerate(contour_xy):
+        previous = contour_xy[index - 1]
+        following = contour_xy[(index + 1) % len(contour_xy)]
+        source_vertex = surface.vertices[ordered[index][0]]
+        previous_vertex = surface.vertices[ordered[index - 1][0]]
+        next_vertex = surface.vertices[ordered[index][1]]
+        # Use the actual ordered 3D endpoints so support-plane height checks
+        # remain tied to the existing mesh boundary vertices.
+        offset_xy.append(
+            _miter_offset_point(
+                previous_vertex,
+                source_vertex,
+                next_vertex,
+                distance,
+                tolerance,
+            )
+        )
+
+    issues = validate_simple_polygon(offset_xy, eps)
+    if issues:
+        raise GeometryInputError(
+            "OVERHANG_OFFSET_INVALID",
+            "Miter-свес создал самопересекающийся или вырожденный внешний контур: "
+            + issues[0].message,
+        )
+    if signed_area(offset_xy) <= area_tolerance:
+        raise GeometryInputError(
+            "OVERHANG_OFFSET_WINDING",
+            "Внешний miter-контур имеет неверную ориентацию.",
+        )
+
+    # At a corner the incoming and outgoing strips must share one 3D vertex.
+    # If their roof planes disagree in height there, refuse to build a fan.
+    for index, point_xy in enumerate(offset_xy):
+        previous_slope = ordered[index - 1][2]
+        next_slope = ordered[index][2]
+        previous_z = surface.planes[previous_slope].height(*point_xy)
+        next_z = surface.planes[next_slope].height(*point_xy)
+        if abs(previous_z - next_z) > z_tolerance:
+            raise GeometryInputError(
+                "OVERHANG_PITCH_DISCONTINUITY",
+                f"На углу {index + 1} соседние плоскости скатов расходятся по высоте "
+                f"на {abs(previous_z - next_z):.6g}. Для свеса здесь нужны совместимые "
+                "уклоны соседних скатов; измени pitch или установи Свес = 0.",
+            )
+
     registry = _VertexRegistry(tolerance)
     remap = [registry.add(point) for point in surface.vertices]
     if any(new_index != old_index for old_index, new_index in enumerate(remap)):
@@ -159,129 +275,51 @@ def extend_convex_roof_surface(
 
     faces = [tuple(remap[index] for index in face) for face in surface.faces]
     slope_ids = list(surface.face_slope_indices)
-    outer_records: list[tuple[int, int]] = []
 
-    for first, second, slope_index, _face_index in ordered:
-        p = surface.vertices[first]
-        q = surface.vertices[second]
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        edge_length = hypot(dx, dy)
-        if edge_length <= tolerance:
+    # One miter point belongs to the two adjacent strips. No corner triangle
+    # is necessary and no duplicate spokes leave the original source vertex.
+    offset_vertex_ids: list[int] = []
+    for index, (x, y) in enumerate(offset_xy):
+        plane = surface.planes[ordered[index][2]]
+        z = plane.height(x, y)
+        offset_vertex_ids.append(registry.add((x, y, z)))
+
+    for index, (first, second, slope_index, _face_index) in enumerate(ordered):
+        next_index = (index + 1) % len(ordered)
+        outer_first = offset_vertex_ids[index]
+        outer_second = offset_vertex_ids[next_index]
+        if outer_first == outer_second:
             raise GeometryInputError(
-                "OVERHANG_ZERO_LENGTH_EDGE",
-                "Внешняя граница содержит ребро нулевой длины.",
+                "OVERHANG_COLLAPSED_EDGE",
+                f"После offset схлопнулось внешнее ребро {index + 1}.",
             )
 
-        # The face boundary is CCW, so its outward normal is the right normal.
-        nx, ny = dy / edge_length, -dx / edge_length
-        plane = surface.planes[slope_index]
-        outer_first_point = (
-            p[0] + nx * distance,
-            p[1] + ny * distance,
-            plane.height(p[0] + nx * distance, p[1] + ny * distance),
+        strip = (
+            remap[second],
+            remap[first],
+            outer_first,
+            outer_second,
         )
-        outer_second_point = (
-            q[0] + nx * distance,
-            q[1] + ny * distance,
-            plane.height(q[0] + nx * distance, q[1] + ny * distance),
-        )
-        outer_first = registry.add(outer_first_point)
-        outer_second = registry.add(outer_second_point)
-
-        # Reverse the inner edge so the strip shares it with the existing roof
-        # top using opposite winding.
-        strip = (remap[second], remap[first], outer_first, outer_second)
         strip_area = signed_area([
-            (registry.vertices[index][0], registry.vertices[index][1])
-            for index in strip
+            (registry.vertices[vertex_id][0], registry.vertices[vertex_id][1])
+            for vertex_id in strip
         ])
         if strip_area <= area_tolerance:
             raise GeometryInputError(
                 "OVERHANG_DEGENERATE_STRIP",
-                "Свес создал вырожденную или перевёрнутую полосу ската.",
+                f"Свес создал вырожденную или перевёрнутую полосу ребра {index + 1}.",
             )
         faces.append(strip)
         slope_ids.append(slope_index)
-        outer_records.append((outer_first, outer_second))
-
-    # Bridge the two offset endpoints at every convex source corner. These
-    # triangles connect both support-plane strips without altering either.
-    for index, record in enumerate(ordered):
-        next_index = (index + 1) % len(ordered)
-        next_record = ordered[next_index]
-        inner_corner = record[1]
-        if inner_corner != next_record[0]:
-            raise GeometryInputError(
-                "OVERHANG_BOUNDARY_DISCONTINUITY",
-                "Соседние граничные полосы не имеют общей исходной вершины.",
-            )
-        previous_outer = outer_records[index][1]
-        next_outer = outer_records[next_index][0]
-        if previous_outer == next_outer:
-            continue
-
-        corner = surface.vertices[inner_corner]
-        previous_point = registry.vertices[previous_outer]
-        next_point = registry.vertices[next_outer]
-        corner_area = signed_area([
-            (corner[0], corner[1]),
-            (previous_point[0], previous_point[1]),
-            (next_point[0], next_point[1]),
-        ])
-        if corner_area < -corner_area_tolerance:
-            raise GeometryInputError(
-                "OVERHANG_REFLEX_UNSUPPORTED",
-                "Свес в этой alpha пока поддерживается только для выпуклых контуров. "
-                "Для вогнутого L/U-контура установи Свес = 0.",
-            )
-        if abs(corner_area) <= corner_area_tolerance:
-            dx = previous_point[0] - next_point[0]
-            dy = previous_point[1] - next_point[1]
-            dz = previous_point[2] - next_point[2]
-            if dx * dx + dy * dy + dz * dz > tolerance * tolerance:
-                raise GeometryInputError(
-                    "OVERHANG_COLLINEAR_PITCH_BREAK",
-                    "На прямом участке с разными углами скатов свес пока не может "
-                    "сформировать вертикальный переход без потери manifold-топологии.",
-                )
-            continue
-
-        faces.append((remap[inner_corner], previous_outer, next_outer))
-        slope_ids.append(-1)  # Convex corner transition, not one authored slope.
-
-    # The outer boundary consists of each offset edge and each convex-corner
-    # connector. Intermediate points are retained for exact boundary coverage.
-    boundary_xy: list[tuple[float, float]] = []
-    for index, (outer_first, outer_second) in enumerate(outer_records):
-        first_point = registry.vertices[outer_first]
-        second_point = registry.vertices[outer_second]
-        first_xy = (first_point[0], first_point[1])
-        second_xy = (second_point[0], second_point[1])
-        if not boundary_xy:
-            boundary_xy.append(first_xy)
-        elif hypot(
-            boundary_xy[-1][0] - first_xy[0],
-            boundary_xy[-1][1] - first_xy[1],
-        ) > tolerance:
-            boundary_xy.append(first_xy)
-        boundary_xy.append(second_xy)
-
-    issues = validate_simple_polygon(boundary_xy, eps)
-    if issues:
-        raise GeometryInputError(
-            "OVERHANG_OFFSET_INVALID",
-            "Свес создал самопересекающийся или вырожденный внешний контур: "
-            + issues[0].message,
-        )
 
     try:
         validate_surface_boundary_edges(
-            registry.vertices, faces, boundary_xy, tolerance * 5.0
+            registry.vertices, faces, offset_xy, tolerance * 5.0
         )
     except GeometryInputError as exc:
         raise GeometryInputError(
             "OVERHANG_SURFACE_INVALID",
-            "Не удалось собрать непрерывную поверхность свеса: " + exc.message,
+            "Не удалось собрать непрерывную поверхность miter-свеса: " + exc.message,
         ) from exc
 
     surface_area = sum(
@@ -291,7 +329,7 @@ def extend_convex_roof_surface(
         ]))
         for face in faces
     )
-    expanded_area = abs(signed_area(boundary_xy))
+    expanded_area = abs(signed_area(offset_xy))
     if abs(surface_area - expanded_area) > max(
         area_tolerance * 10.0,
         expanded_area * 1e-7,
@@ -308,7 +346,7 @@ def extend_convex_roof_surface(
         planes=surface.planes,
         source_area_xy=surface.source_area_xy,
         surface_area_xy=surface_area,
-        boundary_xy=tuple(boundary_xy),
+        boundary_xy=tuple(offset_xy),
         approximation_error=surface.approximation_error,
         refinement_depth=surface.refinement_depth,
     )

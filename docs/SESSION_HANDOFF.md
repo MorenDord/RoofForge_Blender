@@ -1,15 +1,15 @@
-# RoofForge 0.2.0-alpha.3 — Session Handoff
+# RoofForge 0.2.0-alpha.4 — Session Handoff
 
 **Updated:** 2026-11-07  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Validated 0.1.0 baseline:** `develop` at `78f51d34f6a6c79cfa7b5b266b7d872908287b55`  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**Installable code/package snapshot:** `304a90a488fae5bdb23cff54349a5fac3246c7a3` (latest commits after this snapshot are documentation/PR metadata only).  
+**Installable code/package snapshot:** pending alpha.4 CI.  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
-**Installable build:** `roof_forge-0.2.0-alpha.3.zip`, from CI artifact `roof_forge-0.2.0-alpha.3-blender-5.0.1` (artifact ID `13553300364`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070/artifacts/13553300364).  
-**Inner ZIP SHA-256:** `3f703b0de2f4bdc89f4658c59f6487163eddc719199db1011c5e026e2d1e0e3b`.  
-**Latest CI:** [Push run 42320863070](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070) and [PR run 42320868809](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809) both passed on the package snapshot.  
+**Installable build:** `roof_forge-0.2.0-alpha.4.zip`, from CI artifact `roof_forge-0.2.0-alpha.4-blender-5.0.1` (artifact ID `13553300364`).  
+**Outer artifact:** pending alpha.4 CI upload.  
+**Inner ZIP SHA-256:** pending alpha.4 build.  
+**Latest CI:** alpha.4 push/PR runs pending.  
 **Important:** `main` and `develop` have not been modified. Continue only on the feature branch.
 
 ## User-confirmed 0.2.0 scope
@@ -22,7 +22,7 @@
 - Provide Eave Overhang in scene units: nonzero is supported for convex contours; concave L/U reflex corners require zero overhang.
 - Keep a compact simple per-edge UI; no need for a pitch-map preview yet.
 
-## What is now packaged in 0.2.0-alpha.3
+## What is now packaged in 0.2.0-alpha.4
 
 ### Automatic boundary detection
 - Detects one outer loop from a wire-only mesh or a face mesh with one boundary loop.
@@ -42,8 +42,8 @@
 - Generated result is a separate closed shell with face attributes `roof_forge_component` and `roof_forge_slope_index`.
 
 ### Live Update
-- Per-edge pitch, thickness and overhang callbacks schedule a timer with approximately 0.3 s debounce.
-- Mesh calculation and validation occur on Blender's main thread after the debounce. The surface LRU cache key is source object pointer + XYZ points + pitches + overhang; thickness is excluded.
+- Per-edge pitch, thickness and overhang callbacks schedule a timer with user-selected 0–1000 ms debounce; default is 0 ms.
+- Mesh calculation and validation occur on Blender's main thread after the timer delay. The 0 ms setting removes intentional debounce but cannot remove the geometry solver's own execution time. The surface LRU cache key is source object pointer + XYZ points + pitches + overhang; thickness is excluded.
 - New mesh data is built separately; only after successful validation is it swapped into the generated object.
 - On error, the last valid roof mesh remains unchanged and status is shown in the panel.
 - Renaming the source object or generated roof object stops automatic updates. The already generated geometry remains in the scene.
@@ -52,10 +52,15 @@
 ## Overhang and delete/recreate additions in alpha.3
 
 - `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` extends each convex boundary facet on its authored support plane and adds convex corner join triangles; strict coverage and shell-manifold checks remain enabled.
-- Reflex/concave contours with nonzero overhang are rejected as `OVERHANG_REFLEX_UNSUPPORTED`; use zero for L/U until a robust concave offset join is implemented.
 - If the generated object has been deleted, Create / Update clears the stale pointer/name snapshot, creates a replacement in the active scene root collection, and confirms it is present in `bpy.data.objects` and `scene.objects`.
 - Blender smoke explicitly deletes and re-creates the L roof from its unchanged source contour.
 - Thickness-only Live Update uses the validated surface cache and rebuilds only the closed shell. `mesh.attributes` face values use bulk `foreach_set`.
+
+## Live Update delay slider
+
+- `live_update_delay_ms` is an integer slider from 0 to 1000 ms with 10 ms step; default 0.
+- `live_update_delay_seconds(settings)` converts the setting and `schedule_live_update()` passes it as Blender timer `first_interval`.
+- Zero means no intentional debounce: callback is scheduled on the next Blender timer tick, not synchronously inside the property callback. Geometry still runs on the main thread, so solver runtime remains measurable.
 
 ## Explicit alpha limitations
 
@@ -121,5 +126,5 @@ python -m compileall -q core addon __init__.py
 python -m unittest discover -s tests -v
 blender --background --factory-startup --python tests/blender_smoke.py
 python tools/build_extension.py --output-dir dist
-blender --command extension validate dist/roof_forge-0.2.0-alpha.3.zip
+blender --command extension validate dist/roof_forge-0.2.0-alpha.4.zip
 ```

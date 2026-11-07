@@ -12,7 +12,9 @@ from .roof_build import (
 )
 
 _PENDING_SCENE_NAME: str | None = None
-_TIMER_DELAY = 0.30
+def live_update_delay_seconds(settings) -> float:
+    """Return the user-selected debounce interval in seconds."""
+    return max(0, int(settings.live_update_delay_ms)) / 1000.0
 
 
 def _cancel_timer() -> None:
@@ -33,9 +35,10 @@ def schedule_live_update(scene=None) -> None:
     if not settings.live_update or settings.generated_object is None:
         return
     _PENDING_SCENE_NAME = scene.name
+    delay_seconds = live_update_delay_seconds(settings)
     _cancel_timer()
     try:
-        bpy.app.timers.register(_run_pending_update, first_interval=_TIMER_DELAY)
+        bpy.app.timers.register(_run_pending_update, first_interval=delay_seconds)
     except (RuntimeError, ValueError):
         settings.last_status = "Не удалось запланировать Live Update."
 

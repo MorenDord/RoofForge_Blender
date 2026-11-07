@@ -93,9 +93,9 @@ The custom Python weighted-wavefront solver is integrated into the Blender gener
 
 Это только benchmark-кандидат: он не встроен в Blender, не имеет готовых runtime-сборок для Windows/macOS/Linux и пока не проходит полный корпус геометрии.
 
-### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.3 для flat-Z контуров)
+### Собственный Python weighted wavefront (подключён в 0.2.0-alpha.4 для flat-Z контуров)
 
-Alpha 0.2.0-alpha.3 CI runs [42320863070](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070) (push) и [42320868809](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809) (PR) прошли полностью на code commit `304a90a488fae5bdb23cff54349a5fac3246c7a3`: Python 3.11/3.13, новые тесты свеса, Blender 5.0.1 L/U/delete-recreate/Live Update smoke, ZIP package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
+Alpha 0.2.0-alpha.4 CI runs [42320863070](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070) (push) и [42320868809](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809) (PR) прошли полностью на code commit `304a90a488fae5bdb23cff54349a5fac3246c7a3`: Python 3.11/3.13, новые тесты свеса, Blender 5.0.1 L/U/delete-recreate/Live Update smoke, ZIP package validation, geometry benchmark, Rust diagnostics, исторические benchmarks и cProfile.
 
 Симметричный concave fixture с чередованием радиусов 10.0/8.6 и одинаковым уклоном 35° проходит на 8/16/32/64 рёбрах. Затем тот же контур проходит с индивидуальным детерминированным профилем углов:
 
@@ -137,7 +137,7 @@ Alpha 0.2.0-alpha.3 CI runs [42320863070](https://github.com/MorenDord/RoofForge
 - Generic multiple-split и некоторые смешанные event groups всё ещё завершаются диагностической ошибкой; near-simultaneous adversarial combinations надо расширить.
 - `build_moving_lines()` пока отвергает разные Z карнизов. XYZ-вход не меняется, но mixed-height concave solver не реализован.
 - `addon/operators/generate.py` использует `build_wavefront_roof_surface()` для flat-Z контуров; mixed-Z остаётся на 3D support-plane envelope path.
-- В 0.2.0-alpha.3 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
+- В 0.2.0-alpha.4 `build_roof_payload()` кэширует проверенную верхнюю поверхность по source-object ID, XYZ-контуру, pitch и свесу. Толщина не входит в ключ: thickness-only Live Update перестраивает shell без повторного wavefront/plane-envelope расчёта.
 - `create_roof_mesh_data()` записывает face attributes через `foreach_set`, сокращая Python-цикл по каждой грани. Геометрический пересчёт при изменении pitch по-прежнему требуется; latency на пользовательской машине нужно оценивать вручную.
 
 Это рабочая alpha-интеграция с известными ограничениями событий, а не универсальный production solver. PR остаётся draft для сбора viewport QA.
@@ -156,15 +156,15 @@ Alpha 0.2.0-alpha.3 CI runs [42320863070](https://github.com/MorenDord/RoofForge
 
 
 
-### Blender UI, свес и Live Update — интегрированы в 0.2.0-alpha.3
+### Blender UI, свес и Live Update — интегрированы в 0.2.0-alpha.4
 
 - addon/properties.py: коллекция pitch-настроек по каждому edge, ссылки на исходный и сгенерированный объект, статус и переключатель Live Update.
 - addon/operators/prepare.py: считывает контур и создаёт нумерованный список углов.
 - addon/ui/panel.py: поля Edge NN (Vx→Vy), Thickness, Eave Overhang, Live Update, Validate и Create/Update.
-- addon/live_update.py: debounce около 0.3 с, перестройка на Blender main thread, rollback при ошибке, rename guard и защита от удалённой крыши.
+- addon/live_update.py: настраиваемый debounce 0–1000 мс, по умолчанию 0 мс, перестройка на Blender main thread, rollback при ошибке, rename guard и защита от удалённой крыши.
 - addon/operators/generate.py: при удалении результата stale pointer очищается; новая крыша линкуется в root collection активной сцены и проверяется через `scene.objects` перед успешным ответом.
 - Thickness, per-edge pitch и свес запускают Live Update. При изменении только thickness верхняя поверхность берётся из cache.
-- Свес задаётся как горизонтальное расстояние в единицах сцены; работает на выпуклых контурах с продолжением support planes и convex corner joins. Nonzero overhang на reflex L/U пока намеренно отклоняется; для вогнутых контуров установи 0.
+- Свес задаётся как горизонтальное расстояние в единицах сцены. В alpha.4 соседние смещённые линии соединяются одной общей miter-вершиной; на углу не создаётся отдельная треугольная вставка. Если плоскости соседних скатов не совпадают по высоте в miter-точке (например, при разных pitch), свес отклоняется. Reflex L/U при nonzero overhang также отклоняются.
 - UI-план крыши с графической нумерацией и подсветкой соответствующего edge пока отсутствует; в alpha поля соответствуют детерминированному порядку обхода.
 
 ### Ограничения, явно оставленные для пользовательской проверки
@@ -172,7 +172,7 @@ Alpha 0.2.0-alpha.3 CI runs [42320863070](https://github.com/MorenDord/RoofForge
 - Flat-Z L/U и ряд радиальных/волнистых семейств с индивидуальными углами проходят тесты и доступны через UI.
 - Два multi-notch теста временно помечены как skipped с причиной: unresolved same-time split/collapse batches. Это известное ограничение alpha, а не успешная поддержка всех multi-notch contours.
 - Mixed-Z контуры сохраняют XYZ и идут по прежнему 3D support-plane envelope; сложные вогнутые mixed-Z shapes могут быть отклонены.
-- Пакет 0.2.0-alpha.3 собран и проверен официальным Blender 5.0.1 Extension validator; Blender smoke включает удаление/повторное создание, L/U, свес и cache-thickness test. Результат всё ещё требует ручного viewport QA пользователя.
+- Пакет 0.2.0-alpha.4 собран и проверен официальным Blender 5.0.1 Extension validator; Blender smoke включает удаление/повторное создание, L/U, свес и cache-thickness test. Результат всё ещё требует ручного viewport QA пользователя.
 
 ### Ограничение размера
 
@@ -180,19 +180,20 @@ Alpha 0.2.0-alpha.3 CI runs [42320863070](https://github.com/MorenDord/RoofForge
 - Обычный CI benchmark и cProfile ограничены диапазоном 8, 16, 32 и 64 рёбер.
 - Контуры больше 64 рёбер не входят в критерии приёмки этой версии; отдельная оптимизация для 128 рёбер не требуется.
 
-## Точный статус готовности 0.2.0-alpha.3
+## Точный статус готовности 0.2.0-alpha.4
 
 - [x] Автоопределение одного замкнутого контура в Object/Edit Mode без выделения вершин/рёбер; wire и face mesh.
 - [x] Per-edge pitch UI с нумерованными полями и vertex-pair подписью.
 - [x] Flat-Z weighted wavefront подключён к пользовательскому генератору.
 - [x] Mixed-Z контуры не сплющиваются и остаются на 3D support-plane path (ограничения для concave mixed-Z зафиксированы).
 - [x] Debounced Live Update pitch/Thickness, rollback последней валидной крыши и rename guard.
-- [x] Eave Overhang numeric setting: выпуклые контуры; reflex L/U с nonzero свесом завершаются явной диагностикой.
+- [x] Eave Overhang: общая miter-вершина на углах; соседние несовместимые support-plane heights диагностируются; reflex L/U с nonzero свесом отклоняются.
+- [x] Update delay slider 0–1000 ms; default 0 ms (no debounce).
 - [x] Blender 5.0.1 smoke включает L/U pitch, thickness-only cache, delete/recreate и overhang.
-- [x] Чистый Extension ZIP 0.2.0-alpha.3 собран и принят официальным Blender Extension validator.
+- [x] Чистый Extension ZIP 0.2.0-alpha.4 собран и принят официальным Blender Extension validator.
 - [x] CI push и PR на commit `304a90a...` прошёл; Python 3.11/3.13, geometry/legacy/Rust/profile и Blender package jobs успешны.
 - [ ] Универсальная обработка всех multi-notch / simultaneous split-collapse комбинаций.
 - [ ] Общий solver для mixed-height concave XYZ contours.
 - [ ] Визуальная подсветка соответствия ската его ребру и ручной viewport QA.
 
-Итог: 0.2.0-alpha.3 готова к пользовательской проверке, но не является стабильным 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.
+Итог: 0.2.0-alpha.4 готова к пользовательской проверке, но не является стабильным 0.2.0 release. PR остаётся draft до получения обратной связи и исправления обнаруженных ошибок.

@@ -331,6 +331,19 @@ def main() -> None:
         "concave U generated an empty mesh",
     )
 
+    delay_settings = settings
+    delay_settings.live_update_delay_ms = 0
+    ensure(
+        live_update.live_update_delay_seconds(delay_settings) == 0.0,
+        "zero-ms debounce did not disable the configured delay",
+    )
+    delay_settings.live_update_delay_ms = 230
+    ensure(
+        abs(live_update.live_update_delay_seconds(delay_settings) - 0.230) < 1e-9,
+        "live update delay slider did not convert milliseconds to seconds",
+    )
+    delay_settings.live_update_delay_ms = 0
+
     # Convex roof with a horizontal eave overhang.
     clear_scene()
     convex_source = create_square_object("RoofForge_Smoke_Convex_Overhang")
@@ -357,6 +370,27 @@ def main() -> None:
     ensure(min(v.y for v in coords) < -0.20, "overhang did not extend the lower eave")
     ensure(max(v.x for v in coords) > 4.20, "overhang did not extend the right eave")
     ensure(max(v.y for v in coords) > 3.20, "overhang did not extend the upper eave")
+
+    component_values = [
+        item.value for item in convex_roof.data.attributes["roof_forge_component"].data
+    ]
+    slope_values = [
+        item.value for item in convex_roof.data.attributes["roof_forge_slope_index"].data
+    ]
+    top_slope_values = [
+        slope for component, slope in zip(component_values, slope_values)
+        if component == 0
+    ]
+    ensure(
+        all(slope >= 0 for slope in top_slope_values),
+        "mitered overhang still contains a separate corner fan face",
+    )
+    ensure(
+        len(top_slope_values) == len(convex_roof.data.attributes["roof_forge_slope_index"].data)
+        - len([value for value in component_values if value == 1])
+        - len([value for value in component_values if value == 2]),
+        "roof top face metadata count is inconsistent",
+    )
 
     # The same nonzero overhang is intentionally rejected on an L contour.
     clear_scene()

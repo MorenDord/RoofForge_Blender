@@ -37,6 +37,14 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         col.prop(settings, "thickness")
         col.prop(settings, "eave_overhang")
         col.prop(settings, "live_update")
+        delay_row = col.row()
+        delay_row.enabled = settings.live_update
+        delay_row.prop(
+            settings, "live_update_delay_ms",
+            text="Update delay (ms)", slider=True,
+        )
+        if settings.live_update_delay_ms == 0:
+            delay_row.label(text="No debounce", icon="TIME")
         col.operator("roof_forge.validate_input", icon="CHECKMARK")
         col.operator("roof_forge.generate_surface", icon="MESH_CUBE")
 
