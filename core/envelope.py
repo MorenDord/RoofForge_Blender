@@ -81,6 +81,70 @@ def lower_envelope_restricted_cells(
     support = tuple(domain if active_contour is None else active_contour)
     if len(domain) < 3 or len(support) != len(planes):
         raise GeometryInputError("PLANE_COUNT", "Для каждого ребра контура нужна одна плоскость ската.")
+
+    # Preserve the original concave-roof solver unchanged when no overhang
+    # support contour is supplied. The finite-edge continuation is an
+    # overhang-specific mode only.
+    if active_contour is None:
+        triangles = triangulate_simple_polygon(domain, eps)
+        output: list[list[list[Point2]]] = [[] for _ in planes]
+        winding = 1.0 if signed_area(domain) > 0.0 else -1.0
+        scale = max(_bbox_scale(domain), 1.0)
+        area_eps = eps * scale * scale
+        edge_lines = []
+        for index, start in enumerate(domain):
+            end = domain[(index + 1) % len(domain)]
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            edge_length = hypot(dx, dy)
+            if edge_length <= eps * scale:
+                raise GeometryInputError("DEGENERATE_EDGE", f"Ребро {index + 1} исходного контура имеет нулевую длину.")
+            edge_lines.append((
+                winding * -dy, winding * dx,
+                winding * (dy * start[0] - dx * start[1]),
+                edge_length,
+            ))
+        for triangle in triangles:
+            cells = [list(triangle)]
+            for a, b, c_line, edge_length in edge_lines:
+                function_eps = eps * scale * edge_length
+                next_cells = []
+                for cell in cells:
+                    inside = clip_half_plane(cell, -a, -b, -c_line, function_eps)
+                    outside = clip_half_plane(cell, a, b, c_line, function_eps)
+                    inside_valid = len(inside) >= 3 and abs(signed_area(inside)) > area_eps
+                    outside_valid = len(outside) >= 3 and abs(signed_area(outside)) > area_eps
+                    if inside_valid and outside_valid:
+                        next_cells.extend((inside, outside))
+                    elif inside_valid:
+                        next_cells.append(inside)
+                    elif outside_valid:
+                        next_cells.append(outside)
+                cells = next_cells
+                if not cells:
+                    break
+            for cell in cells:
+                sample = (
+                    sum(point[0] for point in cell) / len(cell),
+                    sum(point[1] for point in cell) / len(cell),
+                )
+                active = [
+                    index for index, (a, b, c_line, edge_length) in enumerate(edge_lines)
+                    if a * sample[0] + b * sample[1] + c_line
+                    >= -eps * scale * edge_length
+                ]
+                if not active:
+                    raise GeometryInputError(
+                        "NO_ACTIVE_SLOPE",
+                        "Для области крыши не найдена активная плоскость ската.",
+                    )
+                regions = lower_envelope_regions(
+                    cell, [planes[index] for index in active], eps
+                )
+                for local_index, region in enumerate(regions):
+                    if len(region) >= 3 and abs(signed_area(region)) > area_eps:
+                        output[active[local_index]].append(region)
+        return output
+
     triangles = triangulate_simple_polygon(domain, eps)
     output: list[list[list[Point2]]] = [[] for _ in planes]
     scale = max(_bbox_scale(domain), _bbox_scale(support), 1.0)
