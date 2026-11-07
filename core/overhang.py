@@ -207,29 +207,24 @@ def _validate_corner_ridge(
             "OVERHANG_COLLAPSED_MITER",
             f"В углу {corner_index + 1} смещение схлопнулось в исходную вершину.",
         )
-    first_3d = (
-        incoming[0] - corner[0],
-        incoming[1] - corner[1],
-        incoming[2] - corner[2],
-    )
-    second_3d = (
-        outgoing[0] - corner[0],
-        outgoing[1] - corner[1],
-        outgoing[2] - corner[2],
-    )
-    cross_3d = (
-        first_3d[1] * second_3d[2] - first_3d[2] * second_3d[1],
-        first_3d[2] * second_3d[0] - first_3d[0] * second_3d[2],
-        first_3d[0] * second_3d[1] - first_3d[1] * second_3d[0],
-    )
-    cross_length = hypot(hypot(cross_3d[0], cross_3d[1]), cross_3d[2])
-    allowed_cross = tolerance * max(first_length, second_length, 1.0) * 20.0
-    if cross_length > allowed_cross:
+    cross_error = abs(_cross2(first, second))
+    allowed_cross = tolerance * max(first_length, second_length) * 20.0
+    if cross_error > allowed_cross:
         raise GeometryInputError(
             "OVERHANG_RIDGE_MISMATCH",
             f"В углу {corner_index + 1} смещения соседних скатов не лежат "
-            "на одной 3D-линии пересечения.",
+            "на одной линии их пересечения.",
         )
+    # Check the 3D points against both planes. Collinearity in XY alone is not
+    # enough on mixed-height eaves.
+    dz_in = incoming[2] - corner[2]
+    dz_out = outgoing[2] - corner[2]
+    for first_value, second_value in zip(first, second):
+        if abs(dz_in * second_value - dz_out * first_value) > allowed_cross:
+            raise GeometryInputError(
+                "OVERHANG_RIDGE_MISMATCH",
+                f"В углу {corner_index + 1} 3D-смещения не лежат на общей линии скатов.",
+            )
 
 
 def extend_convex_roof_surface(
@@ -268,6 +263,7 @@ def extend_convex_roof_surface(
     )
     tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = tolerance * scale * 10.0
+    cap_area_tolerance = max(1e-16, eps * scale * scale * 10.0)
     plane_tolerance = max(1e-10, eps * scale * 100.0)
 
     edge_uses: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
@@ -487,10 +483,11 @@ def extend_convex_roof_surface(
             (registry.vertices[vertex_id][0], registry.vertices[vertex_id][1])
             for vertex_id in cap
         ])
-        if abs(cap_area) <= area_tolerance:
+        if abs(cap_area) <= cap_area_tolerance:
             raise GeometryInputError(
                 "OVERHANG_CORNER_CAP_DEGENERATE",
-                f"В углу {index + 1} соединительная фаска свеса выродилась. "
+                f"В углу {index + 1} соединительная фаска свеса выродилась "
+                f"(проекционная площадь {cap_area:.6g}). "
                 "Уменьши свес или измени соседние Pitch.",
             )
         if cap_area * winding < 0.0:
@@ -523,11 +520,15 @@ def extend_convex_roof_surface(
 
     issues = validate_simple_polygon(boundary_xy, eps)
     if issues:
+        point_dump = "; ".join(
+            f"({point[0]:.7g}, {point[1]:.7g})" for point in boundary_xy
+        )
         raise GeometryInputError(
             "OVERHANG_OFFSET_INVALID",
             "Свес создал самопересекающийся или вырожденный внешний контур: "
             + issues[0].message
-            + " Уменьши свес или проверь вогнутые участки.",
+            + f" Точки контура: {point_dump}. "
+            + "Уменьши свес или проверь вогнутые участки.",
         )
 
     try:
