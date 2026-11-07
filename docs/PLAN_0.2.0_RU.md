@@ -68,7 +68,8 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [ ] Per-edge pitch values remain mapped to the correct source edge after rebuilds.
 - [x] Changing a pitch causes one coalesced Live Update using the selected 0–1000 ms delay; rapid changes cancel the pending timer and replace it.
 - [ ] A failed update leaves the last valid output unchanged.
-- [ ] With nonzero overhang, the underside/support planes pass through every original contour edge and the shell is extruded upward from that support surface.
+- [ ] With nonzero convex overhang, the underside/support planes pass through every original contour edge and the shell is extruded upward from that support surface.
+- [ ] Concave L/U contours still generate with zero overhang; nonzero overhang is rejected with a clear diagnostic.
 - [ ] Coplanar internal roof edges are absent from the generated Blender mesh.
 - [ ] The facet preview is transparent white RGBA, antialiased, width-responsive and labels stay inside their corresponding facet.
 - [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
