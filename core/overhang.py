@@ -16,6 +16,30 @@ def _cross2(first: Point2, second: Point2) -> float:
     return first[0] * second[1] - first[1] * second[0]
 
 
+def _is_convex_xy(points: Sequence[Point3], eps: float = 1e-9) -> bool:
+    """Return whether a simple XY contour has one consistent turn direction."""
+    sign = 0
+    scale = max(
+        1.0,
+        max(point[0] for point in points) - min(point[0] for point in points),
+        max(point[1] for point in points) - min(point[1] for point in points),
+    )
+    tolerance = eps * scale * scale
+    for index, current in enumerate(points):
+        previous = points[index - 1]
+        following = points[(index + 1) % len(points)]
+        first = (current[0] - previous[0], current[1] - previous[1])
+        second = (following[0] - current[0], following[1] - current[1])
+        turn = _cross2(first, second)
+        if abs(turn) <= tolerance:
+            continue
+        current_sign = 1 if turn > 0.0 else -1
+        if sign and current_sign != sign:
+            return False
+        sign = current_sign
+    return sign != 0
+
+
 def offset_contour_outward(
     points: Sequence[Point3],
     distance: float,
@@ -225,6 +249,13 @@ def build_source_anchored_overhang_surface(
     source = tuple(
         tuple(float(value) for value in point) for point in points
     )
+    if not _is_convex_xy(source):
+        raise GeometryInputError(
+            "OVERHANG_CONCAVE_UNSUPPORTED",
+            "Свес с сохранением исходной опорной поверхности пока поддерживается "
+            "только для выпуклого контура. Для вогнутой крыши отключи свес; "
+            "обычная генерация контура остаётся доступна.",
+        )
     expanded = offset_contour_outward(source, distance)
     planes = build_boundary_planes(source, pitches_degrees)
     conflicts = boundary_envelope_conflicts(
