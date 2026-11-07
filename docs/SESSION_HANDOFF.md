@@ -1,80 +1,83 @@
-# RoofForge 0.2.0-alpha.10 — Session Handoff
+# RoofForge 0.2.0-alpha.11 — Session Handoff
 
-**Updated:** 2026-11-07  
+**Updated:** 2026-11-08  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base UI reference:** `main` commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`, manifest 2.9.2  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Installable build:** `roof_forge-0.2.0-alpha.10.zip`, from artifact `roof_forge-0.2.0-alpha.10-blender-5.0.1` (artifact ID `13577397939`).  
-**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42381677571/artifacts/13577397939).  
-**Inner ZIP SHA-256:** `b08430a8454860226b469a6a7e23798771121fd376b6eb6efc69940ad77f6ca9`.  
-**Important:** `main` and `develop` must remain unchanged.
+**Installable build:** `roof_forge-0.2.0-alpha.11.zip`, from artifact `roof_forge-0.2.0-alpha.11-blender-5.0.1` (artifact ID `13592915106`).  
+**Workflow:** [run 42418098836](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42418098836), all jobs passed.  
+**Inner ZIP SHA-256:** `bb76a87621c3e27edfabcbcc3f2c478341f628c825eb4a08f0a1f7a15a970748`.  
+**Artifact ZIP SHA-256:** `9d7cf6579eb62f118594ea93e4293ae95c8a9500610cf8f45f931e150d026d76`.  
+**Important:** `main` and `develop` remain unchanged.
 
 ## User request
 
-The user said editing Pitch values through Edit Mode was inconvenient and requested the UI from main branch RoofForge 2.9.2, plus an audit of other useful features.
+The user reported that the eave overhang moved the roof edges and caused the lower surface to miss the original contour. The requested behavior is to keep the underside/support surface exactly on the original roof/eave contour.
 
-## What was found in main 2.9.2
+The user also asked to replace the contour-only preview with actual roof facet graphics: white lines and numbers, transparent background, internal non-coplanar edges, no coplanar seams, antialiasing, adjustable line width, numbers centered and auto-sized inside facets, and width-responsive preview.
 
-Main points at audit time:
-- Branch main commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`.
-- Package folder `RoofForge_2.9.2_weighted-endpoint-fix`.
-- Manifest version `2.9.2`.
-- The monolithic add-on includes a numbered top-view roof plan, per-edge pitch fields, plan-label sizing, interactive update-rate throttle, ridge/valley profile meshes and standing seam generation.
+## Alpha.11 geometry changes
 
-## Alpha.10 UI changes
+- For a **convex contour with a positive overhang**, support planes are built through the original 3D boundary edges. The expanded XY domain extends those same planes without re-anchoring them to shifted contour edges.
+- The support/underside surface remains at the original contour. Shell thickness is extruded upward from it.
+- Coplanar internal edges are dissolved from the actual Blender mesh through BMesh; face component/slope metadata is rebuilt after topology changes.
+- Concave overhang (L/U) is **not supported in this alpha**. The add-on now returns a clear `OVERHANG_CONCAVE_UNSUPPORTED` diagnostic rather than risking a disconnected or invalid roof. Concave L/U contours continue to generate normally with zero overhang. A proper reflex-corner/valley transition solver is future work.
 
-The Edit Mode Show button workflow is removed from the registered operators/UI. Each Pitch row is now identified from a schematic plan:
-- White background, black contour and simple black edge numbers.
-- Labels run in the same deterministic order as source contour and Pitch settings.
-- Number on an edge maps directly to the Pitch field with the same index.
-- Diagram scales to the available N-panel width.
-- `Number size` is independent of geometry settings and changes only label rendering.
-- The preview image is cached by contour + label-size signature, stored as a temporary PNG for Blender PreviewCollection, and cleaned up on unregister.
-- Renderer is pure Python in `core/plan_preview.py`; it does not call the roof solver or Blender API.
-- Ordered outline is stored in `scene.roof_forge.outline_preview_json` after Prepare, Generate and successful Live Update. It is persistent in the .blend scene settings.
-- Panel drawing reads cached outline and only builds/reuses the preview image; it does not execute roof geometry.
-- Existing per-edge numeric Pitch fields remain directly editable below the plan.
+## Alpha.11 roof-facet plan UI
+
+- The plan is derived from generated roof vertices, faces, slope IDs and plane data, not from a guessed outline.
+- Outer boundary and real non-coplanar ridge edges are drawn; coplanar internal edges are omitted.
+- White antialiased lines and labels on transparent RGBA background.
+- Labels are placed in the largest face region belonging to a slope and centered using a pole-of-inaccessibility approximation; glyph size is reduced to fit local line clearance.
+- Separate `Number size` and `Line thickness` controls.
+- Preview image scale grows with the available N-panel width.
+- Preview data is persisted after Generate / Live Update; drawing the panel does not rerun the roof solver.
 
 ## Implementation files
 
-- `core/plan_preview.py`: pure monochrome PNG contour renderer.
-- `addon/ui/plan_preview.py`: Blender PreviewCollection + temporary file cache lifecycle.
-- `addon/properties.py`: `outline_preview_json`, `plan_label_scale`.
-- `addon/operators/prepare.py`: stores the ordered contour when Pitch settings are loaded/refreshed.
-- `addon/operators/generate.py` / `addon/live_update.py`: refresh saved preview contour as roofs rebuild.
-- `addon/ui/panel.py`: plan schematic and direct Pitch fields; no Edit Mode Show button.
-- `addon/registration.py`: releases preview resources on unregister.
-- `tests/test_plan_preview.py`: PNG format, B/W pixel, label-size, two-digit number, L/U, invalid contour tests.
-- `tests/blender_smoke.py`: checks plan panel registration, icon creation and Number size control.
+- `core/plan_preview.py`: actual roof facet topology conversion, coplanar-edge filtering, transparent antialiased PNG renderer and centered/auto-fit numbers.
+- `addon/ui/plan_preview.py`: Blender PreviewCollection and temporary PNG lifecycle.
+- `addon/properties.py`: saved roof plan JSON and rendering controls.
+- `addon/operators/generate.py` / `addon/live_update.py`: refresh saved plan data on successful generation/rebuild.
+- `addon/roof_build.py`: source-anchored convex overhang, upward shell, coplanar BMesh dissolve and face metadata rebuild.
+- `core/overhang.py`, `core/mesh.py`, `core/envelope.py`, `core/planes.py`, `core/shell.py`: overhang support construction, active roof envelope, source-plane checks and shell extrusion.
+- `addon/ui/panel.py`: full-width roof facet plan and independent rendering controls.
+- `tests/test_plan_preview.py`: transparent/white pixels, antialiasing, ridge vs coplanar edge behavior, line/number size, two-digit IDs, concave diagrams.
+- `tests/test_overhang.py`: convex support edge alignment, mixed-Z contour, upward thickness, safe concave rejection, clockwise offset and input validation.
+- `tests/blender_smoke.py`: Blender 5.0.1 UI, plan rendering/cache, metadata after dissolve, actual overhang support edge alignment and concave no-overhang behavior.
+- `.github/workflows/tests.yml`: build, validate and artifact names are bumped to alpha.11.
 
-## Additional useful features audited in 2.9.2
+## Validation completed
 
-1. Interactive update-rate cap 1–60 Hz, with expensive profiles/seams deferred until the user stops dragging. Potentially useful but not copied yet because the current 0 ms debounce UX must be preserved until measured.
-2. Separate ridge and valley profile meshes extracted from actual roof face adjacency. Candidate next milestone after adapting it to current `RoofSurface` and face source IDs.
-3. Standing-seam layout generator with panel width, seam height/base width and end offsets. Candidate later feature; not safe to import without porting against current generated facets and shell thickness.
-4. Persistent source-surface/profile metadata on generated roof objects, useful for rebuilds after file save/reopen. Candidate architecture improvement.
-5. Old solver, overhang strip builder, mesh extrusion and monolithic property group were deliberately not copied; they are incompatible with the current alpha API and would risk bringing back older geometry limitations.
+Run [42418098836](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42418098836) passed all jobs:
+- Pure Python tests on 3.11 and 3.13.
+- Blender 5.0.1 background smoke.
+- Clean extension ZIP build.
+- Official Blender 5.0.1 extension validator.
+- Geometry scaling benchmarks.
+- Legacy spatial benchmark and solver profile.
+- Rust skeleton candidate diagnostics.
 
-## Validation required for alpha.10
+Artifact archive ID `13592915106` was downloaded and inspected. It contains outer artifact files:
+- `roof_forge-0.2.0-alpha.11.zip`
+- `roof_forge-0.2.0-alpha.11.zip.sha256`
 
-- Pure Python tests: 3.11 and 3.13.
-- Blender 5.0.1 smoke: visible top-plan UI references, PreviewCollection icon creation, label-size change, scene-persisted ordered outline; previous roof smoke still passes.
-- Clean Extension ZIP and official Blender Extension Validator.
-- Download exact alpha.10 artifact and inspect manifest + panel module contents before release.
+The inner ZIP manifest identifies `0.2.0-alpha.11`; archive contains 29 files including the new renderer, UI wrapper, geometry and shell modules. SHA-256 was checked against the provided sidecar.
 
-## User QA
+## User viewport QA still needed
 
-1. Remove previous RoofForge alpha, install alpha.10.
-2. Prepare a rectangle, L or U contour.
-3. Confirm a top-view plan appears above the Pitch fields.
-4. Confirm each number lies by its matching source edge and matches same-numbered Pitch row.
-5. Change Number size: only labels should resize; geometry/Pitch should not change.
-6. Change Pitch values directly in rows; no Edit Mode selection should be required.
-7. Try two-digit edge numbers on an 11–16 edge contour.
+1. Install alpha.11 in Blender 5.0+.
+2. Generate a convex roof with overhang and check that the underside/support surface remains on the original contour while thickness builds upward.
+3. Try a mixed-Z convex contour with overhang and check the same alignment.
+4. Resize the N-panel narrower and wider; verify the roof plan fills the available width.
+5. Check the white transparent lines/labels on the current Blender theme, antialiasing and readability; verify number positions across facets of different widths.
+6. Check that real ridges remain visible, coplanar seams are absent from both plan and roof mesh.
+7. Verify concave L/U contours with overhang 0; a positive overhang should be rejected with a clear message in this alpha.
 
 ## Repository rules
 
 - Continue only on `feature/0.2.0-arbitrary-contours-live-pitch`.
 - Keep PR #6 draft; do not merge to develop or tag stable 0.2.0.
+- Main and develop must remain unchanged.
 - User viewport QA remains separate from CI.
