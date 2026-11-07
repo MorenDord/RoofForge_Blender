@@ -50,9 +50,13 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 roof_object = current_roof
                 old_mesh = roof_object.data
                 roof_object.data = new_mesh
-                apply_shell_metadata(
-                    roof_object, source, surface, shell, pitches, solver
-                )
+                try:
+                    apply_shell_metadata(
+                        roof_object, source, surface, shell, pitches, solver
+                    )
+                except Exception:
+                    roof_object.data = old_mesh
+                    raise
                 if old_mesh is not new_mesh and old_mesh.users == 0:
                     bpy.data.meshes.remove(old_mesh)
             else:
