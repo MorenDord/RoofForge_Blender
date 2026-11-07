@@ -5,7 +5,9 @@
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base UI reference:** `main` commit `63d7952e0ee9c7aa62b4ed4efe40716a7641a2e0`, manifest 2.9.2  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Alpha.10 artifact / SHA-256:** pending versioned package CI.  
+**Installable build:** `roof_forge-0.2.0-alpha.10.zip`, from artifact `roof_forge-0.2.0-alpha.10-blender-5.0.1` (artifact ID `13577397939`).  
+**Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42381677571/artifacts/13577397939).  
+**Inner ZIP SHA-256:** `b08430a8454860226b469a6a7e23798771121fd376b6eb6efc69940ad77f6ca9`.  
 **Important:** `main` and `develop` must remain unchanged.
 
 ## User request
