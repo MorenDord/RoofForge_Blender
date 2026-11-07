@@ -6,7 +6,7 @@
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Installable code/package snapshot:** `a2b85ad189f019a1310ad46a6bfe69f94ef17361`.  
 **PR:** [#6 — WIP RoofForge 0.2.0](https://github.com/MorenDord/RoofForge_Blender/pull/6) (open, draft; wait for user QA before merge).  
-**Installable build:** `roof_forge-0.2.0-alpha.4.zip`, from CI artifact `roof_forge-0.2.0-alpha.4-blender-5.0.1` (artifact ID `13553300364`).  
+**Installable build:** `roof_forge-0.2.0-alpha.4.zip`, from CI artifact `roof_forge-0.2.0-alpha.4-blender-5.0.1` (artifact ID `13552943327`).  
 **Outer artifact:** [download from GitHub Actions](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435/artifacts/13552943327).  
 **Inner ZIP SHA-256:** `185186234319dc31dfc03c592ba3d40aded78ed5ed47d55d7f456f1d1270aa57`.  
 **Latest CI:** [Push run 42321985435](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435) and [PR run 42321992476](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476) both passed.  
@@ -49,9 +49,10 @@
 - Renaming the source object or generated roof object stops automatic updates. The already generated geometry remains in the scene.
 - If topology edge count changes, the user must use `Load / Refresh Slope Angles` and verify the mapping.
 
-## Overhang and delete/recreate additions in alpha.3
+## Overhang and delete/recreate additions in alpha.4
 
-- `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` extends each convex boundary facet on its authored support plane and adds convex corner join triangles; strict coverage and shell-manifold checks remain enabled.
+- `eave_overhang` is a horizontal distance in scene units. `core/overhang.py` intersects adjacent offset boundary lines and creates one shared miter vertex per convex corner. Each source segment gets one parallel outer segment. No separate triangular corner fan is emitted; coverage and shell-manifold checks remain enabled.
+- Incoming/outgoing support planes must agree in height at each miter. Differing adjacent pitches that create a height mismatch are rejected as `OVERHANG_PITCH_DISCONTINUITY` rather than generating a broken seam.
 - If the generated object has been deleted, Create / Update clears the stale pointer/name snapshot, creates a replacement in the active scene root collection, and confirms it is present in `bpy.data.objects` and `scene.objects`.
 - Blender smoke explicitly deletes and re-creates the L roof from its unchanged source contour.
 - Thickness-only Live Update uses the validated surface cache and rebuilds only the closed shell. `mesh.attributes` face values use bulk `foreach_set`.
@@ -120,8 +121,8 @@ For each issue, record Blender version, OS, contour points/edge count, per-edge 
 
 ## Important links
 - [PR #6](https://github.com/MorenDord/RoofForge_Blender/pull/6)
-- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320863070)
-- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42320868809)
+- [Latest push CI](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321985435)
+- [Latest PR CI / installable artifact](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42321992476)
 - [Implementation plan](https://github.com/MorenDord/RoofForge_Blender/blob/feature/0.2.0-arbitrary-contours-live-pitch/docs/PLAN_0.2.0_RU.md)
 
 ## Local checks

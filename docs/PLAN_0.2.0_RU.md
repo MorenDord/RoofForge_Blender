@@ -66,10 +66,11 @@ Blender background smoke coverage is being expanded for both wire and face meshe
 - [ ] Invalid/self-intersecting/degenerate inputs fail with actionable diagnostics.
 - [ ] Object selection alone is enough to detect the contour, in Object Mode and Edit Mode, on both wire-only and face meshes.
 - [ ] Per-edge pitch values remain mapped to the correct source edge after rebuilds.
-- [ ] Changing a pitch causes one debounced live update; rapid changes do not queue unbounded builds.
+- [x] Changing a pitch causes one coalesced Live Update using the selected 0–1000 ms delay; rapid changes cancel the pending timer and replace it.
 - [ ] A failed update leaves the last valid output unchanged.
 - [ ] Performance baselines exist at 8–64 edges, with 64 as the maximum 0.2.0 target; preview and final thresholds are defined from measured results.
-- [ ] No overhang/eaves generator, ridge/valley/hip, seam, UV, LOD or export controls are included.
+- [x] Convex eave overhang uses shared miter corners; incompatible adjacent support planes and reflex L/U contours are rejected rather than creating a broken mesh.
+- [x] Live Update delay is adjustable from 0 to 1000 ms, default 0 ms; no intentional debounce at zero. Ridge/valley/hip, seam, UV, LOD or export controls remain out of scope.
 - [ ] Blender 5.0.1 background smoke and official extension package validation pass; manual viewport QA remains a separate gate.
 
 ## Current known mathematical risk
