@@ -2,7 +2,7 @@ import math
 import unittest
 
 from core.geometry import signed_area
-from core.mesh import build_roof_shell
+from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.wavefront import (
     build_wavefront_roof_surface,
