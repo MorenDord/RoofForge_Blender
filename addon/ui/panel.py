@@ -55,14 +55,15 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             preview.label(text="Roof plan")
             preview.prop(settings, "plan_show_vector", text="Show preview")
             if settings.plan_show_vector:
-                style = preview.column(align=True)
+                # Keep the draw-handler canvas immediately below the toggle.
+                # The matching GPU layout uses this compact top anchor.
+                preview_slot = layout.row()
+                preview_slot.scale_y = 8.0
+                preview_slot.label(text=" ")
+
+                style = layout.column(align=True)
                 style.prop(settings, "plan_label_scale", text="Number size", slider=True)
                 style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
-
-                # A blank layout row reserves a stable canvas for the GPU overlay.
-                preview_slot = layout.row()
-                preview_slot.scale_y = 9.0
-                preview_slot.label(text=" ")
 
         pitch_column = layout.column(align=True)
         for index, item in enumerate(settings.slope_settings, start=1):
