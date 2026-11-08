@@ -275,8 +275,8 @@ def main() -> None:
         "overhang corner-convergence option was not registered",
     )
     ensure(
-        not hasattr(bpy.ops.roof_forge, "validate_input"),
-        "Validate Roof operator should no longer be registered",
+        not hasattr(bpy.types, "ROOFFORGE_OT_validate_input"),
+        "Validate Roof operator class should no longer be registered",
     )
 
     # No mesh elements are selected: the add-on must find the contour itself.
