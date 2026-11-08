@@ -9,7 +9,6 @@ from .operators import (
 from .ui.panel import ROOFFORGE_PT_panel
 from .live_update import cancel_pending_live_update
 from .roof_build import clear_surface_cache
-from .ui.plan_preview import clear_contour_plan_preview
 from .ui.vector_plan_preview import register_vector_preview, unregister_vector_preview
 
 _CLASSES = (
@@ -36,7 +35,6 @@ def unregister():
     cancel_pending_live_update()
     unregister_vector_preview()
     clear_surface_cache()
-    clear_contour_plan_preview()
     if hasattr(bpy.types.Scene, "roof_forge"):
         del bpy.types.Scene.roof_forge
     for cls in reversed(_CLASSES):
