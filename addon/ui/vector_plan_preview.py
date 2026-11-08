@@ -98,8 +98,8 @@ def _compute_canvas_layout(
     return {
         "side": side,
         "scale": scale,
-        "origin_x": target_x - bbox_center_x * scale,
-        "origin_y": target_y - bbox_center_y * scale,
+        "origin_x": target_x - (bbox_center_x - min_x) * scale,
+        "origin_y": target_y - (bbox_center_y - min_y) * scale,
         "target_center": (target_x, target_y),
     }
 
