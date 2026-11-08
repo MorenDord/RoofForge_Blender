@@ -48,7 +48,7 @@ This is a tested family of cases, not a proof for every possible simple polygon.
 
 ### Mixed-height 3D eaves
 
-If boundary vertices have different Z heights, RoofForge keeps the original relative XYZ contour elevations and uses the existing 3D support-plane envelope solver. The offset contour preserves the Z value of each corresponding source vertex. The roof is then recalculated from that new XYZ boundary. This path is covered by convex mixed-height fixtures; concave mixed-height contours are not yet a general guaranteed case and may be rejected by plane-continuity or coverage validation.
+If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver. With overhang, each source-edge plane still passes through its original endpoints; corner convergence computes a shared outer-corner point on the adjacent planes. Convex mixed-height fixtures are covered by CI. Concave mixed-height contours are not guaranteed and nonzero concave overhang is rejected.
 
 ### Other current limits
 
