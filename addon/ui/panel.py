@@ -1,7 +1,7 @@
-"""RoofForge's compact workflow panels."""
+"""RoofForge's compact workflow panel."""
 import bpy
 
-from .vector_plan_preview import preview_icon_scale
+from .vector_plan_preview import preview_icon_scale, set_preview_slot_visible
 
 
 def _draw_common_settings(layout, settings):
@@ -34,64 +34,49 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "RoofForge"
-    bl_order = 0
+
+    def draw_header(self, context):
+        # The root panel itself can also be collapsed. Never leave a stale
+        # draw-handler visibility flag behind when its body is not drawn.
+        set_preview_slot_visible(context.region, False)
 
     def draw(self, context):
-        self.layout.operator(
+        layout = self.layout
+        settings = context.scene.roof_forge
+        set_preview_slot_visible(context.region, False)
+
+        layout.operator(
             "roof_forge.generate_surface",
             text="Create / Update Roof",
             icon="MESH_DATA",
         )
 
+        if settings.roof_plan_json:
+            header, body = layout.panel(
+                "roof_forge_plan_preview",
+                text="Roof Plan",
+                default_closed=False,
+            )
+            header.prop(settings, "plan_show_vector", text="Show preview")
 
-class ROOFFORGE_PT_plan_preview(bpy.types.Panel):
-    bl_label = "Roof Plan"
-    bl_idname = "ROOFFORGE_PT_plan_preview"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "RoofForge"
-    bl_order = 1
+            # A collapsed UILayout.panel() returns body=None. The handler is
+            # enabled only while this real layout slot is present in the UI.
+            if body is not None and settings.plan_show_vector:
+                region_width = getattr(context.region, "width", 320)
+                icon_scale = preview_icon_scale(region_width)
+                if icon_scale is None:
+                    body.label(text="Widen the N-panel to view the plan", icon="INFO")
+                else:
+                    # ICON_NONE reserves the square; GPU paints only inside it.
+                    body.template_icon(0, scale=icon_scale)
 
-    @classmethod
-    def poll(cls, context):
-        settings = getattr(getattr(context, "scene", None), "roof_forge", None)
-        return bool(settings and settings.roof_plan_json)
-
-    def draw(self, context):
-        layout = self.layout
-        settings = context.scene.roof_forge
-        layout.prop(settings, "plan_show_vector", text="Show preview")
-
-        if not settings.plan_show_vector:
-            return
-
-        region_width = getattr(context.region, "width", 320)
-        icon_scale = preview_icon_scale(region_width)
-        if icon_scale is None:
-            layout.label(text="Widen the N-panel to view the plan", icon="INFO")
-        else:
-            # ICON_NONE reserves the exact square in normal UI flow. The GPU
-            # handler paints only inside this slot; no bitmap is generated.
-            layout.template_icon(0, scale=icon_scale)
-
-        style = layout.column(align=True)
-        style.prop(settings, "plan_label_scale", text="Number size", slider=True)
-        style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
-
-
-class ROOFFORGE_PT_settings(bpy.types.Panel):
-    bl_label = "Pitch & Settings"
-    bl_idname = "ROOFFORGE_PT_settings"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "RoofForge"
-    bl_order = 2
-
-    def draw(self, context):
-        layout = self.layout
-        settings = context.scene.roof_forge
+                style = body.column(align=True)
+                style.prop(settings, "plan_label_scale", text="Number size", slider=True)
+                style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
+                set_preview_slot_visible(context.region, icon_scale is not None)
 
         if not settings.slope_settings:
+            layout.separator(factor=0.5)
             layout.label(text="Initial settings")
             layout.prop(settings, "initial_pitch", text="Initial pitch (°)", slider=True)
         else:
@@ -105,8 +90,4 @@ class ROOFFORGE_PT_settings(bpy.types.Panel):
         _draw_common_settings(layout, settings)
 
 
-__all__ = [
-    "ROOFFORGE_PT_panel",
-    "ROOFFORGE_PT_plan_preview",
-    "ROOFFORGE_PT_settings",
-]
+__all__ = ["ROOFFORGE_PT_panel"]
