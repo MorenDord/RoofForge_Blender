@@ -67,11 +67,12 @@ def _cache_owner_id(owner) -> int | None:
         return id(owner)
 
 
-def _build_roof_surface(points, pitches, overhang):
+def _build_roof_surface(points, pitches, overhang, corner_convergence):
     authored_points = tuple(tuple(float(value) for value in point) for point in points)
     if overhang > 0.0:
         surface = build_source_anchored_overhang_surface(
-            authored_points, pitches, overhang
+            authored_points, pitches, overhang,
+            corner_convergence=corner_convergence,
         )
         return surface, "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
     if is_flat_eave_contour(authored_points):
@@ -84,6 +85,7 @@ def build_roof_payload(
     thickness,
     overhang: float = 0.0,
     *,
+    corner_convergence: bool = True,
     cache_owner=None,
 ):
     """Build a validated roof shell, reusing unchanged surface geometry.
@@ -109,6 +111,7 @@ def build_roof_payload(
         tuple(tuple(float(value) for value in point) for point in points),
         tuple(float(value) for value in pitches),
         overhang,
+        bool(corner_convergence),
     )
     cache_key = (owner_id, signature) if owner_id is not None else None
     cached = _SURFACE_CACHE.get(cache_key) if cache_key is not None else None
@@ -117,7 +120,9 @@ def build_roof_payload(
         surface, solver = cached
         _SURFACE_CACHE.move_to_end(cache_key)
     else:
-        surface, solver = _build_roof_surface(points, pitches, overhang)
+        surface, solver = _build_roof_surface(
+            points, pitches, overhang, bool(corner_convergence)
+        )
         if cache_key is not None:
             _SURFACE_CACHE[cache_key] = (surface, solver)
             _SURFACE_CACHE.move_to_end(cache_key)
@@ -290,6 +295,9 @@ def apply_shell_metadata(
     roof_object["roof_forge_overhang"] = float(overhang)
     roof_object["roof_forge_overhang_support"] = (
         "SOURCE_CONTOUR_UNDERSIDE" if overhang > 0.0 else "STANDARD_TOP_SURFACE"
+    )
+    roof_object["roof_forge_overhang_corner_convergence"] = bool(
+        overhang > 0.0 and getattr(shell, "corner_convergence", True)
     )
     if thickness_cm is not None:
         roof_object["roof_forge_thickness_cm"] = float(thickness_cm)
