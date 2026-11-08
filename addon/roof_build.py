@@ -281,6 +281,7 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
 def apply_shell_metadata(
     roof_object, source, surface, shell, pitches, solver,
     overhang=0.0, thickness_cm=None, overhang_cm=None,
+    corner_convergence=True,
 ):
     """Write stable links and diagnostic metadata onto the generated object."""
     roof_object["roof_forge_generated"] = True
@@ -297,7 +298,7 @@ def apply_shell_metadata(
         "SOURCE_CONTOUR_UNDERSIDE" if overhang > 0.0 else "STANDARD_TOP_SURFACE"
     )
     roof_object["roof_forge_overhang_corner_convergence"] = bool(
-        overhang > 0.0 and getattr(shell, "corner_convergence", True)
+        overhang > 0.0 and corner_convergence
     )
     if thickness_cm is not None:
         roof_object["roof_forge_thickness_cm"] = float(thickness_cm)
