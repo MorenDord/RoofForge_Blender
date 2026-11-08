@@ -105,3 +105,15 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Blender 5.0.1 background smoke: legacy geometry suite and vector-preview geometry/registration/toggle smoke passed. Extension validator passed.
 - Manual interactive viewport QA is still required for actual GPU visual placement, resizing, readability, redraw latency, multiple View3D areas, and draw-handler cleanup.
 - Positive overhang remains convex-only; concave L/U roofs are supported at zero overhang.
+
+
+## RoofForge 0.2.3 — direct GPU preview in the N-panel (experimental)
+
+- PR #6 remains open and draft; no merge. Main/develop unchanged.
+- The vector draw-handler now targets SpaceView3D region type `UI` (N-panel) rather than `WINDOW` (main viewport).
+- A dedicated N-panel category/tab `Roof Plan` contains the GPU canvas and its visibility/style controls. Main generation controls remain in `RoofForge`; this avoids drawing over a dynamically sized list of Pitch controls.
+- The handler only draws while `region.active_panel_category == "Roof Plan"`; it is tagged for redraw on the UI regions only.
+- Vector-only mode skips PNG timer scheduling and PNG rendering. Raster remains independently switchable and may be enabled together with vector.
+- Canvas is centered in the UI region below a reserved control strip; manual Blender 5.0.1 visual QA is required for coordinates, panel resizing, scroll behaviour, multiple areas, redraw and cleanup.
+- Version set to 0.2.3 in manifest, add-on metadata and workflow artifact name.
+- Smoke asserts UI-region handler registration, dedicated panel category and that vector-only mode does not queue a PNG render.
