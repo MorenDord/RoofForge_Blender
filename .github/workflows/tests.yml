@@ -55,10 +55,10 @@ jobs:
       - name: Upload installable test build
         uses: actions/upload-artifact@v4
         with:
-          name: roof_forge-0.2.1-blender-5.0.1
+          name: roof_forge-0.2.2-blender-5.0.1
           path: |
-            dist/roof_forge-0.2.1.zip
-            dist/roof_forge-0.2.1.zip.sha256
+            dist/roof_forge-0.2.2.zip
+            dist/roof_forge-0.2.2.zip.sha256
           if-no-files-found: error
           retention-days: 30
   geometry-benchmarks:
