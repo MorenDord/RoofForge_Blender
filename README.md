@@ -56,7 +56,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original rela
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is covered for convex contours and tested concave L/U contours with individual edge pitches. Mixed-height convex XYZ contours are also covered. Arbitrary multi-notch event combinations and arbitrary concave mixed-height XYZ are not yet guaranteed.
+- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Concave L/U contours remain supported without overhang; positive overhang on concave contours is deliberately rejected until a reflex-corner transition solver is available.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## Installation and test build
