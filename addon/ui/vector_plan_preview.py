@@ -197,6 +197,155 @@ def _is_panel_scrolled(region):
         return False
 
 
+
+def _view2d_visible_rect(region):
+    """Return the View2D visible mask in region-local pixel coordinates.
+
+    View2D.view_to_region() maps the current visible view rectangle through
+    Blender's real View2D transform. The +1 converts inclusive pixel maxima
+    into a half-open rectangle suitable for drawing.
+    """
+    try:
+        view2d = region.view2d
+        current = view2d.cur
+        first = view2d.view_to_region(
+            float(current.xmin), float(current.ymin), clip=False
+        )
+        last = view2d.view_to_region(
+            float(current.xmax), float(current.ymax), clip=False
+        )
+        left = min(float(first[0]), float(last[0]))
+        bottom = min(float(first[1]), float(last[1]))
+        right = max(float(first[0]), float(last[0])) + 1.0
+        top = max(float(first[1]), float(last[1])) + 1.0
+        if right <= left or top <= bottom:
+            return None
+        return (left, bottom, right, top)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _translate_scissor(scissor, viewport):
+    """Translate region-local scissor coordinates into framebuffer pixels."""
+    x, y, width, height = (float(value) for value in scissor)
+    viewport_x, viewport_y = float(viewport[0]), float(viewport[1])
+    return (
+        round(viewport_x + x),
+        round(viewport_y + y),
+        round(width),
+        round(height),
+    )
+
+
+def _rectangle_line_positions(rect):
+    """Return the four outline edges for a half-open pixel rectangle."""
+    left, bottom, right, top = (float(value) for value in rect)
+    right -= 1.0
+    top -= 1.0
+    return (
+        (left, bottom), (right, bottom),
+        (right, bottom), (right, top),
+        (right, top), (left, top),
+        (left, top), (left, bottom),
+    )
+
+
+def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color):
+    """Draw real UI/viewport bounds beside the current estimated preview slot."""
+    width = float(region.width)
+    height = float(region.height)
+    region_rect = (0.0, 0.0, max(1.0, width), max(1.0, height))
+    view_rect = _view2d_visible_rect(region)
+    slot_rect = (
+        float(layout["slot_left"]),
+        float(layout["slot_bottom"]),
+        float(layout["slot_left"] + layout["slot_side"]),
+        float(layout["slot_bottom"] + layout["slot_side"]),
+    )
+
+    # Region = red, View2D visible mask = green, estimated icon slot = amber.
+    rectangles = [
+        (region_rect, (1.0, 0.12, 0.12, 1.0)),
+    ]
+    if view_rect is not None:
+        rectangles.append((view_rect, (0.12, 1.0, 0.28, 1.0)))
+    rectangles.append((slot_rect, (1.0, 0.72, 0.08, 1.0)))
+
+    viewport_x, viewport_y, viewport_width, viewport_height = (
+        float(value) for value in viewport
+    )
+    try:
+        local_x = viewport_x - float(region.x)
+        local_y = viewport_y - float(region.y)
+        mapped_viewport = (
+            local_x,
+            local_y,
+            local_x + viewport_width,
+            local_y + viewport_height,
+        )
+        if (
+            mapped_viewport[2] > 0.0
+            and mapped_viewport[3] > 0.0
+            and mapped_viewport[0] < width
+            and mapped_viewport[1] < height
+        ):
+            rectangles.append((mapped_viewport, (0.12, 0.72, 1.0, 1.0)))
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        mapped_viewport = None
+
+    shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
+    for rect, color in rectangles:
+        positions = _rectangle_line_positions(rect)
+        batch = batch_for_shader(shader, "LINES", {"pos": positions})
+        shader.bind()
+        shader.uniform_float(
+            "viewportSize",
+            (float(viewport_width), float(viewport_height)),
+        )
+        shader.uniform_float("lineWidth", max(1.0, 1.6 * ui_scale))
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+
+    def format_rect(rect):
+        if rect is None:
+            return "unavailable"
+        return ",".join(str(round(value)) for value in rect)
+
+    region_origin = (
+        round(float(getattr(region, "x", 0))),
+        round(float(getattr(region, "y", 0))),
+    )
+    lines = [
+        f"REGION {round(width)}x{round(height)} @ {region_origin[0]},{region_origin[1]}",
+        f"VIEW2D L,B,R,T = {format_rect(view_rect)}",
+        f"GPU VP = {round(viewport_x)},{round(viewport_y)} {round(viewport_width)}x{round(viewport_height)}",
+        f"EST SLOT L,B,S = {round(slot_rect[0])},{round(slot_rect[1])},{round(layout['slot_side'])}",
+    ]
+    if mapped_viewport is not None:
+        lines.append(f"VP-REGION = {format_rect(mapped_viewport)}")
+
+    font_id = 0
+    font_size = max(9, int(10 * ui_scale))
+    blf.size(font_id, font_size)
+    blf.enable(font_id, blf.SHADOW)
+    try:
+        shadow_color = (
+            (0.0, 0.0, 0.0, 0.95)
+            if text_color[0] > 0.5
+            else (1.0, 1.0, 1.0, 0.95)
+        )
+        blf.shadow(font_id, 3, *shadow_color)
+        blf.shadow_offset(font_id, 1, -1)
+        blf.color(font_id, *text_color)
+        label_y = max(4.0, height - 15.0 * ui_scale)
+        for line in lines:
+            blf.position(font_id, round(6.0 * ui_scale), round(label_y), 0)
+            blf.draw(font_id, line)
+            label_y -= 12.0 * ui_scale
+    finally:
+        blf.disable(font_id, blf.SHADOW)
+
+
 def _line_color(context):
     """Choose a contrasting line/text colour from the active Blender UI theme."""
     try:
@@ -248,10 +397,28 @@ def _draw_vector_preview():
         if layout is None:
             return
 
-        # Hard clipping prevents the vector layer from painting over Pitch /
-        # Settings or the neighbouring editor, even if a draw coordinate drifts.
+        viewport = tuple(int(value) for value in gpu.state.viewport_get())
+        color = _line_color(context)
+        gpu.state.blend_set("ALPHA")
+        gpu.state.depth_test_set("NONE")
+
+        if getattr(settings, "plan_debug_bounds", False):
+            try:
+                _draw_debug_overlay(
+                    context,
+                    region,
+                    layout,
+                    viewport,
+                    ui_scale,
+                    color,
+                )
+            except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+                pass
+
+        # scissor_set uses active-framebuffer pixels, whereas the preview slot
+        # is calculated in region-local POST_PIXEL coordinates.
         gpu.state.scissor_test_set(True)
-        gpu.state.scissor_set(*layout["scissor"])
+        gpu.state.scissor_set(*_translate_scissor(layout["scissor"], viewport))
         scissor_enabled = True
 
         origin_x = layout["origin_x"]
@@ -272,13 +439,9 @@ def _draw_vector_preview():
                 screen(geometry["vertices"][second]),
             ))
 
-        color = _line_color(context)
-        gpu.state.blend_set("ALPHA")
-        gpu.state.depth_test_set("NONE")
         if line_positions:
             shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
             batch = batch_for_shader(shader, "LINES", {"pos": line_positions})
-            viewport = gpu.state.viewport_get()
             shader.bind()
             shader.uniform_float("viewportSize", (float(viewport[2]), float(viewport[3])))
             shader.uniform_float(
@@ -376,5 +539,7 @@ __all__ = [
     "tag_vector_preview_redraw",
     "set_preview_slot_visible",
     "_compute_canvas_layout",
+    "_view2d_visible_rect",
+    "_translate_scissor",
     "preview_icon_scale",
 ]
