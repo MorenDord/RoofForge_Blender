@@ -21,12 +21,14 @@ _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
-# The GPU drawing is centred in the complete N-panel UI region.
-# Width is the primary sizing constraint; height is capped to keep tall plans
-# from covering the panel controls above and below the preview slot.
-_PANEL_MIN_WIDTH = 76
-_MAX_HEIGHT_FRACTION = 0.30
-_CANVAS_MARGIN = 10
+# Reproduce the old Raster preview's square template-icon layout exactly:
+# its displayed side is region width minus 24 px, inserted after the preview toggle.
+# The GPU overlay is drawn over an invisible ICON_NONE layout anchor.
+_PREVIEW_SLOT_TOP_OFFSET = 126.0
+_PREVIEW_SLOT_MIN_SIDE = 96.0
+_PREVIEW_MARGIN_FRACTION = 0.075
+_TEMPLATE_ICON_BASE_SIZE = 32.0
+_TEMPLATE_ICON_SIDE_MARGIN = 24.0
 
 
 def _prepare_geometry(plan_data):
@@ -60,6 +62,23 @@ def _cached_geometry(plan_json):
     return _CACHE_GEOMETRY
 
 
+def preview_icon_scale(region_width):
+    """Return the same template_icon scale used by the former raster preview.
+
+    The old panel used max(1, (region_width - 24) / 32). Keep that exact
+    relationship so the vector drawing and its invisible UI layout anchor
+    always occupy the same square slot.
+    """
+    width = max(0.0, float(region_width))
+    side = width - _TEMPLATE_ICON_SIDE_MARGIN
+    if side < _PREVIEW_SLOT_MIN_SIDE:
+        return None
+    scale = side / _TEMPLATE_ICON_BASE_SIZE
+    if scale < 1.0:
+        return None
+    return min(100.0, scale)
+
+
 def _compute_canvas_layout(
     region_width,
     region_height,
@@ -67,48 +86,62 @@ def _compute_canvas_layout(
     *,
     ui_scale=1.0,
 ):
-    """Fit the complete bounding box and centre it in the N-panel UI region.
+    """Use the former raster preview's square-canvas fit and layout placement.
 
-    The scale is recomputed from the current UI-region width on every draw,
-    so widening the N-panel increases the plan size. The height cap prevents
-    very tall contours from consuming the whole panel.
+    The square is anchored immediately after the Roof plan / Show preview rows,
+    exactly where UILayout.template_icon used to put the PNG preview. Its square
+    size grows with the sidebar width. The bounding box is centred inside that
+    square with the same 7.5% margin and max-span scale as the PNG renderer.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
     height = max(0.0, float(region_height))
-    margin = _CANVAS_MARGIN * ui_scale
+    icon_scale = preview_icon_scale(width)
+    if icon_scale is None:
+        return None
 
+    side = _TEMPLATE_ICON_BASE_SIZE * icon_scale
     min_x, min_y, max_x, max_y = (float(value) for value in bounds)
     span_x, span_y = max_x - min_x, max_y - min_y
-    if span_x <= 1.0e-12 or span_y <= 1.0e-12:
+    span = max(span_x, span_y)
+    if span <= 1.0e-12:
         return None
 
-    available_width = width - 2.0 * margin
-    available_height = height * _MAX_HEIGHT_FRACTION - 2.0 * margin
-    if available_width < _PANEL_MIN_WIDTH * ui_scale or available_height <= 0.0:
-        return None
-
-    # Independent X/Y constraints preserve the contour's aspect ratio.
-    scale = min(available_width / span_x, available_height / span_y)
+    margin = side * _PREVIEW_MARGIN_FRACTION
+    scale = (side - 2.0 * margin) / span
     if scale <= 0.0:
         return None
 
-    bbox_width = span_x * scale
-    bbox_height = span_y * scale
-    target_x = width * 0.5
-    target_y = height * 0.5
-    bbox_center_x = (min_x + max_x) * 0.5
-    bbox_center_y = (min_y + max_y) * 0.5
+    # Match UILayout.template_icon: horizontally centred with a 12 px gutter.
+    canvas_left = (width - side) * 0.5
+    canvas_top = height - _PREVIEW_SLOT_TOP_OFFSET * ui_scale
+    canvas_bottom = canvas_top - side
+    if canvas_bottom < 8.0 * ui_scale:
+        return None
 
+    offset_x = (side - span_x * scale) * 0.5
+    offset_y = (side - span_y * scale) * 0.5
+    origin_x = canvas_left + offset_x
+    origin_y = canvas_bottom + offset_y
+    bbox_center = (
+        origin_x + (span_x * scale) * 0.5,
+        origin_y + (span_y * scale) * 0.5,
+    )
     return {
-        "width": bbox_width,
-        "height": bbox_height,
+        "side": side,
         "scale": scale,
-        "origin_x": target_x - (bbox_center_x - min_x) * scale,
-        "origin_y": target_y - (bbox_center_y - min_y) * scale,
-        "target_center": (target_x, target_y),
-        "available_width": available_width,
-        "available_height": available_height,
+        "origin_x": origin_x,
+        "origin_y": origin_y,
+        "canvas_left": canvas_left,
+        "canvas_bottom": canvas_bottom,
+        "canvas_top": canvas_top,
+        "target_center": (
+            canvas_left + side * 0.5,
+            canvas_bottom + side * 0.5,
+        ),
+        "bbox_center": bbox_center,
+        "margin": margin,
+        "icon_scale": icon_scale,
     }
 
 
@@ -167,8 +200,8 @@ def _draw_vector_preview():
             geometry["bounds"],
             ui_scale=ui_scale,
         )
-        # A narrow N-panel must hide the canvas instead of painting over the
-        # neighbouring editor. The normal layout controls remain available.
+        # The UI template-icon anchor reserves the full square and pushes Pitch
+        # and style controls below it. The handler only paints over that square.
         if layout is None:
             return
 
@@ -283,4 +316,5 @@ __all__ = [
     "unregister_vector_preview",
     "tag_vector_preview_redraw",
     "_compute_canvas_layout",
+    "preview_icon_scale",
 ]
