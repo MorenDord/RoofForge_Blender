@@ -151,3 +151,17 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Added a smoke assertion that the opaque-rectangle helper is absent.
 - Bumped add-on, manifest and workflow package version to `0.2.5`.
 - Manual QA still required for transparent rendering, alignment with the slot, readability across Blender themes, and panel resizing/scrolling. Background CI cannot verify rendered pixels.
+
+
+## RoofForge 0.3.0 — vector-only preview and pre-create settings
+
+- Removed raster PNG preview end-to-end: deleted `addon/ui/plan_preview.py` and `core/plan_preview.py`, removed `plan_show_raster`, preview icon cache, temporary PNG file handling and deferred PNG refresh timer.
+- Added `core/roof_plan.py` containing only JSON-safe topology, visible-edge and label-anchor geometry helpers.
+- Added GPU antialiasing using Blender's `POLYLINE_UNIFORM_COLOR` built-in shader with `viewportSize` and `lineWidth` uniforms.
+- Replaced the largest-face label anchor with an area-weighted centroid across all faces assigned to the same source slope. Strongly concave regions fall back to a higher-resolution pole-of-inaccessibility search.
+- Added exact bounding-box-centre alignment to the N-panel preview slot. Preview size is clamped to the region's actual available width/height; below a minimum width it is hidden rather than spilling into the adjacent editor.
+- Vector colour is selected from the active UI theme brightness; facet labels use a contrasting text outline.
+- Added `initial_pitch` (default 30°, range 1–85°). `sync_slope_settings()` copies it to every edge only when a new source/contour is initialized. Changing it later does not overwrite already-authored individual pitches.
+- The main panel now shows initial pitch, thickness, overhang, corner convergence, Live Update and debounce controls before the first roof is created.
+- Background tests cover removal of raster settings, no raster module references, first-build initial pitch, continuous area-centroid anchors, centred bounding boxes, narrow-panel hiding and label geometry. Actual GPU anti-aliasing and pixel placement still require manual viewport QA.
+- Version bumped to `0.3.0`; PR #6 remains open and draft.
