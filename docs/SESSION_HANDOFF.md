@@ -141,3 +141,13 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Version: `0.2.4` in the manifest, `bl_info` and CI package artifact name.
 - New Blender background smoke checks the main category, absence of the standalone panel, vector geometry and top/scroll state helper.
 - Manual viewport QA remains required: position/alignment with raster off and on, Pitch control accessibility, N-panel scrolling, width/UI-scale changes, multiple View3D areas and handler cleanup. Background smoke does not validate pixel-perfect placement.
+
+
+## RoofForge 0.2.5 — transparent GPU preview cleanup
+
+- User-provided Blender screenshot showed the same-tab preview now works but has a dark opaque square behind the plan, a `RoofForge / GPU` watermark colliding with the geometry, and a redundant `Vector plan` heading overlapping the reserved canvas area.
+- Removed the opaque GPU quad entirely; the vector preview now draws only white edges and facet labels over the native Blender N-panel background.
+- Removed the in-canvas watermark and the redundant `Vector plan` UI heading. Kept the blank layout row as the reserved canvas slot to preserve placement.
+- Added a smoke assertion that the opaque-rectangle helper is absent.
+- Bumped add-on, manifest and workflow package version to `0.2.5`.
+- Manual QA still required for transparent rendering, alignment with the slot, readability across Blender themes, and panel resizing/scrolling. Background CI cannot verify rendered pixels.
