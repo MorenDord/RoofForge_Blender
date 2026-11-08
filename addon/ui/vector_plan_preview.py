@@ -23,11 +23,11 @@ _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
 # Preview slot follows the Create button and the Show preview toggle.
 # The style controls are below the canvas, so the anchor stays compact.
-_PANEL_TOP_RESERVED = 136
-_PANEL_BOTTOM_RESERVED = 8
-_PANEL_MAX_SIZE = 176
-_PANEL_MIN_SIZE = 88
-_CANVAS_MARGIN = 8
+_PANEL_TOP_RESERVED = 152
+_PANEL_BOTTOM_RESERVED = 10
+_PANEL_MAX_SIZE = 140
+_PANEL_MIN_SIZE = 76
+_CANVAS_MARGIN = 10
 
 
 def _prepare_geometry(plan_data):
