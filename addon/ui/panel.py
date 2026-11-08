@@ -1,6 +1,8 @@
 """RoofForge's compact workflow panel."""
 import bpy
 
+from .vector_plan_preview import preview_icon_scale
+
 
 class ROOFFORGE_PT_panel(bpy.types.Panel):
     bl_label = "RoofForge"
@@ -54,15 +56,18 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             preview = layout.column(align=True)
             preview.label(text="Roof plan")
             preview.prop(settings, "plan_show_vector", text="Show preview")
+
             if settings.plan_show_vector:
-                style = preview.column(align=True)
+                region_width = getattr(context.region, "width", 320)
+                icon_scale = preview_icon_scale(region_width)
+                if icon_scale is not None:
+                    # ICON_NONE reserves the old raster preview's square slot.
+                    # The GPU handler paints over it; no roof bitmap is generated.
+                    layout.template_icon(0, scale=icon_scale)
+
+                style = layout.column(align=True)
                 style.prop(settings, "plan_label_scale", text="Number size", slider=True)
                 style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
-
-                # The GPU overlay is centred in this dedicated 9-row blank slot.
-                preview_slot = layout.row()
-                preview_slot.scale_y = 9.0
-                preview_slot.label(text=" ")
 
         pitch_column = layout.column(align=True)
         for index, item in enumerate(settings.slope_settings, start=1):
