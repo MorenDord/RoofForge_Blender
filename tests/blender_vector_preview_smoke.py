@@ -16,8 +16,8 @@ extension.register()
 settings = bpy.context.scene.roof_forge
 assert hasattr(settings, "plan_show_raster")
 assert hasattr(settings, "plan_show_vector")
-assert hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
-assert bpy.types.ROOFFORGE_PT_vector_preview.bl_category == "Roof Plan"
+assert hasattr(bpy.types, "ROOFFORGE_PT_main")
+assert not hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
 assert settings.plan_show_raster is True
 assert settings.plan_show_vector is False
 
@@ -28,6 +28,19 @@ plan = {
     "planes": [[0.0, 0.0, 0.0], [1.0, -4.0 / 3.0, 0.0]],
 }
 module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_preview")
+assert module._PANEL_CATEGORY == "RoofForge"
+assert not module._is_panel_scrolled(
+    type("Region", (), {"view2d": type("View2D", (), {
+        "cur": type("Rect", (), {"ymax": 100.0})(),
+        "tot": type("Rect", (), {"ymax": 100.0})(),
+    })()})()
+)
+assert module._is_panel_scrolled(
+    type("Region", (), {"view2d": type("View2D", (), {
+        "cur": type("Rect", (), {"ymax": 75.0})(),
+        "tot": type("Rect", (), {"ymax": 100.0})(),
+    })()})()
+)
 prepared = module._prepare_geometry(plan)
 assert len(prepared["edges"]) == 5
 assert [label[0] for label in prepared["labels"]] == [1, 2]
