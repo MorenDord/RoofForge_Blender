@@ -27,7 +27,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         display = layout.column(align=True)
         display.label(text="Plan display")
         display.prop(settings, "plan_show_raster", text="Raster preview (PNG)")
-        display.prop(settings, "plan_show_vector", text="Vector preview (N-panel)")
+        display.prop(settings, "plan_show_vector", text="Vector preview")
 
         if settings.plan_show_raster:
             preview_icon = get_roof_plan_icon()
@@ -40,6 +40,12 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         style.enabled = settings.plan_show_raster or settings.plan_show_vector
         style.prop(settings, "plan_label_scale", text="Number size", slider=True)
         style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
+
+        if settings.plan_show_vector and settings.roof_plan_json:
+            layout.label(text="Vector plan", icon="SHADING_WIRE")
+            preview_slot = layout.row()
+            preview_slot.scale_y = 11.0
+            preview_slot.label(text=" ")
 
         pitch_column = layout.column(align=True)
         for index, item in enumerate(settings.slope_settings, start=1):
@@ -69,26 +75,3 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             slider=True,
         )
 
-
-class ROOFFORGE_PT_vector_preview(bpy.types.Panel):
-    """Dedicated N-panel canvas for the direct GPU roof-plan preview."""
-
-    bl_label = "Roof Plan"
-    bl_idname = "ROOFFORGE_PT_vector_preview"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Roof Plan"
-
-    def draw(self, context):
-        layout = self.layout
-        settings = context.scene.roof_forge
-        layout.label(text="Direct GPU vector preview", icon="SHADING_WIRE")
-        layout.prop(settings, "plan_show_vector", text="Show vector plan")
-        style = layout.column(align=True)
-        style.enabled = settings.plan_show_vector
-        style.prop(settings, "plan_label_scale", text="Number size", slider=True)
-        style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
-        if not settings.roof_plan_json:
-            layout.label(text="Create a roof to populate the plan", icon="INFO")
-        elif not settings.plan_show_vector:
-            layout.label(text="Enable the option above to display the plan")
