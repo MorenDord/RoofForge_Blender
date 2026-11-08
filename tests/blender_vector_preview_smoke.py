@@ -75,19 +75,22 @@ assert module.preview_icon_scale(72) is None
 layout = module._compute_canvas_layout(320, 900, (-2.0, 1.0, 8.0, 6.0))
 wider_layout = module._compute_canvas_layout(420, 900, (-2.0, 1.0, 8.0, 6.0))
 assert layout is not None and wider_layout is not None
-assert abs(layout["side"] - 296.0) < 1.0e-7
+assert abs(layout["slot_side"] - 296.0) < 1.0e-7
 assert abs(layout["icon_scale"] - (296.0 / 32.0)) < 1.0e-7
-assert abs(layout["margin"] - 296.0 * 0.075) < 1.0e-7
+assert abs(layout["margin"] - layout["draw_side"] * 0.075) < 1.0e-7
+assert abs(layout["slot_left"] - 6.0) < 1.0e-7
 center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
-assert abs(layout["target_center"][0] - 160.0) < 1.0e-7
+assert abs(layout["target_center"][0] - 154.0) < 1.0e-7
 assert abs(layout["target_center"][1] - (900.0 - 126.0 - 296.0 * 0.5)) < 1.0e-7
-assert wider_layout["side"] > layout["side"]
+assert layout["scissor"] == (6, 478, 296, 296)
+assert layout["draw_side"] == 280.0
+assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
-assert abs(wider_layout["target_center"][0] - 210.0) < 1.0e-7
-assert abs(wider_layout["target_center"][1] - (900.0 - 126.0 - wider_layout["side"] * 0.5)) < 1.0e-7
+assert abs(wider_layout["target_center"][0] - 204.0) < 1.0e-7
+assert abs(wider_layout["target_center"][1] - (900.0 - 126.0 - wider_layout["slot_side"] * 0.5)) < 1.0e-7
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
