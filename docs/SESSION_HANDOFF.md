@@ -4,10 +4,10 @@
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **PR:** [#6 — WIP RoofForge 0.2.1](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Installable build:** `roof_forge-0.2.1.zip`, artifact `roof_forge-0.2.1-blender-5.0.1` (artifact ID `13596766321`).  
-**Workflow:** [run 42429239529](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42429239529), all jobs passed.  
-**Inner ZIP SHA-256:** `93190e63a1598966439ae332f02bcaab96ff23798884653a55cd39c95b46e8a8`.  
-**Outer artifact digest:** `52bb867241cada09e1e1421b704f58b41b032e70e68a95fafecdac65511d9eee`.  
+**Installable build:** `roof_forge-0.2.1.zip`, artifact `roof_forge-0.2.1-blender-5.0.1` (artifact ID `13595999237`).  
+**Workflow:** [run 42429419184](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42429419184), all jobs passed on PR head `c01778aa1dd931f5761d8971ddf88f26dae759f3`.  
+**Inner ZIP SHA-256:** `e9cb79d17128318e2fd2fd81d151806f0dd86b1eca4054e0f062c4b5b7a980b6`.  
+**Outer artifact digest:** `53b851e926f21550db85dccebeaa05ab316b7b0f9e3dde26171e737122df3db6`.  
 **Important:** main and develop remain unchanged.
 
 ## User feedback addressed
