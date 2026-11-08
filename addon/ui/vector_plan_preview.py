@@ -24,7 +24,7 @@ _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
 # The preview is its own panel directly below the Create / Update panel.
 # Its blank template_icon slot reserves space in normal Blender UI flow.
-_PREVIEW_SLOT_TOP_OFFSET = 106.0
+_PREVIEW_SLOT_TOP_OFFSET = 126.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
 _PREVIEW_DRAW_INSET = 8.0
