@@ -208,3 +208,8 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - The drawing canvas has an 8 px inset inside the reserved slot and is clipped with `gpu.state.scissor_set` / `scissor_test_set`; antialiased lines and labels cannot paint outside the slot into Pitch controls or the adjacent editor.
 - Added smoke assertions for panel ordering, anchor ownership, content-centre alignment, width-responsive scaling and scissor clipping. CI still cannot certify exact visual alignment in an interactive Blender window; manual viewport QA remains necessary.
 - Version: 0.3.4. PR #6 remains open and draft; do not merge.
+
+
+### 0.3.4 layout refinement — nested panel instead of sibling panels
+
+The initial 0.3.4 draft split the UI into three sibling panels. This was superseded before packaging because a separate collapsible panel could leave a stale GPU draw-handler visible when collapsed. The final design keeps a single root `ROOFFORGE_PT_panel` and uses `UILayout.panel("roof_forge_plan_preview", ...)` for a collapsible Roof Plan subsection. The draw-handler visibility is tracked per UI region through `set_preview_slot_visible`; it draws only when the nested section body is present, Show preview is enabled, and the panel is not scrolled away. The reserved `template_icon(0)` square remains in normal layout flow before Pitch rows. The canvas is clipped to the square and compensated for the sidebar scrollbar gutter. The nested heading replaces the prior heading + toggle rows, so the vertical anchor top offset is 106 logical px. Smoke tests verify visibility state, panel structure, clipping, bounding-box centring and width-dependent scaling. Manual Blender UI QA remains required.
