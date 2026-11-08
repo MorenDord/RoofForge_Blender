@@ -224,10 +224,145 @@ def offset_contour_outward(
 
 
 
+def corner_converged_overhang_contour(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    distance: float,
+    eps: float = 1e-9,
+) -> tuple[Point3, ...]:
+    """Build one outer corner per source vertex where neighbouring pitches meet.
+
+    Each miter-offset corner is projected to the XY line where its two adjacent
+    source-edge roof planes have equal height. This keeps the outer boundary
+    vertex on both slope planes, so adjacent roof facets converge at one 3D
+    point. The requested distance is a target, not a hard constraint: the
+    resulting eave extension may vary around the perimeter.
+    """
+    if len(points) < 3 or len(points) != len(pitches_degrees):
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Нужно минимум три вершины и по одному уклону на каждое ребро."
+        )
+    distance = float(distance)
+    if not isfinite(distance) or distance <= 0.0:
+        raise GeometryInputError(
+            "INVALID_OVERHANG",
+            "Для построения свеса нужно положительное конечное расстояние."
+        )
+    source = tuple(
+        tuple(float(value) for value in point) for point in points
+    )
+    if not _is_convex_xy(source):
+        raise GeometryInputError(
+            "OVERHANG_CONCAVE_UNSUPPORTED",
+            "Схождение углов свеса пока поддерживается только для выпуклого контура."
+        )
+
+    reference = offset_contour_outward(source, distance, eps)
+    planes = build_boundary_planes(source, pitches_degrees, eps)
+    winding = 1.0 if signed_area([(p[0], p[1]) for p in source]) > 0.0 else -1.0
+    scale = max(
+        1.0,
+        max(p[0] for p in source) - min(p[0] for p in source),
+        max(p[1] for p in source) - min(p[1] for p in source),
+        distance,
+    )
+    linear_tolerance = max(1e-10, eps * scale * 100.0)
+    result: list[Point3] = []
+
+    for index, target in enumerate(reference):
+        previous = planes[index - 1]
+        current = planes[index]
+        a = previous.a - current.a
+        b = previous.b - current.b
+        c = previous.c - current.c
+        norm_sq = a * a + b * b
+
+        x, y = target[0], target[1]
+        if norm_sq <= eps * eps:
+            if abs(c) > linear_tolerance:
+                raise GeometryInputError(
+                    "OVERHANG_CORNER_PARALLEL_PLANES",
+                    f"Скаты по сторонам угла {index + 1} параллельны и не пересекаются; "
+                    "нельзя свести их в одну вершину. Отключи схождение углов "
+                    "или измени один из уклонов.",
+                )
+        else:
+            residual = a * x + b * y + c
+            x -= residual * a / norm_sq
+            y -= residual * b / norm_sq
+
+        z_previous = previous.height(x, y)
+        z_current = current.height(x, y)
+        if abs(z_previous - z_current) > linear_tolerance:
+            raise GeometryInputError(
+                "OVERHANG_CORNER_INTERSECTION",
+                f"Не удалось свести соседние скаты в вершине {index + 1}.",
+            )
+        z = 0.5 * (z_previous + z_current)
+
+        # The projected corner must remain outside both adjacent source edges.
+        for edge_index in ((index - 1) % len(source), index):
+            start = source[edge_index]
+            end = source[(edge_index + 1) % len(source)]
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            edge_length = hypot(dx, dy)
+            inward = winding * (
+                -dy * x + dx * y + dy * start[0] - dx * start[1]
+            ) / edge_length
+            if inward >= -linear_tolerance:
+                raise GeometryInputError(
+                    "OVERHANG_CORNER_NOT_OUTSIDE",
+                    f"Схождение скатов у вершины {index + 1} уводит край свеса "
+                    "внутрь исходного контура. Уменьши свес или отключи схождение углов.",
+                )
+
+        extension = hypot(x - source[index][0], y - source[index][1])
+        if extension > max(distance * 50.0, distance + linear_tolerance * 10.0):
+            raise GeometryInputError(
+                "OVERHANG_CORNER_TOO_FAR",
+                f"Схождение скатов у вершины {index + 1} требует слишком большого выноса.",
+            )
+        result.append((x, y, z))
+
+    result_xy = [(point[0], point[1]) for point in result]
+    issues = validate_simple_polygon(result_xy, eps)
+    if issues:
+        raise GeometryInputError(
+            "OVERHANG_CORNER_CONTOUR_INVALID",
+            "Контур углового свеса самопересекается или схлопнулся: "
+            + issues[0].message,
+        )
+    if signed_area(result_xy) * winding <= 0.0:
+        raise GeometryInputError(
+            "OVERHANG_CORNER_WINDING",
+            "Контур углового свеса изменил ориентацию.",
+        )
+    source_area = abs(signed_area([(p[0], p[1]) for p in source]))
+    if abs(signed_area(result_xy)) <= source_area + linear_tolerance * linear_tolerance:
+        raise GeometryInputError(
+            "OVERHANG_CORNER_NO_EXTENSION",
+            "Схождение скатов не создало внешний свес.",
+        )
+
+    # Every outer edge is required to lie on its corresponding source plane.
+    for index, plane in enumerate(planes):
+        for point_index in (index, (index + 1) % len(result)):
+            point = result[point_index]
+            if abs(point[2] - plane.height(point[0], point[1])) > linear_tolerance:
+                raise GeometryInputError(
+                    "OVERHANG_CORNER_EDGE_MISMATCH",
+                    f"Внешнее ребро {index + 1} не лежит на плоскости своего ската.",
+                )
+    return tuple(result)
+
+
 def build_source_anchored_overhang_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
     distance: float,
+    *,
+    corner_convergence: bool = True,
 ):
     """Extend a roof beyond the original eaves without moving support lines.
 
@@ -256,8 +391,12 @@ def build_source_anchored_overhang_surface(
             "только для выпуклого контура. Для вогнутой крыши отключи свес; "
             "обычная генерация контура остаётся доступна.",
         )
-    expanded = offset_contour_outward(source, distance)
     planes = build_boundary_planes(source, pitches_degrees)
+    expanded = (
+        corner_converged_overhang_contour(source, pitches_degrees, distance)
+        if corner_convergence
+        else offset_contour_outward(source, distance)
+    )
     conflicts = boundary_envelope_conflicts(
         source, planes, active_contour=source
     )
@@ -275,6 +414,7 @@ def build_source_anchored_overhang_surface(
 
 __all__ = [
     "offset_contour_outward",
+    "corner_converged_overhang_contour",
     "build_source_anchored_overhang_surface",
 ]
 
