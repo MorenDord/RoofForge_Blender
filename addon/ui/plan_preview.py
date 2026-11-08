@@ -136,7 +136,9 @@ def schedule_roof_plan_refresh(
     """Refresh the image once settings have been quiet; old image remains visible."""
     global _PENDING_JSON, _PENDING_TEXT_SCALE, _PENDING_LINE_WIDTH
     try:
-        plan_json = str(settings.roof_plan_json or "")
+        from .vector_plan_preview import tag_vector_preview_redraw
+        tag_vector_preview_redraw()
+       plan_json = str(settings.roof_plan_json or "")
         if not plan_json:
             return False
         plan_data = json.loads(plan_json)
