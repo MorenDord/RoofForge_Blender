@@ -39,12 +39,12 @@ def split_rectangle(split_x):
 class RoofPlanGeometryTests(unittest.TestCase):
     def test_ridge_is_visible_between_different_planes(self):
         self.assertEqual(
-            len(visible_roof_edges(square_plan((1.0, -4.0 / 3.0, 0.0))),
+            len(visible_roof_edges(square_plan((1.0, -4.0 / 3.0, 0.0)))),
             5,
         )
 
     def test_coplanar_internal_edge_is_hidden(self):
-        self.assertEqual(len(visible_roof_edges(square_plan()), 4)
+        self.assertEqual(len(visible_roof_edges(square_plan())), 4)
 
     def test_polygon_area_centroid_is_exact_for_rectangle(self):
         area, center = polygon_area_centroid(
