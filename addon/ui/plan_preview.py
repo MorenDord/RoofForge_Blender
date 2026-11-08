@@ -138,6 +138,10 @@ def schedule_roof_plan_refresh(
     try:
         from .vector_plan_preview import tag_vector_preview_redraw
         tag_vector_preview_redraw()
+        if not bool(getattr(settings, "plan_show_raster", True)):
+            _cancel_preview_timer()
+            _PENDING_JSON = None
+            return False
         plan_json = str(settings.roof_plan_json or "")
         if not plan_json:
             return False
