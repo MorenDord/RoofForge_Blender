@@ -16,6 +16,8 @@ extension.register()
 settings = bpy.context.scene.roof_forge
 assert hasattr(settings, "plan_show_raster")
 assert hasattr(settings, "plan_show_vector")
+assert hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
+assert bpy.types.ROOFFORGE_PT_vector_preview.bl_category == "Roof Plan"
 assert settings.plan_show_raster is True
 assert settings.plan_show_vector is False
 
@@ -35,6 +37,7 @@ settings.roof_plan_json = json.dumps(plan)
 settings.plan_show_raster = False
 settings.plan_show_vector = True
 assert module._DRAW_HANDLE is not None
+assert module._DRAW_REGION_TYPE == "UI"
 settings.plan_show_raster = True
 settings.plan_show_vector = True
 settings.plan_show_raster = False
