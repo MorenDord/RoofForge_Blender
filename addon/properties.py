@@ -91,6 +91,12 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         default=True,
         update=_preview_changed,
     )
+    plan_debug_bounds: bpy.props.BoolProperty(
+        name="Debug UI Bounds",
+        description="Overlay Region, View2D, estimated preview-slot and GPU viewport bounds",
+        default=False,
+        update=_preview_changed,
+    )
     plan_label_scale: bpy.props.FloatProperty(
         name="Plan Label Size",
         description="Adjust the size of facet numbers in the vector roof plan",
