@@ -6,7 +6,7 @@ from .operators import (
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_OT_prepare_slopes,
 )
-from .ui.panel import ROOFFORGE_PT_panel, ROOFFORGE_PT_vector_preview
+from .ui.panel import ROOFFORGE_PT_panel
 from .live_update import cancel_pending_live_update
 from .roof_build import clear_surface_cache
 from .ui.plan_preview import clear_contour_plan_preview
@@ -18,7 +18,6 @@ _CLASSES = (
     ROOFFORGE_OT_prepare_slopes,
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_PT_panel,
-    ROOFFORGE_PT_vector_preview,
 )
 
 
