@@ -13,8 +13,10 @@ from ...core.plan_preview import _label_center, _normalise_plan, _visible_edges
 _DRAW_HANDLE = None
 _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
-_PANEL_PADDING = 14
-_PANEL_SIZE = 236
+_PANEL_CATEGORY = "Roof Plan"
+_PANEL_TOP_RESERVED = 112
+_PANEL_BOTTOM_RESERVED = 28
+_PANEL_MAX_SIZE = 340
 
 
 def _prepare_geometry(plan_data):
@@ -76,7 +78,9 @@ def _draw_vector_preview():
         context = bpy.context
         region = context.region
         scene = context.scene
-        if region is None or region.type != "WINDOW" or scene is None:
+        if region is None or region.type != "UI" or scene is None:
+            return
+        if getattr(region, "active_panel_category", "") != _PANEL_CATEGORY:
             return
         settings = getattr(scene, "roof_forge", None)
         if settings is None or not settings.plan_show_vector or not settings.roof_plan_json:
@@ -84,11 +88,21 @@ def _draw_vector_preview():
         geometry = _cached_geometry(settings.roof_plan_json)
         min_x, min_y, max_x, max_y = geometry["bounds"]
         span_x, span_y = max_x - min_x, max_y - min_y
-        available = min(_PANEL_SIZE, max(120, region.width - 36), max(120, region.height - 36))
-        inner = available - 2 * _PANEL_PADDING
+        # Keep the canvas below the native panel controls and centered in the
+        # remaining UI region. The dedicated category avoids drawing over the
+        # normal RoofForge controls.
+        available = min(
+            _PANEL_MAX_SIZE,
+            max(96, region.width - 28),
+            max(96, region.height - _PANEL_TOP_RESERVED - _PANEL_BOTTOM_RESERVED),
+        )
+        padding = 12
+        inner = max(1, available - 2 * padding)
         scale = inner / max(span_x, span_y, 1.0e-9)
-        origin_x = 18 + (inner - span_x * scale) * 0.5
-        origin_y = 32 + (inner - span_y * scale) * 0.5
+        origin_x = (region.width - available) * 0.5 + padding + (inner - span_x * scale) * 0.5
+        canvas_bottom = _PANEL_BOTTOM_RESERVED
+        canvas_top = max(canvas_bottom, region.height - _PANEL_TOP_RESERVED)
+        origin_y = canvas_bottom + max(0.0, (canvas_top - canvas_bottom - available) * 0.5) + padding + (inner - span_y * scale) * 0.5
 
         def screen(point):
             return (
@@ -106,7 +120,7 @@ def _draw_vector_preview():
         gpu.state.blend_set("ALPHA")
         gpu.state.depth_test_set("NONE")
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-        _draw_rect(shader, 12, 12, available + 12, available + 34, (0.025, 0.03, 0.04, 0.78))
+        _draw_rect(shader, (region.width - available) * 0.5, origin_y - padding, available, available, (0.025, 0.03, 0.04, 0.78))
         if line_positions:
             batch = batch_for_shader(shader, "LINES", {"pos": line_positions})
             shader.bind()
@@ -125,9 +139,9 @@ def _draw_vector_preview():
             blf.draw(font_id, text)
 
         blf.size(font_id, 10)
-        blf.position(font_id, 22, available + 22, 0)
+        blf.position(font_id, (region.width - available) * 0.5 + 8, origin_y - padding + 7, 0)
         blf.color(font_id, 0.72, 0.78, 0.86, 0.95)
-        blf.draw(font_id, "RoofForge / Vector")
+        blf.draw(font_id, "RoofForge / GPU")
         gpu.state.line_width_set(1.0)
         gpu.state.depth_test_set("LESS_EQUAL")
         gpu.state.blend_set("NONE")
@@ -148,7 +162,9 @@ def tag_vector_preview_redraw():
                 continue
             for area in screen.areas:
                 if area.type == "VIEW_3D":
-                    area.tag_redraw()
+                    for region in area.regions:
+                        if region.type == "UI":
+                            region.tag_redraw()
     except (AttributeError, ReferenceError, RuntimeError):
         pass
 
@@ -158,7 +174,7 @@ def register_vector_preview():
     if _DRAW_HANDLE is None:
         try:
             _DRAW_HANDLE = bpy.types.SpaceView3D.draw_handler_add(
-                _draw_vector_preview, (), "WINDOW", "POST_PIXEL"
+                _draw_vector_preview, (), "UI", "POST_PIXEL"
             )
         except (AttributeError, RuntimeError, TypeError):
             _DRAW_HANDLE = None
@@ -169,7 +185,7 @@ def unregister_vector_preview():
     global _DRAW_HANDLE, _CACHE_SIGNATURE, _CACHE_GEOMETRY
     if _DRAW_HANDLE is not None:
         try:
-            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, "WINDOW")
+            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, "UI")
         except (ReferenceError, RuntimeError, ValueError):
             pass
     _DRAW_HANDLE = None
