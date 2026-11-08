@@ -31,8 +31,9 @@ def _plan_display_changed(self, context):
     if context is None or context.scene is None:
         return
     settings = context.scene.roof_forge
-    from .ui.plan_preview import schedule_roof_plan_refresh
-    schedule_roof_plan_refresh(settings)
+    if settings.plan_show_raster:
+        from .ui.plan_preview import schedule_roof_plan_refresh
+        schedule_roof_plan_refresh(settings)
     from .ui.vector_plan_preview import tag_vector_preview_redraw
     tag_vector_preview_redraw()
 
@@ -98,7 +99,7 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         update=_plan_display_changed,
     )
     plan_show_vector: bpy.props.BoolProperty(
-        name="Vector overlay",
+        name="Vector preview (N-panel)",
         description="Draw the roof plan directly in the Roof Plan N-panel tab using GPU lines and text",
         default=False,
         update=_plan_display_changed,
