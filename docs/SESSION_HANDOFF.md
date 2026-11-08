@@ -129,3 +129,15 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Inner extension ZIP SHA-256 (matches included sidecar and independently computed): `b9ba992847a5d6fb9c50484ffa7ca09fa346484103937df9b99d524cbb718e97`.
 - Exact package downloaded and inspected: manifest `0.2.3`, 30 files, includes the `UI`-region draw handler, Roof Plan tab and current Russian test instructions.
 - Manual visual QA is not covered by background CI and remains required.
+
+
+## RoofForge 0.2.4 — vector preview integrated into the main N-panel tab
+
+- User tested 0.2.3 and confirmed the GPU drawing worked, but the separate **Roof Plan** tab prevented simultaneous viewing and use of the **RoofForge** controls.
+- Removed the standalone `ROOFFORGE_PT_vector_preview` panel and moved the drawing target to the existing `RoofForge` category.
+- The main panel now reserves a blank UI-layout row for the GPU canvas between Plan display controls and the per-edge Pitch list.
+- The draw handler checks the active category and hides its pinned canvas when the UI region's View2D is scrolled away from the top, avoiding overlap with lower controls.
+- When Raster and Vector are both enabled, the top offset accounts for the displayed PNG icon so the GPU canvas is positioned below it.
+- Version: `0.2.4` in the manifest, `bl_info` and CI package artifact name.
+- New Blender background smoke checks the main category, absence of the standalone panel, vector geometry and top/scroll state helper.
+- Manual viewport QA remains required: position/alignment with raster off and on, Pitch control accessibility, N-panel scrolling, width/UI-scale changes, multiple View3D areas and handler cleanup. Background smoke does not validate pixel-perfect placement.
