@@ -44,7 +44,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         if settings.plan_show_vector and settings.roof_plan_json:
             layout.label(text="Vector plan", icon="SHADING_WIRE")
             preview_slot = layout.row()
-            preview_slot.scale_y = 11.0
+            preview_slot.scale_y = 10.0
             preview_slot.label(text=" ")
 
         pitch_column = layout.column(align=True)
