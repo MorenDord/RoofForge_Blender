@@ -1,4 +1,4 @@
-# RoofForge 0.2.1 — Session Handoff
+# RoofForge 0.3.5 — Session Handoff
 
 **Updated:** 2026-11-08  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
@@ -213,3 +213,13 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 ### 0.3.4 layout refinement — nested panel instead of sibling panels
 
 The initial 0.3.4 draft split the UI into three sibling panels. This was superseded before packaging because a separate collapsible panel could leave a stale GPU draw-handler visible when collapsed. The final design keeps a single root `ROOFFORGE_PT_panel` and uses `UILayout.panel("roof_forge_plan_preview", ...)` for a collapsible Roof Plan subsection. The draw-handler visibility is tracked per UI region through `set_preview_slot_visible`; it draws only when the nested section body is present, Show preview is enabled, and the panel is not scrolled away. The reserved `template_icon(0)` square remains in normal layout flow before Pitch rows. The canvas is clipped to the square and compensated for the sidebar scrollbar gutter. The nested heading and its Show preview body row retain the two-row layout, so the vertical anchor top offset remains 126 logical px. Smoke tests verify visibility state, panel structure, clipping, bounding-box centring and width-dependent scaling. Manual Blender UI QA remains required.
+
+
+## RoofForge 0.3.5 — UI bounds diagnostics
+
+- Added an opt-in **Debug UI bounds** overlay to the nested Roof Plan section.
+- The overlay draws the full UI Region, the visible View2D rectangle derived through `View2D.view_to_region(..., clip=False)`, the current estimated template-icon slot and the GPU viewport mapped through `Region.x/y`. Text labels expose their pixel dimensions and origins.
+- Corrected scissor coordinates: the template slot is calculated in region-local POST_PIXEL coordinates, while `gpu.state.scissor_set` operates in active-framebuffer pixel coordinates. The scissor rectangle is now translated by the active `gpu.state.viewport_get()` origin.
+- Added smoke coverage for View2D bounds conversion and framebuffer scissor translation.
+- Version: 0.3.5. The debug overlay is off by default. It is a measurement aid, not proof of final panel-item alignment.
+- Request a screenshot with the full RoofForge sidebar and Debug UI bounds enabled before replacing the remaining estimated template-icon slot position.
