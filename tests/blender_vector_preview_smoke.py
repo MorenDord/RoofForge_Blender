@@ -38,6 +38,9 @@ settings.plan_show_raster = False
 settings.plan_show_vector = True
 assert module._DRAW_HANDLE is not None
 assert module._DRAW_REGION_TYPE == "UI"
+plan_preview = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
+assert plan_preview.schedule_roof_plan_refresh(settings) is False
+assert plan_preview._PENDING_JSON is None
 settings.plan_show_raster = True
 settings.plan_show_vector = True
 settings.plan_show_raster = False
