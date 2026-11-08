@@ -26,6 +26,8 @@ module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_pre
 assert module._PANEL_CATEGORY == "RoofForge"
 assert module._DRAW_REGION_TYPE == "UI"
 assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
+assert module._PANEL_TOP_RESERVED == 152
+assert module._PANEL_MAX_SIZE == 140
 
 plan = {
     "vertices": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0], [0.0, 3.0, 0.0]],
@@ -66,7 +68,8 @@ center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
-assert layout["side"] <= 300.0
+assert layout["side"] <= module._PANEL_MAX_SIZE
+assert layout["target_center"][1] < 900.0 - module._PANEL_TOP_RESERVED
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
