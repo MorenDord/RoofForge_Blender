@@ -11,7 +11,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 3)
+assert extension.bl_info["version"] == (0, 3, 4)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -19,6 +19,8 @@ assert not hasattr(settings, "plan_show_raster")
 assert hasattr(settings, "plan_show_vector")
 assert hasattr(settings, "initial_pitch")
 assert hasattr(bpy.types, "ROOFFORGE_PT_main")
+assert hasattr(bpy.types, "ROOFFORGE_PT_plan_preview")
+assert hasattr(bpy.types, "ROOFFORGE_PT_settings")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
 assert settings.plan_show_vector is True
 assert abs(settings.initial_pitch - 30.0) < 1.0e-7
@@ -28,8 +30,14 @@ assert module._PANEL_CATEGORY == "RoofForge"
 assert module._DRAW_REGION_TYPE == "UI"
 assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
 assert module._PREVIEW_SLOT_TOP_OFFSET == 126.0
+assert "scissor_set" in module._draw_vector_preview.__code__.co_names
+assert "scissor_test_set" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
-assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "template_icon" in panel_module.ROOFFORGE_PT_plan_preview.draw.__code__.co_names
+assert "template_icon" not in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert panel_module.ROOFFORGE_PT_panel.bl_order < panel_module.ROOFFORGE_PT_plan_preview.bl_order
+assert panel_module.ROOFFORGE_PT_plan_preview.bl_order < panel_module.ROOFFORGE_PT_settings.bl_order
+assert "initial_pitch" in panel_module.ROOFFORGE_PT_settings.draw.__code__.co_names
 
 plan = {
     "vertices": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0], [0.0, 3.0, 0.0]],
