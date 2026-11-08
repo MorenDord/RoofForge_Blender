@@ -241,10 +241,13 @@ def main() -> None:
     panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
     panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
     ensure(
-        "get_roof_plan_icon" in panel_code.co_names
-        and "template_icon" in panel_code.co_names
-        and "render_roof_plan_png" not in panel_code.co_names,
-        "RoofForge panel must draw the cached facet plan without rendering it",
+        "get_roof_plan_icon" not in panel_code.co_names
+        and "plan_show_raster" not in panel_code.co_consts,
+        "Raster preview must be completely removed from the RoofForge panel",
+    )
+    ensure(
+        "initial_pitch" in panel_code.co_consts,
+        "pre-create initial pitch control is missing from the main panel",
     )
     ensure(
         "prepare_slopes" not in panel_code.co_names,
@@ -265,6 +268,14 @@ def main() -> None:
     ensure(
         hasattr(bpy.context.scene.roof_forge, "plan_line_width"),
         "plan line-thickness control was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "initial_pitch"),
+        "initial pitch control was not registered",
+    )
+    ensure(
+        not hasattr(bpy.context.scene.roof_forge, "plan_show_raster"),
+        "Raster preview settings must not be registered",
     )
     ensure(
         hasattr(bpy.context.scene.roof_forge, "roof_plan_json"),
@@ -290,6 +301,7 @@ def main() -> None:
     clear_scene()
     plan_source = create_square_object("RoofForge_Smoke_Numbered_Plan")
     plan_settings = bpy.context.scene.roof_forge
+    plan_settings.initial_pitch = 37.5
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
         "first-click roof generation without Load / Refresh Slope Angles failed",
@@ -298,6 +310,11 @@ def main() -> None:
         len(plan_settings.slope_settings) == 4,
         "Generate did not initialise per-edge pitch settings automatically",
     )
+    ensure(
+        all(abs(item.pitch - 37.5) < 1e-7 for item in plan_settings.slope_settings),
+        "first-click generation did not use the configurable initial pitch",
+    )
+    plan_settings.initial_pitch = 30.0
     ensure(
         len(json.loads(plan_settings.outline_preview_json)) == 4,
         "Generate did not store the source contour for the roof plan",
@@ -308,47 +325,19 @@ def main() -> None:
         len(plan_data.get("faces", ())) > 0 and len(plan_data.get("planes", ())) == 4,
         "generated facet plan did not preserve the actual roof topology",
     )
-    plan_core = importlib.import_module(f"{extension.__name__}.core.plan_preview")
-    plan_png = plan_core.render_roof_plan_png(plan_data, text_scale=1.0)
-    ensure(
-        plan_png.startswith(b"\x89PNG\r\n\x1a\n"),
-        "transparent roof plan renderer did not return a valid PNG",
-    )
+    plan_core = importlib.import_module(f"{extension.__name__}.core.roof_plan")
     ensure(
         len(plan_core.visible_roof_edges(plan_data)) > 4,
         "facet plan is missing the roof's internal ridge lines",
     )
-    plan_ui = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
-    plan_settings.plan_show_raster = True
-    plan_icon = plan_ui.refresh_roof_plan_icon(
-        plan_data,
-        text_scale=plan_settings.plan_label_scale,
-        line_width=plan_settings.plan_line_width,
-    )
-    ensure(plan_icon > 0, "Blender preview icon was not created for the roof plan")
-    original_signature = plan_ui._PREVIEW_SIGNATURE
-    plan_settings.plan_label_scale = 1.5
-    plan_settings.plan_line_width = 3.0
-    plan_ui.cancel_pending_roof_plan_refresh()
+    vertices, faces, slopes, _planes = plan_core.normalise_roof_plan(plan_data)
     ensure(
-        plan_ui.schedule_roof_plan_refresh(plan_settings, delay=60.0),
-        "plan refresh did not schedule a deferred preview update",
+        len(plan_core.slope_region_centers(vertices, faces, slopes)) == 4,
+        "vector preview did not compute one stable label anchor per slope",
     )
-    ensure(
-        plan_ui.get_roof_plan_icon() == plan_icon
-        and plan_ui._PREVIEW_SIGNATURE == original_signature,
-        "plan image changed before the deferred refresh timer",
-    )
-    plan_ui.cancel_pending_roof_plan_refresh()
-    resized_icon = plan_ui.refresh_roof_plan_icon(
-        plan_data,
-        text_scale=plan_settings.plan_label_scale,
-        line_width=plan_settings.plan_line_width,
-    )
-    ensure(resized_icon > 0, "plan number/line setting did not refresh the cached preview")
     ensure(
         all(abs(float(plan_points[i][2])) < 1e-9 for i in range(4)),
-        "plan preview changed source contour coordinates",
+        "roof plan changed source contour coordinates",
     )
 
     # 64 is the enforced alpha limit, not merely a benchmark target.
