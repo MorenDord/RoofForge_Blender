@@ -3,7 +3,7 @@
 **Working branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **Base:** validated user-facing 0.1.0 alpha  
 **Target:** Blender 5.0+  
-**Status:** 0.2.0-alpha.11 implementation in progress; geometry/UI regression suite and package CI pending
+**Status:** Scope baseline 0.2.0; incremental follow-up 0.2.1 implemented and CI-validated on 2026-11-08.
 
 ## User-confirmed priorities
 
@@ -11,9 +11,28 @@
 2. Do not require selecting vertices or edges in Edit Mode. Selecting the mesh object is enough; RoofForge discovers one outer boundary from the mesh topology. A face mesh uses its boundary edges; a wire-only mesh uses its closed wire loop.
 3. Give every boundary edge/slope its own pitch angle. Use a compact list of numeric fields plus a numbered top-view roof-facet plan; each number is centered inside its generated slope and maps to the same ordered Pitch row.
 4. Pitch edits trigger a debounced live rebuild. Keep the last valid roof visible until the replacement is built and validated. Coalesce rapid changes; never regenerate inside a UI draw callback.
-5. Provide an optional eave overhang in centimeters by extending the source-edge pitch planes over one outward-offset domain. Keep the underside/support surface exactly on the original 3D contour; add shell thickness above that support surface. Reject collapsed or self-intersecting offsets.
+5. Provide an optional eave overhang in centimeters by extending source-edge pitch planes over one outer contour point per source vertex. Keep the underside/support surface on the original 3D contour; add shell thickness above it. Default corner convergence places each outer corner on the equality line of its two adjacent pitch planes, so neighbouring slopes meet at one point. Keep the previous equal-distance miter offset as an explicit alternative. Reject collapsed/self-intersecting results.
 
 Everything else in the 1.0 roadmap is deferred: ridge/valley/hip profiles, standing seams, UV, LOD, export, complex material handling and detach/relink.
+
+
+## Incremental follow-up 0.2.1
+
+This patch keeps the 0.2.0 solver scope and changes the user-facing iteration number to `x.y.z`:
+- routine fixes and alpha iterations increment `z` (`0.2.1`, `0.2.2`, ...);
+- a broader feature milestone increments `y` (`0.3.0`);
+- a major release increments `x` (`1.0.0`).
+
+Current 0.2.1 acceptance:
+- [x] Generate is the first and primary UI action. It reads the active contour and creates/reconciles Pitch fields automatically; no separate Load / Refresh action is exposed in the panel.
+- [x] After deleting the generated roof, Create / Update can recover the stored source and recreate the output. After editing the source contour in Edit Mode, return to Object Mode and invoke Create / Update to rebuild from the current boundary.
+- [x] The facet image is not rendered in `Panel.draw`. The panel displays the last cached PNG; successful generation/live updates and plan-style changes schedule a single refresh after a quiet interval (0.75 s). During pitch/geometry changes the previous image remains displayed.
+- [x] Number size and line thickness retain separate controls. The preview is rendered at 384 px instead of 512 px to reduce the cost of the deferred refresh.
+- [x] Convex overhang has two selectable corner behaviours. Default **Converge corners** projects each outer corner to the equality line of adjacent source-edge planes; each outer boundary edge then lies on its source slope plane. The requested overhang is a target distance, not a strict constant distance along every side. Turning the option off restores the uniform miter offset.
+- [x] The outer boundary keeps one point per source contour vertex in both overhang modes; impossible/invalid corner solutions are rejected rather than extended differently on adjacent slopes.
+- [x] Concave L/U roofs remain supported without overhang. Positive overhang on concave contours is rejected safely until reflex-corner transitions are implemented.
+- [x] Smoke covers first-click generation, deleted-roof recovery, source Edit Mode modification followed by regeneration, cached-preview timer behaviour, corner convergence, old offset fallback, manifold shell and official Blender 5.0.1 validation.
+
 
 ## Geometry contract
 
