@@ -138,7 +138,7 @@ def schedule_roof_plan_refresh(
     try:
         from .vector_plan_preview import tag_vector_preview_redraw
         tag_vector_preview_redraw()
-       plan_json = str(settings.roof_plan_json or "")
+        plan_json = str(settings.roof_plan_json or "")
         if not plan_json:
             return False
         plan_data = json.loads(plan_json)
