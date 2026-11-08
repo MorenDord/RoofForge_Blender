@@ -45,7 +45,8 @@ jobs:
           tar -xf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/blender-5.0.1-linux-x64" >> "$GITHUB_PATH"
       - name: Run Blender background smoke tests
-        run: blender --background --factory-startup --python tests/blender_smoke.py
+        run: |
+          blender --background --factory-startup --python tests/blender_smoke.py
           blender --background --factory-startup --python tests/blender_vector_preview_smoke.py
       - name: Build clean Blender Extension ZIP
         run: python3 tools/build_extension.py --output-dir dist
