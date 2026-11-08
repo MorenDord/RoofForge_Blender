@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.4.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.5.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
