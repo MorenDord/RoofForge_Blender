@@ -319,6 +319,7 @@ def main() -> None:
         "facet plan is missing the roof's internal ridge lines",
     )
     plan_ui = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
+    plan_settings.plan_show_raster = True
     plan_icon = plan_ui.refresh_roof_plan_icon(
         plan_data,
         text_scale=plan_settings.plan_label_scale,
