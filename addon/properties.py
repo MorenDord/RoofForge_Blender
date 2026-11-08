@@ -16,6 +16,13 @@ def _settings_changed(self, context):
     schedule_live_update(context.scene)
 
 
+def _plan_style_changed(self, context):
+    if context is None or context.scene is None:
+        return
+    from .ui.plan_preview import schedule_roof_plan_refresh
+    schedule_roof_plan_refresh(context.scene.roof_forge)
+
+
 class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
     edge_index: bpy.props.IntProperty(name="Edge Index", default=0, min=0)
     start_vertex_index: bpy.props.IntProperty(name="Start Vertex", default=0, min=0)
@@ -50,6 +57,12 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         precision=2,
         update=_settings_changed,
     )
+    overhang_corner_convergence: bpy.props.BoolProperty(
+        name="Converge Corners",
+        description="Make neighbouring roof slopes meet at one point on each eave corner",
+        default=True,
+        update=_settings_changed,
+    )
     live_update_delay_ms: bpy.props.IntProperty(
         name="Update Delay",
         description="Debounce before a live rebuild; 0 runs on the next Blender timer tick",
@@ -71,6 +84,7 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         min=0.6,
         max=1.8,
         precision=1,
+        update=_plan_style_changed,
     )
     plan_line_width: bpy.props.FloatProperty(
         name="Line Thickness",
@@ -79,6 +93,7 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         min=0.5,
         max=6.0,
         precision=1,
+        update=_plan_style_changed,
     )
     source_object: bpy.props.PointerProperty(type=bpy.types.Object)
     generated_object: bpy.props.PointerProperty(type=bpy.types.Object)
