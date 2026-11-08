@@ -62,8 +62,8 @@ assert abs(center_a[1] - center_b[1]) < 1.0e-7
 assert module._compute_canvas_layout(72, 900, (0.0, 0.0, 4.0, 3.0)) is None
 layout = module._compute_canvas_layout(320, 900, (-2.0, 1.0, 8.0, 6.0))
 assert layout is not None
-center_x = layout["origin_x"] + 3.0 * layout["scale"]
-center_y = layout["origin_y"] + 3.5 * layout["scale"]
+center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
+center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
 assert layout["side"] <= 300.0
