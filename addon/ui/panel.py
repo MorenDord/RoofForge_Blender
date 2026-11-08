@@ -71,6 +71,10 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                         # ICON_NONE reserves the square; GPU paints only inside it.
                         body.template_icon(0, scale=icon_scale)
 
+                    debug_row = body.row()
+                    debug_row.enabled = icon_scale is not None
+                    debug_row.prop(settings, "plan_debug_bounds", text="Debug UI bounds")
+
                     style = body.column(align=True)
                     style.prop(settings, "plan_label_scale", text="Number size", slider=True)
                     style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
