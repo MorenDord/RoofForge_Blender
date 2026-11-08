@@ -19,6 +19,7 @@ _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
 _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
+_LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
 # The controls above the placeholder row occupy this part of the N-panel.
 _PANEL_TOP_RESERVED = 188
@@ -185,7 +186,7 @@ def _draw_vector_preview():
         gpu.state.blend_set("ALPHA")
         gpu.state.depth_test_set("NONE")
         if line_positions:
-            shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+            shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
             batch = batch_for_shader(shader, "LINES", {"pos": line_positions})
             viewport = gpu.state.viewport_get()
             shader.bind()
