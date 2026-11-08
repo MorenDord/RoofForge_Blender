@@ -242,12 +242,13 @@ def main() -> None:
     panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
     ensure(
         "get_roof_plan_icon" in panel_code.co_names
-        and "template_icon" in panel_code.co_names,
-        "RoofForge Pitch panel does not draw the generated roof facet plan",
+        and "template_icon" in panel_code.co_names
+        and "render_roof_plan_png" not in panel_code.co_names,
+        "RoofForge panel must draw the cached facet plan without rendering it",
     )
     ensure(
-        "Roof facet plan — numbers match Pitch fields" in panel_code.co_consts,
-        "RoofForge Pitch panel does not label the facet plan",
+        "prepare_slopes" not in panel_code.co_names,
+        "Load / Refresh Slope Angles should not be part of the user panel",
     )
     ensure(
         "Show" not in panel_code.co_consts,
@@ -274,6 +275,10 @@ def main() -> None:
         "generated roof plan data property was not registered",
     )
     ensure(
+        hasattr(bpy.context.scene.roof_forge, "overhang_corner_convergence"),
+        "overhang corner-convergence option was not registered",
+    )
+    ensure(
         not hasattr(bpy.ops.roof_forge, "validate_input"),
         "Validate Roof operator should no longer be registered",
     )
@@ -290,16 +295,16 @@ def main() -> None:
     plan_source = create_square_object("RoofForge_Smoke_Numbered_Plan")
     plan_settings = bpy.context.scene.roof_forge
     ensure(
-        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
-        "could not prepare pitch settings for the numbered plan",
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "first-click roof generation without Load / Refresh Slope Angles failed",
+    )
+    ensure(
+        len(plan_settings.slope_settings) == 4,
+        "Generate did not initialise per-edge pitch settings automatically",
     )
     ensure(
         len(json.loads(plan_settings.outline_preview_json)) == 4,
-        "prepared source contour was not stored for the plan preview",
-    )
-    ensure(
-        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "could not generate the roof used by the facet plan preview",
+        "Generate did not store the source contour for the roof plan",
     )
     plan_points = json.loads(plan_settings.outline_preview_json)
     plan_data = json.loads(plan_settings.roof_plan_json)
@@ -318,20 +323,32 @@ def main() -> None:
         "facet plan is missing the roof's internal ridge lines",
     )
     plan_ui = importlib.import_module(f"{extension.__name__}.addon.ui.plan_preview")
-    plan_icon = plan_ui.get_roof_plan_icon(
+    plan_icon = plan_ui.refresh_roof_plan_icon(
         plan_data,
         text_scale=plan_settings.plan_label_scale,
         line_width=plan_settings.plan_line_width,
     )
     ensure(plan_icon > 0, "Blender preview icon was not created for the roof plan")
+    original_signature = plan_ui._PREVIEW_SIGNATURE
     plan_settings.plan_label_scale = 1.5
     plan_settings.plan_line_width = 3.0
-    resized_icon = plan_ui.get_roof_plan_icon(
+    plan_ui.cancel_pending_roof_plan_refresh()
+    ensure(
+        plan_ui.schedule_roof_plan_refresh(plan_settings, delay=60.0),
+        "plan refresh did not schedule a deferred preview update",
+    )
+    ensure(
+        plan_ui.get_roof_plan_icon() == plan_icon
+        and plan_ui._PREVIEW_SIGNATURE == original_signature,
+        "plan image changed before the deferred refresh timer",
+    )
+    plan_ui.cancel_pending_roof_plan_refresh()
+    resized_icon = plan_ui.refresh_roof_plan_icon(
         plan_data,
         text_scale=plan_settings.plan_label_scale,
         line_width=plan_settings.plan_line_width,
     )
-    ensure(resized_icon > 0, "plan number/line setting did not refresh the preview")
+    ensure(resized_icon > 0, "plan number/line setting did not refresh the cached preview")
     ensure(
         all(abs(float(plan_points[i][2])) < 1e-9 for i in range(4)),
         "plan preview changed source contour coordinates",
@@ -458,6 +475,51 @@ def main() -> None:
     )
 
 
+    # Recreate after the result is deleted while the source is no longer active.
+    plan_roof = plan_settings.generated_object
+    plan_source.select_set(False)
+    bpy.context.view_layer.objects.active = plan_roof
+    plan_roof.select_set(True)
+    bpy.data.objects.remove(plan_roof, do_unlink=True)
+    bpy.context.view_layer.update()
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Generate did not recover the stored source after deleting the roof",
+    )
+    recreated_plan_roof = plan_settings.generated_object
+    ensure(
+        recreated_plan_roof is not None
+        and recreated_plan_roof.get("roof_forge_generated", False),
+        "deleted roof was not recreated from the stored contour object",
+    )
+
+    # Edit the source contour in Edit Mode, exit, then explicitly rebuild.
+    recreated_plan_roof.select_set(False)
+    plan_source.select_set(True)
+    bpy.context.view_layer.objects.active = plan_source
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm_source = bmesh.from_edit_mesh(plan_source.data)
+    bm_source.verts.ensure_lookup_table()
+    bm_source.verts[0].co.x -= 0.25
+    bmesh.update_edit_mesh(plan_source.data, loop_triangles=False, destructive=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    old_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in recreated_plan_roof.data.vertices
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Create / Update failed after editing the source contour in Edit Mode",
+    )
+    new_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in plan_settings.generated_object.data.vertices
+    )
+    ensure(
+        old_rebuilt_vertices != new_rebuilt_vertices,
+        "manual regeneration did not use the edited source contour",
+    )
+
     # Concave U contour without overhang: preserve the established solver.
     clear_scene()
     u_source = create_u_contour("RoofForge_Smoke_Concave_U")
@@ -518,6 +580,7 @@ def main() -> None:
     convex_settings = bpy.context.scene.roof_forge
     convex_settings.thickness_cm = 1.0
     convex_settings.eave_overhang_cm = 25.0
+    convex_settings.overhang_corner_convergence = True
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare convex overhang pitch settings",
@@ -541,6 +604,10 @@ def main() -> None:
     ensure(
         convex_roof.get("roof_forge_overhang_support") == "SOURCE_CONTOUR_UNDERSIDE",
         "generated overhang metadata does not identify the original support contour",
+    )
+    ensure(
+        convex_roof.get("roof_forge_overhang_corner_convergence") is True,
+        "corner convergence mode was not persisted on the generated roof",
     )
     support_surface, support_shell, _support_solver = roof_build_for_units.build_roof_payload(
         [
