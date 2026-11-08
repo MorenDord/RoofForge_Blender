@@ -265,7 +265,7 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
         item.edge_index = edge_index
         item.start_vertex_index = edge_index
         item.end_vertex_index = (edge_index + 1) % edge_count
-        item.pitch = 30.0
+        item.pitch = float(settings.initial_pitch)
     settings.source_object = source
     settings.source_name_snapshot = source.name
     settings.generated_object = None
