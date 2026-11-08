@@ -4,6 +4,7 @@ import unittest
 from core.geometry import GeometryInputError, signed_area, validate_simple_polygon
 from core.overhang import (
     build_source_anchored_overhang_surface,
+    corner_converged_overhang_contour,
     offset_contour_outward,
 )
 from core.shell import build_roof_shell
@@ -43,7 +44,7 @@ CONCAVE_U = [
 
 
 class RoofOverhangTests(unittest.TestCase):
-    def _build_offset_roof(self, points, pitches, overhang):
+    def _build_offset_roof(self, points, pitches, overhang, corner_convergence=False):
         offset = offset_contour_outward(points, overhang)
         offset_xy = [(point[0], point[1]) for point in offset]
         self.assertEqual(validate_simple_polygon(offset_xy), [])
@@ -51,7 +52,10 @@ class RoofOverhangTests(unittest.TestCase):
             abs(signed_area(offset_xy)),
             abs(signed_area([(p[0], p[1]) for p in points])),
         )
-        surface = build_source_anchored_overhang_surface(points, pitches, overhang)
+        surface = build_source_anchored_overhang_surface(
+            points, pitches, overhang,
+            corner_convergence=corner_convergence,
+        )
         self.assertEqual(surface.boundary_xy, tuple(offset_xy))
         self.assertAlmostEqual(
             surface.surface_area_xy,
@@ -132,6 +136,64 @@ class RoofOverhangTests(unittest.TestCase):
     def test_mixed_z_equal_pitch_keeps_3d_eave_support(self):
         _offset, surface, _shell = self._build_offset_roof(MIXED_Z_RECTANGLE, [45.0] * 4, 0.2)
         self._assert_support_planes(MIXED_Z_RECTANGLE, surface)
+
+    def test_custom_pitch_overhang_corners_converge_and_keep_boundary_vertex_count(self):
+        pitches = [30.0, 35.0, 40.0, 32.0]
+        outer = corner_converged_overhang_contour(
+            FLAT_RECTANGLE, pitches, 0.2
+        )
+        self.assertEqual(len(outer), len(FLAT_RECTANGLE))
+
+        surface = build_source_anchored_overhang_surface(
+            FLAT_RECTANGLE, pitches, 0.2, corner_convergence=True
+        )
+        self.assertEqual(len(surface.boundary_xy), len(FLAT_RECTANGLE))
+        self.assertEqual(len(surface.planes), len(FLAT_RECTANGLE))
+        self._assert_support_planes(FLAT_RECTANGLE, surface)
+
+        for index, point in enumerate(outer):
+            previous = surface.planes[index - 1]
+            current = surface.planes[index]
+            self.assertAlmostEqual(
+                previous.height(point[0], point[1]), point[2], places=7
+            )
+            self.assertAlmostEqual(
+                current.height(point[0], point[1]), point[2], places=7
+            )
+
+        for index, plane in enumerate(surface.planes):
+            for point_index in (index, (index + 1) % len(outer)):
+                point = outer[point_index]
+                self.assertAlmostEqual(
+                    point[2], plane.height(point[0], point[1]), places=7
+                )
+
+        distances = []
+        for index, point in enumerate(outer):
+            for edge_index in ((index - 1) % len(outer), index):
+                start = FLAT_RECTANGLE[edge_index]
+                end = FLAT_RECTANGLE[(edge_index + 1) % len(FLAT_RECTANGLE)]
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                length = math.hypot(dx, dy)
+                signed_inward = (
+                    -dy * point[0] + dx * point[1]
+                    + dy * start[0] - dx * start[1]
+                ) / length
+                distances.append(-signed_inward)
+        self.assertTrue(any(abs(value - 0.2) > 1e-4 for value in distances))
+
+        shell = build_roof_shell(surface, 0.01, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_corner_convergence_can_be_disabled_for_constant_offset(self):
+        pitches = [30.0, 35.0, 40.0, 32.0]
+        surface = build_source_anchored_overhang_surface(
+            FLAT_RECTANGLE, pitches, 0.2, corner_convergence=False
+        )
+        self.assertEqual(
+            surface.boundary_xy,
+            tuple((p[0], p[1]) for p in offset_contour_outward(FLAT_RECTANGLE, 0.2)),
+        )
 
     def test_concave_l_overhang_is_rejected_without_moving_support_edges(self):
         pitches = [31.0, 32.5, 34.0, 35.5, 37.0, 38.5]
