@@ -117,3 +117,15 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Canvas is centered in the UI region below a reserved control strip; manual Blender 5.0.1 visual QA is required for coordinates, panel resizing, scroll behaviour, multiple areas, redraw and cleanup.
 - Version set to 0.2.3 in manifest, add-on metadata and workflow artifact name.
 - Smoke asserts UI-region handler registration, dedicated panel category and that vector-only mode does not queue a PNG render.
+
+
+### 0.2.3 package verification
+
+- Branch head: `49abdbf65304ab10f2d3b5d4eab062f3fd4ad1ce`.
+- CI: [workflow 42459312000](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42459312000), all seven jobs passed.
+- Blender 5.0.1 smoke step passed both `tests/blender_smoke.py` and `tests/blender_vector_preview_smoke.py`; clean ZIP build and official Blender 5.0.1 extension validator passed.
+- Artifact ID: `13609122113`, name `roof_forge-0.2.3-blender-5.0.1`.
+- Outer artifact SHA-256: `803fb1b53fc4e1792dae092980387f8213028be58084bb3b4802c19918d5065a`.
+- Inner extension ZIP SHA-256 (matches included sidecar and independently computed): `b9ba992847a5d6fb9c50484ffa7ca09fa346484103937df9b99d524cbb718e97`.
+- Exact package downloaded and inspected: manifest `0.2.3`, 30 files, includes the `UI`-region draw handler, Roof Plan tab and current Russian test instructions.
+- Manual visual QA is not covered by background CI and remains required.
