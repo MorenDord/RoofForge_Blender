@@ -165,3 +165,14 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - The main panel now shows initial pitch, thickness, overhang, corner convergence, Live Update and debounce controls before the first roof is created.
 - Background tests cover removal of raster settings, no raster module references, first-build initial pitch, continuous area-centroid anchors, centred bounding boxes, narrow-panel hiding and label geometry. Actual GPU anti-aliasing and pixel placement still require manual viewport QA.
 - Version bumped to `0.3.0`; PR #6 remains open and draft.
+
+
+## RoofForge 0.3.1 — N-panel preview position correction
+
+- User screenshot of 0.3.0 showed the GPU plan occupying nearly the full sidebar width and extending down into the first Pitch row.
+- Calibrated the reserved UI-region anchor from 188 to 152 logical px, reduced the max canvas side from 208 to 140 logical px, and changed safe margins/minimum visible width.
+- Kept the original panel order: Roof plan toggle and style controls first, reserved preview row second, Pitch list immediately below.
+- The resulting canvas is smaller and vertically re-centred inside the existing preview slot; narrow-panel hiding remains in place.
+- Corrected displayed facet numbers from zero-based source indices to one-based numbering matching Pitch rows (01, 02, ...).
+- Added/updated Blender smoke assertions for reserved-area sizing and anchor bounds. Version 0.3.1.
+- Manual interactive viewport QA is still required; screenshot calibration is a best-effort correction, not a GUI pixel-level CI test.
