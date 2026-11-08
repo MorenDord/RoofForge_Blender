@@ -19,8 +19,21 @@ def _settings_changed(self, context):
 def _plan_style_changed(self, context):
     if context is None or context.scene is None:
         return
+    settings = context.scene.roof_forge
     from .ui.plan_preview import schedule_roof_plan_refresh
-    schedule_roof_plan_refresh(context.scene.roof_forge)
+    schedule_roof_plan_refresh(settings)
+    from .ui.vector_plan_preview import tag_vector_preview_redraw
+    tag_vector_preview_redraw()
+
+
+def _plan_display_changed(self, context):
+    if context is None or context.scene is None:
+        return
+    settings = context.scene.roof_forge
+    from .ui.plan_preview import schedule_roof_plan_refresh
+    schedule_roof_plan_refresh(settings)
+    from .ui.vector_plan_preview import tag_vector_preview_redraw
+    tag_vector_preview_redraw()
 
 
 class RoofForgeSlopeSettings(bpy.types.PropertyGroup):
@@ -77,9 +90,21 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
     roof_plan_json: bpy.props.StringProperty(
         name="Roof Plan Data", default="", options={"HIDDEN"}
     )
+    plan_show_raster: bpy.props.BoolProperty(
+        name="Raster preview (PNG)",
+        description="Show the cached PNG plan thumbnail in the RoofForge sidebar",
+        default=True,
+        update=_plan_display_changed,
+    )
+    plan_show_vector: bpy.props.BoolProperty(
+        name="Vector overlay",
+        description="Draw the roof plan directly in the 3D Viewport using GPU lines and text",
+        default=False,
+        update=_plan_display_changed,
+    )
     plan_label_scale: bpy.props.FloatProperty(
         name="Plan Label Size",
-        description="Adjust the size of edge numbers on the top-view roof plan",
+        description="Adjust the size of facet numbers in the raster and vector plans",
         default=1.0,
         min=0.6,
         max=1.8,
