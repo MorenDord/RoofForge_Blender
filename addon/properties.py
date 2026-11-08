@@ -100,7 +100,7 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
     )
     plan_show_vector: bpy.props.BoolProperty(
         name="Vector preview (N-panel)",
-        description="Draw the roof plan directly in the Roof Plan N-panel tab using GPU lines and text",
+        description="Draw the roof plan in the reserved area of the main RoofForge N-panel tab using GPU lines and text",
         default=False,
         update=_plan_display_changed,
     )
