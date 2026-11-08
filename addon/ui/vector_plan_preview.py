@@ -288,8 +288,17 @@ def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color)
             and mapped_viewport[3] > 0.0
             and mapped_viewport[0] < width
             and mapped_viewport[1] < height
+            and mapped_viewport[2] > 0.0
+            and mapped_viewport[3] > 0.0
         ):
-            rectangles.append((mapped_viewport, (0.12, 0.72, 1.0, 1.0)))
+            mapped_viewport = (
+                max(0.0, mapped_viewport[0]),
+                max(0.0, mapped_viewport[1]),
+                min(width, mapped_viewport[2]),
+                min(height, mapped_viewport[3]),
+            )
+            if mapped_viewport[2] > mapped_viewport[0] and mapped_viewport[3] > mapped_viewport[1]:
+                rectangles.append((mapped_viewport, (0.12, 0.72, 1.0, 1.0)))
     except (AttributeError, ReferenceError, TypeError, ValueError):
         mapped_viewport = None
 
