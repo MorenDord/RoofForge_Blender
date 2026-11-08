@@ -27,7 +27,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         display = layout.column(align=True)
         display.label(text="Plan display")
         display.prop(settings, "plan_show_raster", text="Raster preview (PNG)")
-        display.prop(settings, "plan_show_vector", text="Vector overlay (Viewport)")
+        display.prop(settings, "plan_show_vector", text="Vector preview (N-panel)")
 
         if settings.plan_show_raster:
             preview_icon = get_roof_plan_icon()
@@ -68,3 +68,27 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             text="Debounce (ms)",
             slider=True,
         )
+
+
+class ROOFFORGE_PT_vector_preview(bpy.types.Panel):
+    """Dedicated N-panel canvas for the direct GPU roof-plan preview."""
+
+    bl_label = "Roof Plan"
+    bl_idname = "ROOFFORGE_PT_vector_preview"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Roof Plan"
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.roof_forge
+        layout.label(text="Direct GPU vector preview", icon="SHADING_WIRE")
+        layout.prop(settings, "plan_show_vector", text="Show vector plan")
+        style = layout.column(align=True)
+        style.enabled = settings.plan_show_vector
+        style.prop(settings, "plan_label_scale", text="Number size", slider=True)
+        style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
+        if not settings.roof_plan_json:
+            layout.label(text="Create a roof to populate the plan", icon="INFO")
+        elif not settings.plan_show_vector:
+            layout.label(text="Enable the option above to display the plan")
