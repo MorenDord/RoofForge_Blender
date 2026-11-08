@@ -288,8 +288,6 @@ def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color)
             and mapped_viewport[3] > 0.0
             and mapped_viewport[0] < width
             and mapped_viewport[1] < height
-            and mapped_viewport[2] > 0.0
-            and mapped_viewport[3] > 0.0
         ):
             mapped_viewport = (
                 max(0.0, mapped_viewport[0]),
