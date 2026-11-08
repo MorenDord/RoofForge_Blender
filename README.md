@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.5.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The facet preview is cached and refreshed only after edits settle.
+> **Current test build: 0.3.0.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -16,14 +16,14 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 
 - Select a mesh object; no vertex or edge selection is needed.
 - Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
-- Show a top-view numbered roof-facet plan generated from actual roof geometry. Each number is centered inside its slope and maps directly to the corresponding per-edge Pitch field. White graphics use a transparent background; coplanar seams are omitted.
+- Show a top-view numbered roof-facet plan generated from actual roof geometry. Each number maps directly to the corresponding per-edge Pitch field. The GPU preview uses antialiased polylines, contrast-aware line/text colours and area-weighted label anchors; coplanar seams are omitted.
 - Generate and update a separate closed roof shell.
-- Debounced Live Update for per-edge pitch, thickness and overhang changes. The roof-plan image is not regenerated during these changes; it refreshes once after the last successful geometry update.
+- Debounced Live Update for per-edge pitch, thickness and overhang changes. The vector plan geometry is cached from the latest successful roof build and redrawn directly by Blender's GPU handler.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
 - **Source-anchored eaves:** for convex contours, the pitch planes are constructed through the original 3D source edges. The outward domain uses one outer corner per source vertex. With **Converge corners** enabled (default), each outer corner lies on both adjacent pitch planes, so slopes meet at one point; extension length may vary around the perimeter. Disable it to use the previous uniform miter offset. Concave contours still generate normally with zero overhang; nonzero overhang is rejected for concave contours.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
 - Coplanar internal edges are dissolved from the generated Blender mesh, while true ridges and the outer boundary remain.
-- Length controls are displayed in centimeters; default shell thickness is 1 cm and newly prepared pitches default to 30°.
+- Length controls are displayed in centimeters; default shell thickness is 1 cm. Before the first roof build, **Initial Pitch** sets the value copied to every contour edge (default 30°); individual Pitch values can then be edited independently.
 - The first **Create / Update Roof** click reads the active contour and automatically creates the Pitch fields. No separate Load / Refresh Slope Angles action is required.
 - If the generated roof is deleted, Create / Update can recreate it from the stored source. Edit the source contour in Edit Mode, return to Object Mode and press Create / Update to rebuild from the edited boundary.
 - No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
@@ -33,7 +33,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata. The Raster preview is a cached PNG refreshed by a deferred Blender timer; it remains unchanged during edits and refreshes once after the latest update settles. The experimental Vector preview is drawn directly with Blender GPU/BLF in a reserved area of the main **RoofForge** 3D Viewport N-panel tab (`UI` region), between the display controls and per-edge Pitch list. The drawing has a transparent background: only roof edges and facet numbers are painted, with no dark tile or GPU watermark. The preview heading is omitted to reduce clutter and preserve canvas alignment. It is not a separate add-on tab and does not draw over the 3D scene. In vector-only mode the PNG renderer is skipped entirely. While the N-panel is scrolled away from the top, the pinned GPU canvas is hidden to avoid covering controls. Number size and line thickness are shared by both renderers.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is now vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer have been removed. Blender's `POLYLINE_UNIFORM_COLOR` GPU shader renders antialiased edges in a reserved area of the main **RoofForge** N-panel tab (`UI` region). The bounding box is fitted and centred in that area; the preview is hidden if the sidebar becomes too narrow or is scrolled away from its top so it cannot overlap the neighbouring editor or controls. Facet numbers use an area-weighted centroid across all faces belonging to a slope, avoiding the previous largest-face switching behaviour; a pole-of-inaccessibility fallback is used for strongly concave regions. Number size and line thickness remain adjustable.
 
 ## Geometry paths and limitations
 
@@ -61,7 +61,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.5-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.5.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.0-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.0.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
