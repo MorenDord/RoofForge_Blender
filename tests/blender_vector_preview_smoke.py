@@ -29,7 +29,7 @@ module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_pre
 assert module._PANEL_CATEGORY == "RoofForge"
 assert module._DRAW_REGION_TYPE == "UI"
 assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
-assert module._PREVIEW_SLOT_TOP_OFFSET == 106.0
+assert module._PREVIEW_SLOT_TOP_OFFSET == 126.0
 assert "scissor_set" in module._draw_vector_preview.__code__.co_names
 assert "scissor_test_set" in module._draw_vector_preview.__code__.co_names
 assert "set_preview_slot_visible" in module._draw_vector_preview.__code__.co_names
@@ -90,13 +90,13 @@ center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
 assert abs(layout["target_center"][0] - 154.0) < 1.0e-7
-assert abs(layout["target_center"][1] - (900.0 - 106.0 - 296.0 * 0.5)) < 1.0e-7
-assert layout["scissor"] == (6, 498, 296, 296)
+assert abs(layout["target_center"][1] - (900.0 - 126.0 - 296.0 * 0.5)) < 1.0e-7
+assert layout["scissor"] == (6, 478, 296, 296)
 assert layout["draw_side"] == 280.0
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
 assert abs(wider_layout["target_center"][0] - 204.0) < 1.0e-7
-assert abs(wider_layout["target_center"][1] - (900.0 - 106.0 - wider_layout["slot_side"] * 0.5)) < 1.0e-7
+assert abs(wider_layout["target_center"][1] - (900.0 - 126.0 - wider_layout["slot_side"] * 0.5)) < 1.0e-7
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
