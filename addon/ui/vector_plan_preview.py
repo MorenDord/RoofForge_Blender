@@ -14,6 +14,7 @@ _DRAW_HANDLE = None
 _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
 _PANEL_CATEGORY = "Roof Plan"
+_DRAW_REGION_TYPE = "UI"
 _PANEL_TOP_RESERVED = 112
 _PANEL_BOTTOM_RESERVED = 28
 _PANEL_MAX_SIZE = 340
@@ -78,7 +79,7 @@ def _draw_vector_preview():
         context = bpy.context
         region = context.region
         scene = context.scene
-        if region is None or region.type != "UI" or scene is None:
+        if region is None or region.type != _DRAW_REGION_TYPE or scene is None:
             return
         if getattr(region, "active_panel_category", "") != _PANEL_CATEGORY:
             return
@@ -174,7 +175,7 @@ def register_vector_preview():
     if _DRAW_HANDLE is None:
         try:
             _DRAW_HANDLE = bpy.types.SpaceView3D.draw_handler_add(
-                _draw_vector_preview, (), "UI", "POST_PIXEL"
+                _draw_vector_preview, (), _DRAW_REGION_TYPE, "POST_PIXEL"
             )
         except (AttributeError, RuntimeError, TypeError):
             _DRAW_HANDLE = None
@@ -185,7 +186,7 @@ def unregister_vector_preview():
     global _DRAW_HANDLE, _CACHE_SIGNATURE, _CACHE_GEOMETRY
     if _DRAW_HANDLE is not None:
         try:
-            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, "UI")
+            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, _DRAW_REGION_TYPE)
         except (ReferenceError, RuntimeError, ValueError):
             pass
     _DRAW_HANDLE = None
