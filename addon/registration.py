@@ -11,7 +11,6 @@ from .live_update import cancel_pending_live_update
 from .roof_build import clear_surface_cache
 from .ui.plan_preview import clear_contour_plan_preview
 from .ui.vector_plan_preview import register_vector_preview, unregister_vector_preview
-from .ui.vector_plan_preview import register_vector_preview, unregister_vector_preview
 
 _CLASSES = (
     RoofForgeSlopeSettings,
