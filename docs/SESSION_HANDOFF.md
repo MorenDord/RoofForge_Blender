@@ -89,3 +89,19 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Keep PR #6 draft; do not merge to develop or tag a stable 0.2.0/0.2.1 release.
 - Main and develop must remain unchanged.
 - Next ordinary patch uses `0.2.2`; a broader feature increment uses `0.3.0`; major release uses `1.0.0`.
+
+
+## RoofForge 0.2.2 — dual plan preview experiment
+
+- PR #6 remains open and draft; no merge. Main/develop are unchanged.
+- Branch head verified for this build: `b5e3718ad0ac60d83d2e8e2b59b84f71c7a3c067`.
+- Workflow run: [42455878553](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42455878553), all jobs passed.
+- Artifact: `roof_forge-0.2.2-blender-5.0.1`, ID `13607413534`.
+- Outer artifact SHA-256: `f039432fef0bd2b8c4fc33e0dcbe48c318ac4d6955da021a59510a4b226467d7`.
+- Inner extension ZIP SHA-256: `f0d9b5ce64ce2a77cec1eeab1e607de6de80dcdeedb70361b41aab9bad72662e`.
+- Extension manifest version: `0.2.2`, 30 files.
+- Added independent Raster preview (PNG) and Vector overlay (Viewport) toggles. Raster defaults on; vector defaults off. Vector drawing uses a cached roof-plan representation and Blender GPU/BLF drawing; it does not invoke PNG rendering.
+- Both modes can be shown together, independently disabled, or both turned off.
+- Blender 5.0.1 background smoke: legacy geometry suite and vector-preview geometry/registration/toggle smoke passed. Extension validator passed.
+- Manual interactive viewport QA is still required for actual GPU visual placement, resizing, readability, redraw latency, multiple View3D areas, and draw-handler cleanup.
+- Positive overhang remains convex-only; concave L/U roofs are supported at zero overhang.
