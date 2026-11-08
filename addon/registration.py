@@ -30,7 +30,6 @@ def register():
     if not hasattr(bpy.types.Scene, "roof_forge"):
         bpy.types.Scene.roof_forge = bpy.props.PointerProperty(type=RoofForgeSettings)
     register_vector_preview()
-    register_vector_preview()
 
 
 def unregister():
