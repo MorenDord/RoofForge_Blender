@@ -24,14 +24,22 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         if not settings.slope_settings:
             return
 
-        preview_icon = get_roof_plan_icon()
-        if preview_icon:
-            region_width = max(180, getattr(context.region, "width", 320))
-            preview_scale = max(1.0, (region_width - 24.0) / 32.0)
-            layout.template_icon(preview_icon, scale=preview_scale)
+        display = layout.column(align=True)
+        display.label(text="Plan display")
+        display.prop(settings, "plan_show_raster", text="Raster preview (PNG)")
+        display.prop(settings, "plan_show_vector", text="Vector overlay (Viewport)")
 
-        layout.prop(settings, "plan_label_scale", text="Number size", slider=True)
-        layout.prop(settings, "plan_line_width", text="Line thickness", slider=True)
+        if settings.plan_show_raster:
+            preview_icon = get_roof_plan_icon()
+            if preview_icon:
+                region_width = max(180, getattr(context.region, "width", 320))
+                preview_scale = max(1.0, (region_width - 24.0) / 32.0)
+                layout.template_icon(preview_icon, scale=preview_scale)
+
+        style = layout.column(align=True)
+        style.enabled = settings.plan_show_raster or settings.plan_show_vector
+        style.prop(settings, "plan_label_scale", text="Number size", slider=True)
+        style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
 
         pitch_column = layout.column(align=True)
         for index, item in enumerate(settings.slope_settings, start=1):
