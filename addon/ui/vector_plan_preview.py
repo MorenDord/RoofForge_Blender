@@ -63,17 +63,6 @@ def _cached_geometry(plan_json):
     return _CACHE_GEOMETRY
 
 
-def _draw_rect(shader, x, y, width, height, color):
-    vertices = (
-        (x, y), (x + width, y), (x + width, y + height),
-        (x, y), (x + width, y + height), (x, y + height),
-    )
-    batch = batch_for_shader(shader, "TRIS", {"pos": vertices})
-    shader.bind()
-    shader.uniform_float("color", color)
-    batch.draw(shader)
-
-
 def _is_panel_scrolled(region):
     """Return True when the UI region's vertical view is not at its top."""
     try:
@@ -151,7 +140,6 @@ def _draw_vector_preview():
         gpu.state.blend_set("ALPHA")
         gpu.state.depth_test_set("NONE")
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-        _draw_rect(shader, (region.width - available) * 0.5, origin_y - padding, available, available, (0.025, 0.03, 0.04, 0.78))
         if line_positions:
             batch = batch_for_shader(shader, "LINES", {"pos": line_positions})
             shader.bind()
@@ -169,10 +157,6 @@ def _draw_vector_preview():
             blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
             blf.draw(font_id, text)
 
-        blf.size(font_id, max(9, int(10 * ui_scale)))
-        blf.position(font_id, (region.width - available) * 0.5 + 8 * ui_scale, origin_y - padding + 6 * ui_scale, 0)
-        blf.color(font_id, 0.72, 0.78, 0.86, 0.95)
-        blf.draw(font_id, "RoofForge / GPU")
         gpu.state.line_width_set(1.0)
         gpu.state.depth_test_set("LESS_EQUAL")
         gpu.state.blend_set("NONE")
