@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.2.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.3.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -33,7 +33,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is now vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer have been removed. Blender's `POLYLINE_UNIFORM_COLOR` GPU shader renders antialiased edges in a reserved area of the main **RoofForge** N-panel tab (`UI` region). The bounding box is fitted proportionally to the current UI-region width and vertically centred in the full RoofForge N-panel region. Its height is capped relative to the region height; the preview is hidden if the sidebar becomes too narrow or is scrolled away from its top. Facet numbers use an area-weighted centroid across all faces belonging to a slope, avoiding the previous largest-face switching behaviour; a pole-of-inaccessibility fallback is used for strongly concave regions. Number size and line thickness remain adjustable.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is now vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer have been removed. Blender's `POLYLINE_UNIFORM_COLOR` GPU shader renders antialiased edges in a reserved area of the main **RoofForge** N-panel tab (`UI` region). The vector preview now reuses the former Raster preview's square layout: a square slot is inserted into the normal panel flow, its side follows the N-panel width minus the same 24 px gutter, and the roof bounding box is centred inside it with the same 7.5% margin and max-span fit. Pitch controls are pushed below the slot instead of being overdrawn. Facet numbers use an area-weighted centroid across all faces belonging to a slope, avoiding the previous largest-face switching behaviour; a pole-of-inaccessibility fallback is used for strongly concave regions. Number size and line thickness remain adjustable.
 
 ## Geometry paths and limitations
 
@@ -61,7 +61,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.2-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.2.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.3-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.3.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
