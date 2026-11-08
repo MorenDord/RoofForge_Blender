@@ -176,3 +176,13 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - Corrected displayed facet numbers from zero-based source indices to one-based numbering matching Pitch rows (01, 02, ...).
 - Added/updated Blender smoke assertions for reserved-area sizing and anchor bounds. Version 0.3.1.
 - Manual interactive viewport QA is still required; screenshot calibration is a best-effort correction, not a GUI pixel-level CI test.
+
+
+## RoofForge 0.3.2 — full-region centring and width-responsive scaling
+
+- User reported the 0.3.1 preview still was not vertically centred and did not grow with sidebar width.
+- Removed the guessed `_PANEL_TOP_RESERVED` and fixed `_PANEL_MAX_SIZE` layout model.
+- `_compute_canvas_layout()` now centres the contour bounding box at `(region.width / 2, region.height / 2)` in the full active RoofForge UI region.
+- The geometry scale is recalculated on every draw using the current available width and a height cap of 30% of the UI region. This preserves aspect ratio, grows with sidebar width while width-constrained, and prevents very tall shapes from taking over the panel.
+- Added smoke coverage that verifies exact vertical/horizontal centring and monotonic scaling when the UI-region width grows from 320 to 420 px.
+- Version bumped to 0.3.2. Manual interactive viewport QA remains necessary, especially to confirm that the new centre aligns with the visible sidebar in the user's Blender layout.
