@@ -107,7 +107,7 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         min=0.5,
         max=6.0,
         precision=1,
-        update=_plan_style_changed,
+        update=_preview_changed,
     )
     source_object: bpy.props.PointerProperty(type=bpy.types.Object)
     generated_object: bpy.props.PointerProperty(type=bpy.types.Object)
