@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.1.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The facet preview is cached and refreshed only after edits settle.
+> **Current test build: 0.2.3.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The facet preview is cached and refreshed only after edits settle.
 
 ## Project documents
 
@@ -33,7 +33,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata; panel drawing only shows the last cached icon. Raster rendering is deferred to a Blender timer and coalesced until edits have been quiet for about a second. While pitches, thickness or overhang are changing, the old image stays visible; one replacement image is rendered after the last successful update. Labels are placed in the largest region of each slope and reduced to fit available clearance. Number size and line thickness are separate controls, and the square preview scales to the available sidebar width.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. The Raster preview is a cached PNG refreshed by a deferred Blender timer; it remains unchanged during edits and refreshes once after the latest update settles. The experimental Vector preview is drawn directly with Blender GPU/BLF in a dedicated **Roof Plan** tab of the 3D Viewport N-panel (`UI` region), not over the 3D scene. In vector-only mode the PNG renderer is skipped entirely. The separate tab gives the GPU canvas its own space so it does not paint over the generator controls. Number size and line thickness are shared by both renderers.
 
 ## Geometry paths and limitations
 
