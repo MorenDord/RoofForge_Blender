@@ -186,3 +186,14 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - The geometry scale is recalculated on every draw using the current available width and a height cap of 30% of the UI region. This preserves aspect ratio, grows with sidebar width while width-constrained, and prevents very tall shapes from taking over the panel.
 - Added smoke coverage that verifies exact vertical/horizontal centring and monotonic scaling when the UI-region width grows from 320 to 420 px.
 - Version bumped to 0.3.2. Manual interactive viewport QA remains necessary, especially to confirm that the new centre aligns with the visible sidebar in the user's Blender layout.
+
+
+## RoofForge 0.3.3 — restore the former raster preview's layout behaviour for GPU vectors
+
+- User said the 0.3.2 whole-UI-region centring became worse and asked to reproduce the raster preview's behaviour exactly.
+- Retrieved the historical `core/plan_preview.py` and `addon/ui/panel.py` from the 0.2.5 package. The raster renderer used a square 384 px canvas, `margin = max(18, size * 0.075)`, scale `(size - 2 * margin) / max(span_x, span_y)`, and centred offsets `(size - span_x * scale) / 2`, `(size - span_y * scale) / 2`. The panel displayed it with `layout.template_icon(icon_id, scale=max(1, (region_width - 24) / 32))`.
+- Replaced the full-region centring and 30%-height cap with this exact square-fit model. The displayed square side is `region_width - 24` px (provided it is at least 96 px), and its scale grows with the sidebar width.
+- The panel now inserts an `ICON_NONE` `template_icon(0, scale=...)` immediately after the Roof plan toggle. This is a transparent UI-layout anchor only: it contains no roof image data, does not invoke a PNG renderer, and reserves the same square item size in the layout. The GPU draw-handler paints the vector plan over this slot. Number/line style controls and Pitch are laid out after the square, so they are pushed down instead of being covered by the GPU overlay.
+- GPU overlay slot top is anchored 126 logical px below the top of the UI region (scaled by Blender UI scale), matching the panel's button/header/toggle rows in the current layout. Manual GUI check is still needed to validate pixel-level anchor alignment.
+- Added smoke assertions for raster-equivalent square dimensions, 7.5% fit margin, centring and monotonic scaling at 320→420 px UI widths; asserts the UI panel includes a `template_icon` anchor.
+- Version: 0.3.3. PR #6 remains open and draft. `main` was restored after an accidental out-of-branch write; its tree SHA matches the pre-write tree exactly. `develop` was not changed.
