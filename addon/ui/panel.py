@@ -54,26 +54,27 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         if settings.roof_plan_json:
             header, body = layout.panel(
                 "roof_forge_plan_preview",
-                text="Roof Plan",
                 default_closed=False,
             )
-            header.prop(settings, "plan_show_vector", text="Show preview")
+            header.label(text="Roof Plan")
 
             # A collapsed UILayout.panel() returns body=None. The handler is
             # enabled only while this real layout slot is present in the UI.
-            if body is not None and settings.plan_show_vector:
-                region_width = getattr(context.region, "width", 320)
-                icon_scale = preview_icon_scale(region_width)
-                if icon_scale is None:
-                    body.label(text="Widen the N-panel to view the plan", icon="INFO")
-                else:
-                    # ICON_NONE reserves the square; GPU paints only inside it.
-                    body.template_icon(0, scale=icon_scale)
+            if body is not None:
+                body.prop(settings, "plan_show_vector", text="Show preview")
+                if settings.plan_show_vector:
+                    region_width = getattr(context.region, "width", 320)
+                    icon_scale = preview_icon_scale(region_width)
+                    if icon_scale is None:
+                        body.label(text="Widen the N-panel to view the plan", icon="INFO")
+                    else:
+                        # ICON_NONE reserves the square; GPU paints only inside it.
+                        body.template_icon(0, scale=icon_scale)
 
-                style = body.column(align=True)
-                style.prop(settings, "plan_label_scale", text="Number size", slider=True)
-                style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
-                set_preview_slot_visible(context.region, icon_scale is not None)
+                    style = body.column(align=True)
+                    style.prop(settings, "plan_label_scale", text="Number size", slider=True)
+                    style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
+                    set_preview_slot_visible(context.region, icon_scale is not None)
 
         if not settings.slope_settings:
             layout.separator(factor=0.5)
