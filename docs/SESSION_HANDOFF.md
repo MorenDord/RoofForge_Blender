@@ -197,3 +197,14 @@ Downloaded artifact `13596766321` was inspected. Outer artifact contains the ins
 - GPU overlay slot top is anchored 126 logical px below the top of the UI region (scaled by Blender UI scale), matching the panel's button/header/toggle rows in the current layout. Manual GUI check is still needed to validate pixel-level anchor alignment.
 - Added smoke assertions for raster-equivalent square dimensions, 7.5% fit margin, centring and monotonic scaling at 320→420 px UI widths; asserts the UI panel includes a `template_icon` anchor.
 - Version: 0.3.3. PR #6 remains open and draft. `main` was restored after an accidental out-of-branch write; its tree SHA matches the pre-write tree exactly. `develop` was not changed.
+
+
+## RoofForge 0.3.4 — isolate and clip the vector preview slot
+
+- User feedback on 0.3.3: the preview remained slightly right-shifted and GPU drawing overlapped several fields below.
+- Split the former monolithic panel into three ordered root panels in the same **RoofForge** N-panel tab: **RoofForge** (Create / Update), **Roof Plan** (vector visibility, square anchor and drawing style), and **Pitch & Settings** (initial pitch or per-edge Pitch plus common roof settings).
+- The square `template_icon(0)` anchor now belongs to the dedicated Roof Plan panel, so it pushes the subsequent Pitch & Settings panel down in normal Blender layout flow.
+- GPU canvas coordinates compensate for the 12 px right scrollbar gutter, centring the plan on the usable content area rather than the entire UI region.
+- The drawing canvas has an 8 px inset inside the reserved slot and is clipped with `gpu.state.scissor_set` / `scissor_test_set`; antialiased lines and labels cannot paint outside the slot into Pitch controls or the adjacent editor.
+- Added smoke assertions for panel ordering, anchor ownership, content-centre alignment, width-responsive scaling and scissor clipping. CI still cannot certify exact visual alignment in an interactive Blender window; manual viewport QA remains necessary.
+- Version: 0.3.4. PR #6 remains open and draft; do not merge.
