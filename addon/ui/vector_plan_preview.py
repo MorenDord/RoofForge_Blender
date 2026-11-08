@@ -39,7 +39,12 @@ def _prepare_geometry(plan_data):
     max_y = max(point[1] for point in vertices)
     if max(max_x - min_x, max_y - min_y) <= 1.0e-12:
         raise ValueError("Roof plan has zero area")
-    labels = slope_region_centers(vertices, faces, slopes)
+    # Geometry stores source-slope indices as zero-based; the sidebar rows are 01-based.
+    labels = tuple(
+        (slope_index + 1, center, clearance)
+        for slope_index, center, clearance
+        in slope_region_centers(vertices, faces, slopes)
+    )
     return {
         "vertices": [(point[0], point[1]) for point in vertices],
         "edges": edges,
