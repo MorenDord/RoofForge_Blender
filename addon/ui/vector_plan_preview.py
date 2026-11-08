@@ -13,11 +13,11 @@ from ...core.plan_preview import _label_center, _normalise_plan, _visible_edges
 _DRAW_HANDLE = None
 _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
-_PANEL_CATEGORY = "Roof Plan"
+_PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
-_PANEL_TOP_RESERVED = 150
-_PANEL_BOTTOM_RESERVED = 28
-_PANEL_MAX_SIZE = 340
+_PANEL_BASE_TOP_RESERVED = 220
+_PANEL_BOTTOM_RESERVED = 12
+_PANEL_MAX_SIZE = 220
 
 
 def _prepare_geometry(plan_data):
@@ -74,6 +74,18 @@ def _draw_rect(shader, x, y, width, height, color):
     batch.draw(shader)
 
 
+def _is_panel_scrolled(region):
+    """Return True when the UI region's vertical view is not at its top."""
+    try:
+        view2d = region.view2d
+        current_top = float(view2d.cur.ymax)
+        content_top = float(view2d.tot.ymax)
+        return (content_top - current_top) > 2.0
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        # Some Blender contexts do not expose a View2D for the UI region.
+        return False
+
+
 def _draw_vector_preview():
     try:
         context = bpy.context
@@ -86,24 +98,42 @@ def _draw_vector_preview():
         settings = getattr(scene, "roof_forge", None)
         if settings is None or not settings.plan_show_vector or not settings.roof_plan_json:
             return
+        # The preview occupies a reserved blank row in the main RoofForge
+        # panel. Do not pin it over controls while the N-panel is scrolled.
+        if _is_panel_scrolled(region):
+            return
+
         geometry = _cached_geometry(settings.roof_plan_json)
         min_x, min_y, max_x, max_y = geometry["bounds"]
         span_x, span_y = max_x - min_x, max_y - min_y
-        # Keep the canvas below the native panel controls and centered in the
-        # remaining UI region. The dedicated category avoids drawing over the
-        # normal RoofForge controls.
+        ui_scale = 1.0
+        try:
+            ui_scale = max(0.5, float(context.preferences.system.ui_scale))
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        top_reserved = _PANEL_BASE_TOP_RESERVED * ui_scale
+        if settings.plan_show_raster:
+            try:
+                from .plan_preview import get_roof_plan_icon
+                if get_roof_plan_icon():
+                    top_reserved += max(156.0, region.width - 24.0) + 12.0 * ui_scale
+            except (AttributeError, ReferenceError, RuntimeError):
+                pass
+
         available = min(
-            _PANEL_MAX_SIZE,
-            max(96, region.width - 28),
-            max(96, region.height - _PANEL_TOP_RESERVED - _PANEL_BOTTOM_RESERVED),
+            _PANEL_MAX_SIZE * ui_scale,
+            max(96.0 * ui_scale, region.width - 28.0 * ui_scale),
+            max(96.0 * ui_scale, region.height - top_reserved - _PANEL_BOTTOM_RESERVED * ui_scale),
         )
-        padding = 12
-        inner = max(1, available - 2 * padding)
+        if region.height < top_reserved + 96.0 * ui_scale:
+            return
+        padding = 10.0 * ui_scale
+        inner = max(1.0, available - 2.0 * padding)
         scale = inner / max(span_x, span_y, 1.0e-9)
         origin_x = (region.width - available) * 0.5 + padding + (inner - span_x * scale) * 0.5
-        canvas_bottom = _PANEL_BOTTOM_RESERVED
-        canvas_top = max(canvas_bottom, region.height - _PANEL_TOP_RESERVED)
-        origin_y = canvas_bottom + max(0.0, (canvas_top - canvas_bottom - available) * 0.5) + padding + (inner - span_y * scale) * 0.5
+        canvas_top = region.height - top_reserved
+        origin_y = canvas_top - available + padding + (inner - span_y * scale) * 0.5
 
         def screen(point):
             return (
@@ -126,11 +156,11 @@ def _draw_vector_preview():
             batch = batch_for_shader(shader, "LINES", {"pos": line_positions})
             shader.bind()
             shader.uniform_float("color", (0.96, 0.97, 1.0, 0.98))
-            gpu.state.line_width_set(max(1.0, min(6.0, float(settings.plan_line_width))))
+            gpu.state.line_width_set(max(1.0, min(6.0, float(settings.plan_line_width) * ui_scale)))
             batch.draw(shader)
 
         font_id = 0
-        blf.size(font_id, max(10, int(13 * float(settings.plan_label_scale))))
+        blf.size(font_id, max(10, int(13 * float(settings.plan_label_scale) * ui_scale)))
         for number, center, _clearance in geometry["labels"]:
             px = screen(center)
             text = str(number)
@@ -139,8 +169,8 @@ def _draw_vector_preview():
             blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
             blf.draw(font_id, text)
 
-        blf.size(font_id, 10)
-        blf.position(font_id, (region.width - available) * 0.5 + 8, origin_y - padding + 7, 0)
+        blf.size(font_id, max(9, int(10 * ui_scale)))
+        blf.position(font_id, (region.width - available) * 0.5 + 8 * ui_scale, origin_y - padding + 6 * ui_scale, 0)
         blf.color(font_id, 0.72, 0.78, 0.86, 0.95)
         blf.draw(font_id, "RoofForge / GPU")
         gpu.state.line_width_set(1.0)
