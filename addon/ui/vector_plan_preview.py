@@ -21,12 +21,11 @@ _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
-# Preview slot follows the Create button and the Show preview toggle.
-# The style controls are below the canvas, so the anchor stays compact.
-_PANEL_TOP_RESERVED = 152
-_PANEL_BOTTOM_RESERVED = 10
-_PANEL_MAX_SIZE = 140
-_PANEL_MIN_SIZE = 76
+# The GPU drawing is centred in the complete N-panel UI region.
+# Width is the primary sizing constraint; height is capped to keep tall plans
+# from covering the panel controls above and below the preview slot.
+_PANEL_MIN_WIDTH = 76
+_MAX_HEIGHT_FRACTION = 0.30
 _CANVAS_MARGIN = 10
 
 
@@ -67,46 +66,49 @@ def _compute_canvas_layout(
     bounds,
     *,
     ui_scale=1.0,
-    top_reserved=None,
 ):
-    """Fit the roof bounding box inside the reserved slot without overflow."""
+    """Fit the complete bounding box and centre it in the N-panel UI region.
+
+    The scale is recomputed from the current UI-region width on every draw,
+    so widening the N-panel increases the plan size. The height cap prevents
+    very tall contours from consuming the whole panel.
+    """
     ui_scale = max(0.5, float(ui_scale))
-    safe = _CANVAS_MARGIN * ui_scale
-    top_reserved = (
-        _PANEL_TOP_RESERVED * ui_scale
-        if top_reserved is None else float(top_reserved)
-    )
-    available_width = float(region_width) - 2.0 * safe
-    available_height = float(region_height) - top_reserved - _PANEL_BOTTOM_RESERVED * ui_scale
-    side = min(
-        _PANEL_MAX_SIZE * ui_scale,
-        available_width,
-        available_height,
-    )
-    if side < _PANEL_MIN_SIZE * ui_scale:
-        return None
+    width = max(0.0, float(region_width))
+    height = max(0.0, float(region_height))
+    margin = _CANVAS_MARGIN * ui_scale
 
     min_x, min_y, max_x, max_y = (float(value) for value in bounds)
     span_x, span_y = max_x - min_x, max_y - min_y
-    largest_span = max(span_x, span_y)
-    if largest_span <= 1.0e-12:
+    if span_x <= 1.0e-12 or span_y <= 1.0e-12:
         return None
 
-    padding = _CANVAS_MARGIN * ui_scale
-    inner_side = max(1.0, side - 2.0 * padding)
-    scale = inner_side / largest_span
+    available_width = width - 2.0 * margin
+    available_height = height * _MAX_HEIGHT_FRACTION - 2.0 * margin
+    if available_width < _PANEL_MIN_WIDTH * ui_scale or available_height <= 0.0:
+        return None
 
-    # Anchor the actual model bounding-box centre to the centre of the slot.
-    target_x = float(region_width) * 0.5
-    target_y = float(region_height) - top_reserved - side * 0.5
+    # Independent X/Y constraints preserve the contour's aspect ratio.
+    scale = min(available_width / span_x, available_height / span_y)
+    if scale <= 0.0:
+        return None
+
+    bbox_width = span_x * scale
+    bbox_height = span_y * scale
+    target_x = width * 0.5
+    target_y = height * 0.5
     bbox_center_x = (min_x + max_x) * 0.5
     bbox_center_y = (min_y + max_y) * 0.5
+
     return {
-        "side": side,
+        "width": bbox_width,
+        "height": bbox_height,
         "scale": scale,
         "origin_x": target_x - (bbox_center_x - min_x) * scale,
         "origin_y": target_y - (bbox_center_y - min_y) * scale,
         "target_center": (target_x, target_y),
+        "available_width": available_width,
+        "available_height": available_height,
     }
 
 
