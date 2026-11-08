@@ -142,6 +142,9 @@ def schedule_roof_plan_refresh(
         plan_data = json.loads(plan_json)
         if not isinstance(plan_data, dict) or not plan_data.get("faces"):
             return False
+        plan_json = json.dumps(
+            plan_data, sort_keys=True, separators=(",", ":")
+        )
         signature = _signature(
             plan_json,
             settings.plan_label_scale,
