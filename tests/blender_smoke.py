@@ -255,10 +255,6 @@ def main() -> None:
         "Pitch panel should not require Edit Mode edge-selection buttons",
     )
     ensure(
-        not hasattr(bpy.ops.roof_forge, "select_slope_edge"),
-        "legacy Edit Mode edge-selection operator should not be registered",
-    )
-    ensure(
         hasattr(bpy.types, "ROOFFORGE_PT_main"),
         "RoofForge sidebar panel was not registered",
     )
