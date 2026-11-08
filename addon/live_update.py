@@ -13,6 +13,7 @@ from .roof_build import (
     build_roof_payload,
     centimeters_to_blender_units,
 )
+from .ui.plan_preview import schedule_roof_plan_refresh
 
 _PENDING_SCENE_NAME: str | None = None
 def live_update_delay_seconds(settings) -> float:
@@ -106,7 +107,7 @@ def _run_pending_update():
             settings.last_status = (
                 f"Контур изменён: найдено {len(points)} рёбер, "
                 f"а настроено {len(settings.slope_settings)} скатов. "
-                "Нажми «Обновить список скатов»."
+                "Нажми Create / Update Roof, чтобы пересчитать углы по изменённому контуру."
             )
             return None
         pitches = pitch_values(settings, len(points))
@@ -118,6 +119,7 @@ def _run_pending_update():
         )
         surface, shell, solver = build_roof_payload(
             points, pitches, thickness_units, overhang_units,
+            corner_convergence=bool(settings.overhang_corner_convergence),
             cache_owner=source,
         )
         new_mesh = create_roof_mesh_data(
@@ -131,6 +133,7 @@ def _run_pending_update():
                 roof, source, surface, shell, pitches, solver,
                 overhang_units,
                 settings.thickness_cm, settings.eave_overhang_cm,
+                bool(settings.overhang_corner_convergence),
             )
         except Exception:
             roof.data = old_mesh
@@ -141,10 +144,8 @@ def _run_pending_update():
         settings.roof_plan_json = json.dumps(
             surface_plan_data(surface), separators=(",", ":")
         )
-        settings.last_status = (
-            f"Обновлено: {len(points)} скатов, {len(shell.faces)} граней "
-            f"({solver})."
-        )
+        settings.last_status = "RoofForge live update completed"
+        schedule_roof_plan_refresh(settings)
     except Exception as exc:
         if new_mesh is not None and new_mesh.users == 0:
             bpy.data.meshes.remove(new_mesh)
