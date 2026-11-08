@@ -6,7 +6,7 @@ import json
 
 from ..adapters.mesh_io import read_object_boundary
 from ...core.geometry import GeometryInputError
-from ...core.plan_preview import surface_plan_data
+from ...core.roof_plan import surface_plan_data
 from ..roof_build import (
     apply_shell_metadata,
     build_roof_payload,
@@ -15,7 +15,6 @@ from ..roof_build import (
     sync_slope_settings,
     centimeters_to_blender_units,
 )
-from ..ui.plan_preview import schedule_roof_plan_refresh
 
 
 def _is_scene_mesh(obj, scene) -> bool:
@@ -200,7 +199,6 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 surface_plan_data(surface), separators=(",", ":")
             )
             settings.last_status = "RoofForge roof created/updated"
-            schedule_roof_plan_refresh(settings)
             new_mesh = None
 
         except Exception as exc:
