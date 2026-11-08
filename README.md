@@ -75,7 +75,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke checks corner-converged convex eaves, equal boundary-vertex count, uniform-offset fallback, source-edge support alignment, concave no-overhang, deferred plan rendering, one-click generation, delete/recreate from a stored source and rebuild after editing the source contour. Manual viewport QA is still required.
+Blender 5.0.1 background smoke checks corner-converged convex eaves, equal boundary-vertex count, uniform-offset fallback, source-edge support alignment, concave no-overhang, vector-plan edge extraction and stable label anchors, configurable initial pitch, one-click generation, delete/recreate from a stored source and rebuild after editing the source contour. Manual viewport QA is still required.
 
 ## License
 
