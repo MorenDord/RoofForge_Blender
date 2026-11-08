@@ -11,7 +11,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 1)
+assert extension.bl_info["version"] == (0, 3, 3)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -27,7 +27,9 @@ module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_pre
 assert module._PANEL_CATEGORY == "RoofForge"
 assert module._DRAW_REGION_TYPE == "UI"
 assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
-assert module._MAX_HEIGHT_FRACTION == 0.30
+assert module._PREVIEW_SLOT_TOP_OFFSET == 126.0
+panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
+assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 
 plan = {
     "vertices": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0], [0.0, 3.0, 0.0]],
@@ -59,23 +61,25 @@ assert abs(center_a[0] - 5.0) < 1.0e-7
 assert abs(center_b[0] - 5.0) < 1.0e-7
 assert abs(center_a[1] - center_b[1]) < 1.0e-7
 
-# The bounding box is exactly centred in the full N-panel UI region.
-# Widening the sidebar increases the fitted geometry scale.
-assert module._compute_canvas_layout(72, 900, (0.0, 0.0, 4.0, 3.0)) is None
+# The GPU canvas follows the former Raster template-icon sizing and fit:
+# square side = sidebar width - 24 px, 7.5% margins and max-span scaling.
+assert module.preview_icon_scale(72) is None
 layout = module._compute_canvas_layout(320, 900, (-2.0, 1.0, 8.0, 6.0))
 wider_layout = module._compute_canvas_layout(420, 900, (-2.0, 1.0, 8.0, 6.0))
 assert layout is not None and wider_layout is not None
+assert abs(layout["side"] - 296.0) < 1.0e-7
+assert abs(layout["icon_scale"] - (296.0 / 32.0)) < 1.0e-7
+assert abs(layout["margin"] - 296.0 * 0.075) < 1.0e-7
 center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
-assert abs(center_x - 160.0) < 1.0e-7
-assert abs(center_y - 450.0) < 1.0e-7
+assert abs(center_x - layout["target_center"][0]) < 1.0e-7
+assert abs(center_y - layout["target_center"][1]) < 1.0e-7
 assert abs(layout["target_center"][0] - 160.0) < 1.0e-7
-assert abs(layout["target_center"][1] - 450.0) < 1.0e-7
+assert abs(layout["target_center"][1] - (900.0 - 126.0 - 296.0 * 0.5)) < 1.0e-7
+assert wider_layout["side"] > layout["side"]
 assert wider_layout["scale"] > layout["scale"]
-assert wider_layout["width"] > layout["width"]
-assert abs(wider_layout["target_center"][1] - 450.0) < 1.0e-7
-assert wider_layout["width"] <= wider_layout["available_width"] + 1.0e-7
-assert wider_layout["height"] <= wider_layout["available_height"] + 1.0e-7
+assert abs(wider_layout["target_center"][0] - 210.0) < 1.0e-7
+assert abs(wider_layout["target_center"][1] - (900.0 - 126.0 - wider_layout["side"] * 0.5)) < 1.0e-7
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
