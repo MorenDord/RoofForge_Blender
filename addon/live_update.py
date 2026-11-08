@@ -4,7 +4,7 @@ from __future__ import annotations
 import bpy
 import json
 
-from ..core.plan_preview import surface_plan_data
+from ..core.roof_plan import surface_plan_data
 from .adapters.mesh_io import read_object_boundary
 from .roof_build import (
     apply_shell_metadata,
@@ -13,7 +13,6 @@ from .roof_build import (
     build_roof_payload,
     centimeters_to_blender_units,
 )
-from .ui.plan_preview import schedule_roof_plan_refresh
 
 _PENDING_SCENE_NAME: str | None = None
 def live_update_delay_seconds(settings) -> float:
@@ -145,7 +144,6 @@ def _run_pending_update():
             surface_plan_data(surface), separators=(",", ":")
         )
         settings.last_status = "RoofForge live update completed"
-        schedule_roof_plan_refresh(settings)
     except Exception as exc:
         if new_mesh is not None and new_mesh.users == 0:
             bpy.data.meshes.remove(new_mesh)
