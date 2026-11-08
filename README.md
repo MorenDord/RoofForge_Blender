@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.2.4.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The facet preview is cached and refreshed only after edits settle.
+> **Current test build: 0.2.5.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The facet preview is cached and refreshed only after edits settle.
 
 ## Project documents
 
@@ -33,7 +33,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata. The Raster preview is a cached PNG refreshed by a deferred Blender timer; it remains unchanged during edits and refreshes once after the latest update settles. The experimental Vector preview is drawn directly with Blender GPU/BLF in a reserved area of the main **RoofForge** 3D Viewport N-panel tab (`UI` region), between the display controls and per-edge Pitch list. It is not a separate add-on tab and does not draw over the 3D scene. In vector-only mode the PNG renderer is skipped entirely. While the N-panel is scrolled away from the top, the pinned GPU canvas is hidden to avoid covering controls. Number size and line thickness are shared by both renderers.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. The Raster preview is a cached PNG refreshed by a deferred Blender timer; it remains unchanged during edits and refreshes once after the latest update settles. The experimental Vector preview is drawn directly with Blender GPU/BLF in a reserved area of the main **RoofForge** 3D Viewport N-panel tab (`UI` region), between the display controls and per-edge Pitch list. The drawing has a transparent background: only roof edges and facet numbers are painted, with no dark tile or GPU watermark. The preview heading is omitted to reduce clutter and preserve canvas alignment. It is not a separate add-on tab and does not draw over the 3D scene. In vector-only mode the PNG renderer is skipped entirely. While the N-panel is scrolled away from the top, the pinned GPU canvas is hidden to avoid covering controls. Number size and line thickness are shared by both renderers.
 
 ## Geometry paths and limitations
 
@@ -61,7 +61,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.2.4-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.4.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.2.5-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.2.5.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
