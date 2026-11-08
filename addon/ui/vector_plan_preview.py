@@ -17,13 +17,14 @@ from ...core.roof_plan import (
 _DRAW_HANDLE = None
 _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
+_PREVIEW_REGION_VISIBILITY = {}
 _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
 # The preview is its own panel directly below the Create / Update panel.
 # Its blank template_icon slot reserves space in normal Blender UI flow.
-_PREVIEW_SLOT_TOP_OFFSET = 126.0
+_PREVIEW_SLOT_TOP_OFFSET = 106.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
 _PREVIEW_DRAW_INSET = 8.0
@@ -61,6 +62,26 @@ def _cached_geometry(plan_json):
         _CACHE_GEOMETRY = _prepare_geometry(json.loads(plan_json))
         _CACHE_SIGNATURE = plan_json
     return _CACHE_GEOMETRY
+
+def _region_key(region):
+    """Return a stable key for one live UI region."""
+    try:
+        return int(region.as_pointer())
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def set_preview_slot_visible(region, visible):
+    """Enable GPU drawing only while the nested UI layout slot is present."""
+    key = _region_key(region)
+    if key is None:
+        return
+    _PREVIEW_REGION_VISIBILITY[key] = bool(visible)
+
+
+def _is_preview_slot_visible(region):
+    key = _region_key(region)
+    return bool(key is not None and _PREVIEW_REGION_VISIBILITY.get(key, False))
 
 
 def preview_icon_scale(region_width):
@@ -207,6 +228,8 @@ def _draw_vector_preview():
         settings = getattr(scene, "roof_forge", None)
         if settings is None or not settings.plan_show_vector or not settings.roof_plan_json:
             return
+        if not _is_preview_slot_visible(region):
+            return
         if _is_panel_scrolled(region):
             return
 
@@ -344,12 +367,14 @@ def unregister_vector_preview():
     _DRAW_HANDLE = None
     _CACHE_SIGNATURE = None
     _CACHE_GEOMETRY = None
+    _PREVIEW_REGION_VISIBILITY.clear()
 
 
 __all__ = [
     "register_vector_preview",
     "unregister_vector_preview",
     "tag_vector_preview_redraw",
+    "set_preview_slot_visible",
     "_compute_canvas_layout",
     "preview_icon_scale",
 ]
