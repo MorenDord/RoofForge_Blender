@@ -29,6 +29,7 @@ plan = {
 }
 module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_preview")
 assert module._PANEL_CATEGORY == "RoofForge"
+assert not hasattr(module, "_draw_rect")  # GPU plan must not paint an opaque canvas background
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
         "cur": type("Rect", (), {"ymax": 100.0})(),
