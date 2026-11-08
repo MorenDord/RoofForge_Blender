@@ -42,7 +42,7 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
 
         if settings.plan_show_vector and settings.roof_plan_json:
-            layout.label(text="Vector plan", icon="SHADING_WIRE")
+            # Reserve a clean canvas area for the transparent GPU overlay.
             preview_slot = layout.row()
             preview_slot.scale_y = 10.0
             preview_slot.label(text=" ")
