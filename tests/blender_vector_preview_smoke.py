@@ -11,7 +11,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 4)
+assert extension.bl_info["version"] == (0, 3, 5)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -23,6 +23,7 @@ assert not hasattr(bpy.types, "ROOFFORGE_PT_plan_preview")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_settings")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
 assert settings.plan_show_vector is True
+assert settings.plan_debug_bounds is False
 assert abs(settings.initial_pitch - 30.0) < 1.0e-7
 
 module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_preview")
@@ -32,11 +33,14 @@ assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
 assert module._PREVIEW_SLOT_TOP_OFFSET == 126.0
 assert "scissor_set" in module._draw_vector_preview.__code__.co_names
 assert "scissor_test_set" in module._draw_vector_preview.__code__.co_names
+assert "viewport_get" in module._draw_vector_preview.__code__.co_names
+assert "_draw_debug_overlay" in module._draw_vector_preview.__code__.co_names
 assert "set_preview_slot_visible" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
 assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw_header.__code__.co_names
 fake_region = type("Region", (), {"as_pointer": lambda self: 4242})()
 module.set_preview_slot_visible(fake_region, True)
@@ -92,11 +96,23 @@ assert abs(center_y - layout["target_center"][1]) < 1.0e-7
 assert abs(layout["target_center"][0] - 154.0) < 1.0e-7
 assert abs(layout["target_center"][1] - (900.0 - 126.0 - 296.0 * 0.5)) < 1.0e-7
 assert layout["scissor"] == (6, 478, 296, 296)
+assert module._translate_scissor(
+    layout["scissor"], (100, 200, 320, 900)
+) == (106, 678, 296, 296)
 assert layout["draw_side"] == 280.0
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
 assert abs(wider_layout["target_center"][0] - 204.0) < 1.0e-7
 assert abs(wider_layout["target_center"][1] - (900.0 - 126.0 - wider_layout["slot_side"] * 0.5)) < 1.0e-7
+
+fake_view2d = type("View2D", (), {
+    "cur": type("Rect", (), {
+        "xmin": 10.0, "ymin": 20.0, "xmax": 300.0, "ymax": 880.0,
+    })(),
+    "view_to_region": lambda self, x, y, clip=True: (round(x), round(y)),
+})()
+fake_region = type("Region", (), {"view2d": fake_view2d})()
+assert module._view2d_visible_rect(fake_region) == (10.0, 20.0, 301.0, 881.0)
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
