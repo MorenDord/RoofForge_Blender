@@ -27,8 +27,7 @@ module = importlib.import_module(f"{extension.__name__}.addon.ui.vector_plan_pre
 assert module._PANEL_CATEGORY == "RoofForge"
 assert module._DRAW_REGION_TYPE == "UI"
 assert module._LINE_SHADER_NAME == "POLYLINE_UNIFORM_COLOR"
-assert module._PANEL_TOP_RESERVED == 152
-assert module._PANEL_MAX_SIZE == 140
+assert module._MAX_HEIGHT_FRACTION == 0.30
 
 plan = {
     "vertices": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0], [0.0, 3.0, 0.0]],
@@ -60,17 +59,23 @@ assert abs(center_a[0] - 5.0) < 1.0e-7
 assert abs(center_b[0] - 5.0) < 1.0e-7
 assert abs(center_a[1] - center_b[1]) < 1.0e-7
 
-# Layout centres the actual model bounding box and hides the canvas before it
-# could spill into the adjacent editor when the sidebar becomes too narrow.
+# The bounding box is exactly centred in the full N-panel UI region.
+# Widening the sidebar increases the fitted geometry scale.
 assert module._compute_canvas_layout(72, 900, (0.0, 0.0, 4.0, 3.0)) is None
 layout = module._compute_canvas_layout(320, 900, (-2.0, 1.0, 8.0, 6.0))
-assert layout is not None
+wider_layout = module._compute_canvas_layout(420, 900, (-2.0, 1.0, 8.0, 6.0))
+assert layout is not None and wider_layout is not None
 center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
-assert abs(center_x - layout["target_center"][0]) < 1.0e-7
-assert abs(center_y - layout["target_center"][1]) < 1.0e-7
-assert layout["side"] <= module._PANEL_MAX_SIZE
-assert layout["target_center"][1] < 900.0 - module._PANEL_TOP_RESERVED
+assert abs(center_x - 160.0) < 1.0e-7
+assert abs(center_y - 450.0) < 1.0e-7
+assert abs(layout["target_center"][0] - 160.0) < 1.0e-7
+assert abs(layout["target_center"][1] - 450.0) < 1.0e-7
+assert wider_layout["scale"] > layout["scale"]
+assert wider_layout["width"] > layout["width"]
+assert abs(wider_layout["target_center"][1] - 450.0) < 1.0e-7
+assert wider_layout["width"] <= wider_layout["available_width"] + 1.0e-7
+assert wider_layout["height"] <= wider_layout["available_height"] + 1.0e-7
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
