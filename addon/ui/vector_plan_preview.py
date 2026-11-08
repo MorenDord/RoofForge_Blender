@@ -21,12 +21,13 @@ _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
-# Reproduce the old Raster preview's square template-icon layout exactly:
-# its displayed side is region width minus 24 px, inserted after the preview toggle.
-# The GPU overlay is drawn over an invisible ICON_NONE layout anchor.
+# The preview is its own panel directly below the Create / Update panel.
+# Its blank template_icon slot reserves space in normal Blender UI flow.
 _PREVIEW_SLOT_TOP_OFFSET = 126.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
+_PREVIEW_DRAW_INSET = 8.0
+_PREVIEW_SCROLLBAR_GUTTER = 12.0
 _TEMPLATE_ICON_BASE_SIZE = 32.0
 _TEMPLATE_ICON_SIDE_MARGIN = 24.0
 
@@ -86,12 +87,12 @@ def _compute_canvas_layout(
     *,
     ui_scale=1.0,
 ):
-    """Use the former raster preview's square-canvas fit and layout placement.
+    """Fit the roof inside the reserved square UI slot.
 
-    The square is anchored immediately after the Roof plan / Show preview rows,
-    exactly where UILayout.template_icon used to put the PNG preview. Its square
-    size grows with the sidebar width. The bounding box is centred inside that
-    square with the same 7.5% margin and max-span scale as the PNG renderer.
+    The UI slot follows normal panel layout and pushes the next panel down.
+    Its horizontal centre is shifted half the right scrollbar gutter so the
+    drawing is centred in the usable content width, not in the whole region.
+    A small inset keeps antialiased strokes inside the slot boundaries.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
@@ -100,50 +101,69 @@ def _compute_canvas_layout(
     if icon_scale is None:
         return None
 
-    side = _TEMPLATE_ICON_BASE_SIZE * icon_scale
+    slot_side = _TEMPLATE_ICON_BASE_SIZE * icon_scale
     min_x, min_y, max_x, max_y = (float(value) for value in bounds)
     span_x, span_y = max_x - min_x, max_y - min_y
     span = max(span_x, span_y)
     if span <= 1.0e-12:
         return None
 
-    margin = side * _PREVIEW_MARGIN_FRACTION
-    scale = (side - 2.0 * margin) / span
+    inset = _PREVIEW_DRAW_INSET * ui_scale
+    draw_side = slot_side - 2.0 * inset
+    if draw_side <= 2.0:
+        return None
+
+    margin = draw_side * _PREVIEW_MARGIN_FRACTION
+    scale = (draw_side - 2.0 * margin) / span
     if scale <= 0.0:
         return None
 
-    # Match UILayout.template_icon: horizontally centred with a 12 px gutter.
-    canvas_left = (width - side) * 0.5
-    canvas_top = height - _PREVIEW_SLOT_TOP_OFFSET * ui_scale
-    canvas_bottom = canvas_top - side
-    if canvas_bottom < 8.0 * ui_scale:
+    scrollbar_gutter = _PREVIEW_SCROLLBAR_GUTTER * ui_scale
+    slot_left = (width - slot_side - scrollbar_gutter) * 0.5
+    slot_top = height - _PREVIEW_SLOT_TOP_OFFSET * ui_scale
+    slot_bottom = slot_top - slot_side
+    if slot_bottom < 8.0 * ui_scale or slot_left < 0.0:
         return None
 
-    offset_x = (side - span_x * scale) * 0.5
-    offset_y = (side - span_y * scale) * 0.5
-    origin_x = canvas_left + offset_x
-    origin_y = canvas_bottom + offset_y
+    draw_left = slot_left + inset
+    draw_bottom = slot_bottom + inset
+    offset_x = (draw_side - span_x * scale) * 0.5
+    offset_y = (draw_side - span_y * scale) * 0.5
+    origin_x = draw_left + offset_x
+    origin_y = draw_bottom + offset_y
     bbox_center = (
         origin_x + (span_x * scale) * 0.5,
         origin_y + (span_y * scale) * 0.5,
     )
+    target_center = (
+        slot_left + slot_side * 0.5,
+        slot_bottom + slot_side * 0.5,
+    )
     return {
-        "side": side,
+        "side": slot_side,
+        "slot_side": slot_side,
+        "slot_left": slot_left,
+        "slot_bottom": slot_bottom,
+        "slot_top": slot_top,
+        "draw_side": draw_side,
+        "inset": inset,
         "scale": scale,
         "origin_x": origin_x,
         "origin_y": origin_y,
-        "canvas_left": canvas_left,
-        "canvas_bottom": canvas_bottom,
-        "canvas_top": canvas_top,
-        "target_center": (
-            canvas_left + side * 0.5,
-            canvas_bottom + side * 0.5,
-        ),
+        "canvas_left": draw_left,
+        "canvas_bottom": draw_bottom,
+        "canvas_top": draw_bottom + draw_side,
+        "target_center": target_center,
         "bbox_center": bbox_center,
         "margin": margin,
         "icon_scale": icon_scale,
+        "scissor": (
+            round(slot_left),
+            round(slot_bottom),
+            round(slot_side),
+            round(slot_side),
+        ),
     }
-
 
 def _is_panel_scrolled(region):
     """Return True when the UI region's vertical view is not at its top."""
@@ -174,6 +194,8 @@ def _line_color(context):
 
 
 def _draw_vector_preview():
+    scissor_enabled = False
+    shadow_enabled = False
     try:
         context = bpy.context
         region = context.region
@@ -200,10 +222,14 @@ def _draw_vector_preview():
             geometry["bounds"],
             ui_scale=ui_scale,
         )
-        # The UI template-icon anchor reserves the full square and pushes Pitch
-        # and style controls below it. The handler only paints over that square.
         if layout is None:
             return
+
+        # Hard clipping prevents the vector layer from painting over Pitch /
+        # Settings or the neighbouring editor, even if a draw coordinate drifts.
+        gpu.state.scissor_test_set(True)
+        gpu.state.scissor_set(*layout["scissor"])
+        scissor_enabled = True
 
         origin_x = layout["origin_x"]
         origin_y = layout["origin_y"]
@@ -242,35 +268,44 @@ def _draw_vector_preview():
         font_id = 0
         font_size = max(10, int(13 * float(settings.plan_label_scale) * ui_scale))
         blf.size(font_id, font_size)
-        # Outline keeps the number legible over lines in both light and dark themes.
         shadow_color = (1.0, 1.0, 1.0, 0.95) if color[0] < 0.5 else (0.0, 0.0, 0.0, 0.9)
         blf.enable(font_id, blf.SHADOW)
+        shadow_enabled = True
         blf.shadow(font_id, 6, *shadow_color)
         blf.shadow_offset(font_id, 0, 0)
         blf.color(font_id, *color)
         for number, center, _clearance in geometry["labels"]:
             px = screen(center)
             text = str(number)
-            width, height = blf.dimensions(font_id, text)
+            text_width, text_height = blf.dimensions(font_id, text)
             blf.position(
                 font_id,
-                round(px[0] - width * 0.5),
-                round(px[1] - height * 0.5),
+                round(px[0] - text_width * 0.5),
+                round(px[1] - text_height * 0.5),
                 0,
             )
             blf.draw(font_id, text)
         blf.disable(font_id, blf.SHADOW)
+        shadow_enabled = False
 
-        gpu.state.depth_test_set("LESS_EQUAL")
-        gpu.state.blend_set("NONE")
     except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError, KeyError):
+        pass
+    finally:
+        if shadow_enabled:
+            try:
+                blf.disable(0, blf.SHADOW)
+            except (AttributeError, RuntimeError):
+                pass
+        if scissor_enabled:
+            try:
+                gpu.state.scissor_test_set(False)
+            except (AttributeError, RuntimeError):
+                pass
         try:
-            blf.disable(0, blf.SHADOW)
             gpu.state.depth_test_set("LESS_EQUAL")
             gpu.state.blend_set("NONE")
         except (AttributeError, RuntimeError):
             pass
-
 
 def tag_vector_preview_redraw():
     try:
