@@ -24,13 +24,14 @@ _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
 # The preview is its own panel directly below the Create / Update panel.
 # Its blank template_icon slot reserves space in normal Blender UI flow.
-_PREVIEW_SLOT_TOP_OFFSET = 126.0
+_PREVIEW_SLOT_TOP_UNITS = 4.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
 _PREVIEW_DRAW_INSET = 8.0
-_PREVIEW_SCROLLBAR_GUTTER = 12.0
-_TEMPLATE_ICON_BASE_SIZE = 32.0
+_PANEL_CONTENT_LEFT_MARGIN_UNITS = 0.4
+_TEMPLATE_ICON_SCALE_BASE = 32.0
 _TEMPLATE_ICON_SIDE_MARGIN = 24.0
+_WIDGET_UNIT_BASE = 20.0
 
 
 def _prepare_geometry(plan_data):
@@ -84,19 +85,32 @@ def _is_preview_slot_visible(region):
     return bool(key is not None and _PREVIEW_REGION_VISIBILITY.get(key, False))
 
 
-def preview_icon_scale(region_width):
-    """Return the same template_icon scale used by the former raster preview.
+def estimate_widget_unit(ui_scale=1.0):
+    """Estimate Blender's UI_UNIT_X/Y from its exposed resolution scale.
 
-    The old panel used max(1, (region_width - 24) / 32). Keep that exact
-    relationship so the vector drawing and its invisible UI layout anchor
-    always occupy the same square slot.
+    Blender's template_icon uses U.widget_unit for both button dimensions.
+    There is no public Python accessor for U.widget_unit; Blender documents
+    it as approximately 20 * UI_SCALE_FAC, with small DPI/line-width effects.
+    """
+    scale = float(ui_scale)
+    if scale <= 0.0:
+        scale = 1.0
+    return max(1.0, round(_WIDGET_UNIT_BASE * scale))
+
+
+def preview_icon_scale(region_width, *, widget_unit=20.0):
+    """Return the historical template_icon scale, not its pixel dimension.
+
+    Blender creates the actual UI item at UI_UNIT_X/Y * scale. The UI unit is
+    U.widget_unit; it must not be replaced by the unrelated 32px scale divisor.
     """
     width = max(0.0, float(region_width))
+    unit = max(1.0, float(widget_unit))
     side = width - _TEMPLATE_ICON_SIDE_MARGIN
-    if side < _PREVIEW_SLOT_MIN_SIDE:
+    if side <= 0.0:
         return None
-    scale = side / _TEMPLATE_ICON_BASE_SIZE
-    if scale < 1.0:
+    scale = side / _TEMPLATE_ICON_SCALE_BASE
+    if scale < 1.0 or unit * scale < _PREVIEW_SLOT_MIN_SIDE:
         return None
     return min(100.0, scale)
 
@@ -107,6 +121,7 @@ def _compute_canvas_layout(
     bounds,
     *,
     ui_scale=1.0,
+    widget_unit=None,
 ):
     """Fit the roof inside the reserved square UI slot.
 
@@ -118,11 +133,15 @@ def _compute_canvas_layout(
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
     height = max(0.0, float(region_height))
-    icon_scale = preview_icon_scale(width)
+    if widget_unit is None:
+        widget_unit = estimate_widget_unit(ui_scale)
+    widget_unit = max(1.0, float(widget_unit))
+    icon_scale = preview_icon_scale(width, widget_unit=widget_unit)
     if icon_scale is None:
         return None
 
-    slot_side = _TEMPLATE_ICON_BASE_SIZE * icon_scale
+    # template_icon() allocates U.widget_unit * icon_scale on each axis.
+    slot_side = widget_unit * icon_scale
     min_x, min_y, max_x, max_y = (float(value) for value in bounds)
     span_x, span_y = max_x - min_x, max_y - min_y
     span = max(span_x, span_y)
@@ -139,11 +158,13 @@ def _compute_canvas_layout(
     if scale <= 0.0:
         return None
 
-    scrollbar_gutter = _PREVIEW_SCROLLBAR_GUTTER * ui_scale
-    slot_left = (width - slot_side - scrollbar_gutter) * 0.5
-    slot_top = height - _PREVIEW_SLOT_TOP_OFFSET * ui_scale
+    # A normal panel column starts at Blender's UI_PANEL_MARGIN_X:
+    # 0.4 * U.widget_unit. The template_icon is left-aligned in that column;
+    # centring it in the whole region incorrectly shifts it to the right.
+    slot_left = _PANEL_CONTENT_LEFT_MARGIN_UNITS * widget_unit
+    slot_top = height - _PREVIEW_SLOT_TOP_UNITS * widget_unit
     slot_bottom = slot_top - slot_side
-    if slot_bottom < 8.0 * ui_scale or slot_left < 0.0:
+    if slot_bottom < 8.0 * ui_scale or slot_left + slot_side > width:
         return None
 
     draw_left = slot_left + inset
@@ -178,6 +199,7 @@ def _compute_canvas_layout(
         "bbox_center": bbox_center,
         "margin": margin,
         "icon_scale": icon_scale,
+        "widget_unit": widget_unit,
         "scissor": (
             round(slot_left),
             round(slot_bottom),
@@ -199,12 +221,7 @@ def _is_panel_scrolled(region):
 
 
 def _view2d_visible_rect(region):
-    """Return the View2D visible mask in region-local pixel coordinates.
-
-    View2D.view_to_region() maps the current visible view rectangle through
-    Blender's real View2D transform. The +1 converts inclusive pixel maxima
-    into a half-open rectangle suitable for drawing.
-    """
+    """Return (visible_rect, error) in region-local pixel coordinates."""
     try:
         view2d = region.view2d
         current = view2d.cur
@@ -214,15 +231,17 @@ def _view2d_visible_rect(region):
         last = view2d.view_to_region(
             float(current.xmax), float(current.ymax), clip=False
         )
+        if first is None or last is None:
+            return None, "view_to_region returned None"
         left = min(float(first[0]), float(last[0]))
         bottom = min(float(first[1]), float(last[1]))
         right = max(float(first[0]), float(last[0])) + 1.0
         top = max(float(first[1]), float(last[1])) + 1.0
         if right <= left or top <= bottom:
-            return None
-        return (left, bottom, right, top)
-    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
-        return None
+            return None, "empty transformed rectangle"
+        return (left, bottom, right, top), None
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _translate_scissor(scissor, viewport):
@@ -250,12 +269,14 @@ def _rectangle_line_positions(rect):
     )
 
 
-def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color):
-    """Draw real UI/viewport bounds beside the current estimated preview slot."""
+def _draw_debug_overlay(
+    context, region, layout, viewport, ui_scale, text_color, icon_scale
+):
+    """Draw actual Region/GPU bounds and the measured template-icon estimate."""
     width = float(region.width)
     height = float(region.height)
     region_rect = (0.0, 0.0, max(1.0, width), max(1.0, height))
-    view_rect = _view2d_visible_rect(region)
+    view_rect, view_error = _view2d_visible_rect(region)
     slot_rect = (
         float(layout["slot_left"]),
         float(layout["slot_bottom"]),
@@ -263,7 +284,9 @@ def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color)
         float(layout["slot_bottom"] + layout["slot_side"]),
     )
 
-    # Region = red, View2D visible mask = green, estimated icon slot = amber.
+    # Region = red, View2D visible mask = green, GPU viewport local = cyan,
+    # estimated template_icon slot = amber. GPU viewport coordinates already
+    # use the UI region's local framebuffer origin; Region.x/y are window-space.
     rectangles = [
         (region_rect, (1.0, 0.12, 0.12, 1.0)),
     ]
@@ -274,31 +297,27 @@ def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color)
     viewport_x, viewport_y, viewport_width, viewport_height = (
         float(value) for value in viewport
     )
-    try:
-        local_x = viewport_x - float(region.x)
-        local_y = viewport_y - float(region.y)
-        mapped_viewport = (
-            local_x,
-            local_y,
-            local_x + viewport_width,
-            local_y + viewport_height,
+    viewport_rect = (
+        viewport_x,
+        viewport_y,
+        viewport_x + viewport_width,
+        viewport_y + viewport_height,
+    )
+    if (
+        viewport_width > 0.0
+        and viewport_height > 0.0
+        and viewport_rect[0] < width
+        and viewport_rect[1] < height
+        and viewport_rect[2] > 0.0
+        and viewport_rect[3] > 0.0
+    ):
+        viewport_rect = (
+            max(0.0, viewport_rect[0]),
+            max(0.0, viewport_rect[1]),
+            min(width, viewport_rect[2]),
+            min(height, viewport_rect[3]),
         )
-        if (
-            mapped_viewport[2] > 0.0
-            and mapped_viewport[3] > 0.0
-            and mapped_viewport[0] < width
-            and mapped_viewport[1] < height
-        ):
-            mapped_viewport = (
-                max(0.0, mapped_viewport[0]),
-                max(0.0, mapped_viewport[1]),
-                min(width, mapped_viewport[2]),
-                min(height, mapped_viewport[3]),
-            )
-            if mapped_viewport[2] > mapped_viewport[0] and mapped_viewport[3] > mapped_viewport[1]:
-                rectangles.append((mapped_viewport, (0.12, 0.72, 1.0, 1.0)))
-    except (AttributeError, ReferenceError, TypeError, ValueError):
-        mapped_viewport = None
+        rectangles.append((viewport_rect, (0.12, 0.72, 1.0, 1.0))
 
     shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
     for rect, color in rectangles:
@@ -328,8 +347,14 @@ def _draw_debug_overlay(context, region, layout, viewport, ui_scale, text_color)
         f"GPU VP = {round(viewport_x)},{round(viewport_y)} {round(viewport_width)}x{round(viewport_height)}",
         f"EST SLOT L,B,S = {round(slot_rect[0])},{round(slot_rect[1])},{round(layout['slot_side'])}",
     ]
-    if mapped_viewport is not None:
-        lines.append(f"VP-REGION = {format_rect(mapped_viewport)}")
+    if view_rect is None:
+        lines.append(f"VIEW2D ERROR = {view_error or 'unavailable'}")
+    lines.append(
+        f"UI UNIT~{round(layout['widget_unit'], 1)} ICON SCALE={icon_scale:.2f} SLOT~{round(layout['slot_side'])}"
+    )
+    lines.append(
+        f"GPU VP LOCAL={round(viewport_x)},{round(viewport_y)} {round(viewport_width)}x{round(viewport_height)}"
+    )
 
     font_id = 0
     font_size = max(9, int(10 * ui_scale))
@@ -395,11 +420,13 @@ def _draw_vector_preview():
             ui_scale = max(0.5, float(context.preferences.system.ui_scale))
         except (AttributeError, TypeError, ValueError):
             pass
+        widget_unit = estimate_widget_unit(ui_scale)
         layout = _compute_canvas_layout(
             region.width,
             region.height,
             geometry["bounds"],
             ui_scale=ui_scale,
+            widget_unit=widget_unit,
         )
         if layout is None:
             return
@@ -418,6 +445,7 @@ def _draw_vector_preview():
                     viewport,
                     ui_scale,
                     color,
+                    layout["icon_scale"],
                 )
             except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
                 pass
@@ -548,5 +576,6 @@ __all__ = [
     "_compute_canvas_layout",
     "_view2d_visible_rect",
     "_translate_scissor",
+    "estimate_widget_unit",
     "preview_icon_scale",
 ]
