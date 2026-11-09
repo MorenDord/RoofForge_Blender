@@ -91,6 +91,14 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     debug_row.enabled = icon_scale is not None
                     debug_row.prop(settings, "plan_debug_bounds", text="Debug UI bounds")
 
+                    copy_row = body.row()
+                    copy_row.enabled = icon_scale is not None
+                    copy_row.operator(
+                        "roof_forge.copy_preview_debug",
+                        text="Copy debug text",
+                        icon="COPYDOWN",
+                    )
+
                     style = body.column(align=True)
                     style.prop(settings, "plan_label_scale", text="Number size", slider=True)
                     style.prop(settings, "plan_line_width", text="Line thickness", slider=True)
