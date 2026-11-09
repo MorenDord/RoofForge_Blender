@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import bpy
@@ -11,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 6)
+assert extension.bl_info["version"] == (0, 3, 7)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -19,6 +20,7 @@ assert not hasattr(settings, "plan_show_raster")
 assert hasattr(settings, "plan_show_vector")
 assert hasattr(settings, "initial_pitch")
 assert hasattr(bpy.types, "ROOFFORGE_PT_main")
+assert hasattr(bpy.types, "ROOFFORGE_OT_copy_preview_debug")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_plan_preview")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_settings")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
@@ -34,6 +36,7 @@ assert module._PREVIEW_SLOT_TOP_UNITS == 4.0
 assert "scissor_set" in module._draw_vector_preview.__code__.co_names
 assert "scissor_test_set" in module._draw_vector_preview.__code__.co_names
 assert "viewport_get" in module._draw_vector_preview.__code__.co_names
+assert "_build_debug_message" in module._draw_vector_preview.__code__.co_names
 assert "_draw_debug_overlay" in module._draw_vector_preview.__code__.co_names
 assert "set_preview_slot_visible" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
@@ -41,6 +44,7 @@ assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw_header.__code__.co_names
 fake_region = type("Region", (), {"as_pointer": lambda self: 4242})()
 module.set_preview_slot_visible(fake_region, True)
@@ -113,15 +117,52 @@ assert abs(wider_layout["target_center"][0] - 131.75) < 1.0e-7
 assert abs(wider_layout["target_center"][1] - 696.25) < 1.0e-7
 
 fake_view2d = type("View2D", (), {
-    "cur": type("Rect", (), {
-        "xmin": 10.0, "ymin": 20.0, "xmax": 300.0, "ymax": 880.0,
-    })(),
-    "view_to_region": lambda self, x, y, clip=True: (round(x), round(y)),
+    "region_to_view": lambda self, x, y: (x / 2.0, y / 4.0),
+    "view_to_region": lambda self, x, y, clip=True: (round(x * 2.0), round(y * 4.0)),
 })()
-fake_region = type("Region", (), {"view2d": fake_view2d})()
-assert module._view2d_visible_rect(fake_region) == (
-    (10.0, 20.0, 301.0, 881.0), None
+fake_region = type("Region", (), {
+    "width": 100,
+    "height": 50,
+    "x": 1729,
+    "y": 29,
+    "view2d": fake_view2d,
+    "as_pointer": lambda self: 4242,
+})()
+mapping, mapping_error = module._view2d_mapping_info(fake_region)
+assert mapping_error is None
+assert mapping["bottom_left_view"] == (0.0, 0.0)
+assert mapping["top_right_view"] == (49.5, 12.25)
+assert mapping["bottom_left_pixel"] == (0, 0)
+assert mapping["top_right_pixel"] == (99, 49)
+
+message = module._build_debug_message(
+    SimpleNamespace(scene=bpy.context.scene),
+    fake_region,
+    layout,
+    (0, 0, 100, 50),
+    1.25,
 )
+assert "ROOFFORGE PREVIEW DEBUG" in message
+assert "Region: 100x50 @ 1729,29" in message
+assert "View2D error:" not in message
+assert "View2D roundtrip pixels TR: 99.000,49.000" in message
+module._PREVIEW_DEBUG_MESSAGES[4242] = message
+assert module.get_preview_debug_message(fake_region) == message
+
+class FakeOperator:
+    def report(self, levels, text):
+        self.last_report = (levels, text)
+
+fake_operator = FakeOperator()
+fake_context = SimpleNamespace(
+    region=fake_region,
+    window_manager=SimpleNamespace(clipboard=""),
+)
+copy_operator = bpy.types.ROOFFORGE_OT_copy_preview_debug
+assert copy_operator.execute(fake_operator, fake_context) == {"FINISHED"}
+assert fake_context.window_manager.clipboard == message
+assert fake_operator.last_report[0] == {"INFO"}
+module._PREVIEW_DEBUG_MESSAGES.pop(4242, None)
 
 assert not module._is_panel_scrolled(
     type("Region", (), {"view2d": type("View2D", (), {
