@@ -253,3 +253,15 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - The text snapshot includes Blender version, Region size and window-space origin, GPU viewport in local framebuffer coordinates, UI scale, estimated widget unit, `template_icon` scale and estimated slot/draw rectangles.
 - Background Blender smoke covers public View2D mapping, copy operator registration and clipboard string output via a test context.
 - Version: 0.3.7. Clipboard interaction still needs a quick check in an interactive Blender window; the background smoke tests exercise the operator's clipboard assignment with a mock window manager.
+
+
+### 0.3.7 validation and package
+
+- PR head tested: `1245a15aaa03adbf43baaf214af26263c94dbb50`.
+- CI run [42581930937](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42581930937): all seven jobs passed — Python 3.11/3.13, Blender 5.0.1 background smoke, clean ZIP build, official extension validator and benchmark jobs.
+- PR-triggered duplicate run [42581936661](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42581936661) was also started; push run 42581930937 completed successfully.
+- Artifact: `roof_forge-0.3.7-blender-5.0.1`, ID `13658120077`.
+- Outer artifact digest: `41ac36a47344d8919cf39269ca048d28b669f4a82f8fd39a8ccc9002531d56d5`.
+- Inner installable ZIP: `roof_forge-0.3.7.zip`, 30 files, manifest version `0.3.7`; ZIP integrity check passed and the copy operator source is included.
+- Inner ZIP SHA-256 (matches the included sidecar and independently computed): `5f160e329f2f6c1c77ba3a14bdf9b7c4276d4395b2397b76dda3dac38a8390f0`.
+- The tested source no longer references `View2D.cur`; scroll-state tracking uses the public `region_to_view()` mapping with a per-region top baseline.
