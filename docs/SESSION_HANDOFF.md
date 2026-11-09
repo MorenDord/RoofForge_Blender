@@ -223,3 +223,13 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Added smoke coverage for View2D bounds conversion and framebuffer scissor translation.
 - Version: 0.3.5. The debug overlay is off by default. It is a measurement aid, not proof of final panel-item alignment.
 - Request a screenshot with the full RoofForge sidebar and Debug UI bounds enabled before replacing the remaining estimated template-icon slot position.
+
+
+## RoofForge 0.3.6 — correct template_icon dimensions and panel alignment
+
+- Root cause found from Blender's `interface_template_icon.cc`: `template_icon()` allocates `UI_UNIT_X * icon_scale` by `UI_UNIT_Y * icon_scale`; both UI units are `U.widget_unit`. The previous vector code incorrectly treated the unrelated divisor `32` as the physical pixel size, so the GPU square was larger than the real layout item.
+- GPU slot size is now estimated as `round(20 * system.ui_scale) * icon_scale`. Blender does not expose `U.widget_unit` directly in Python; the public UI scale is used as its documented approximation. This is much closer than assuming 32 px per unit.
+- Horizontal alignment no longer recentres the square in the entire UI Region or subtracts a guessed scrollbar gutter. It starts at the panel's internal left margin (`0.4 * widget_unit)).
+- Vertical anchoring is expressed in four UI units for the root panel heading, Create button, nested Roof Plan heading and Show preview row, rather than the old 126 logical-pixel offset.
+- The debug overlay now treats `gpu.state.viewport_get()` as local active-framebuffer coordinates. `Region.x/y` remain window-space and are no longer subtracted from the local GPU viewport. It prints the estimated widget unit and actual `template_icon` slot size, and exposes why View2D mapping is unavailable instead of hiding the exception.
+- Version: 0.3.6. CI must pass before distributing the package. Manual visual QA remains user-confirmed; the UI-unit estimate may still differ slightly with Blender's wide-line/DPI settings.
