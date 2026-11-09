@@ -22,8 +22,7 @@ _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
 
-# The preview is its own panel directly below the Create / Update panel.
-# Its blank template_icon slot reserves space in normal Blender UI flow.
+# A blank template_icon slot reserves space in the nested Roof Plan UI flow.
 _PREVIEW_SLOT_TOP_UNITS = 4.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
@@ -123,12 +122,11 @@ def _compute_canvas_layout(
     ui_scale=1.0,
     widget_unit=None,
 ):
-    """Fit the roof inside the reserved square UI slot.
+    """Fit the roof inside the actual template_icon button dimensions.
 
-    The UI slot follows normal panel layout and pushes the next panel down.
-    Its horizontal centre is shifted half the right scrollbar gutter so the
-    drawing is centred in the usable content width, not in the whole region.
-    A small inset keeps antialiased strokes inside the slot boundaries.
+    Blender sizes template_icon as U.widget_unit * icon_scale in both axes.
+    Its normal panel-column position starts at the UI_PANEL_MARGIN_X inset.
+    The next controls are laid out after that same icon button.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
