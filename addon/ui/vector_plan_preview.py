@@ -18,6 +18,7 @@ _DRAW_HANDLE = None
 _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
 _PREVIEW_REGION_VISIBILITY = {}
+_PREVIEW_DEBUG_MESSAGES = {}
 _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
@@ -218,28 +219,97 @@ def _is_panel_scrolled(region):
 
 
 
-def _view2d_visible_rect(region):
-    """Return (visible_rect, error) in region-local pixel coordinates."""
+def _view2d_mapping_info(region):
+    """Read View2D's public coordinate transform without private cur/tot fields."""
     try:
         view2d = region.view2d
-        current = view2d.cur
-        first = view2d.view_to_region(
-            float(current.xmin), float(current.ymin), clip=False
+        width = max(1.0, float(region.width))
+        height = max(1.0, float(region.height))
+        bottom_left_view = tuple(
+            float(value) for value in view2d.region_to_view(0.0, 0.0)
         )
-        last = view2d.view_to_region(
-            float(current.xmax), float(current.ymax), clip=False
+        top_right_view = tuple(
+            float(value) for value in view2d.region_to_view(width - 1.0, height - 1.0)
         )
-        if first is None or last is None:
-            return None, "view_to_region returned None"
-        left = min(float(first[0]), float(last[0]))
-        bottom = min(float(first[1]), float(last[1]))
-        right = max(float(first[0]), float(last[0])) + 1.0
-        top = max(float(first[1]), float(last[1])) + 1.0
-        if right <= left or top <= bottom:
-            return None, "empty transformed rectangle"
-        return (left, bottom, right, top), None
+        bottom_left_pixel = tuple(
+            int(value) for value in view2d.view_to_region(
+                bottom_left_view[0], bottom_left_view[1], clip=False
+            )
+        )
+        top_right_pixel = tuple(
+            int(value) for value in view2d.view_to_region(
+                top_right_view[0], top_right_view[1], clip=False
+            )
+        )
+        return {
+            "bottom_left_view": bottom_left_view,
+            "top_right_view": top_right_view,
+            "bottom_left_pixel": bottom_left_pixel,
+            "top_right_pixel": top_right_pixel,
+        }, None
     except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
+
+
+def _format_pair(pair):
+    if pair is None:
+        return "unavailable"
+    return f"{pair[0]:.3f},{pair[1]:.3f}"
+
+
+def _build_debug_message(context, region, layout, viewport, ui_scale):
+    """Create the plain-text diagnostic snapshot cached for the Copy button."""
+    mapping, mapping_error = _view2d_mapping_info(region)
+    viewport_x, viewport_y, viewport_width, viewport_height = (
+        int(value) for value in viewport
+    )
+    try:
+        blender_version = bpy.app.version_string
+    except (AttributeError, ReferenceError):
+        blender_version = "unknown"
+    region_x = int(getattr(region, "x", 0))
+    region_y = int(getattr(region, "y", 0))
+    slot_left = float(layout["slot_left"])
+    slot_bottom = float(layout["slot_bottom"])
+    slot_side = float(layout["slot_side"])
+    draw_side = float(layout["draw_side"])
+    lines = [
+        "ROOFFORGE PREVIEW DEBUG",
+        f"Blender: {blender_version}",
+        f"Region: {int(region.width)}x{int(region.height)} @ {region_x},{region_y}",
+        f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
+        f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
+        f"template_icon: scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
+        (
+            "Estimated slot L,B,R,T: "
+            f"{slot_left:.1f},{slot_bottom:.1f},"
+            f"{slot_left + slot_side:.1f},{slot_bottom + slot_side:.1f}"
+        ),
+        (
+            "Estimated draw box L,B,R,T: "
+            f"{slot_left + layout['inset']:.1f},{slot_bottom + layout['inset']:.1f},"
+            f"{slot_left + layout['inset'] + draw_side:.1f},"
+            f"{slot_bottom + layout['inset'] + draw_side:.1f}"
+        ),
+    ]
+    if mapping is not None:
+        lines.extend((
+            "View2D region_to_view BL: " + _format_pair(mapping["bottom_left_view"]),
+            "View2D region_to_view TR: " + _format_pair(mapping["top_right_view"]),
+            "View2D roundtrip pixels BL: " + _format_pair(mapping["bottom_left_pixel"]),
+            "View2D roundtrip pixels TR: " + _format_pair(mapping["top_right_pixel"]),
+        ))
+    else:
+        lines.append("View2D error: " + (mapping_error or "unavailable"))
+    return "\n".join(lines)
+
+
+def get_preview_debug_message(region):
+    """Return the most recent debug snapshot for this UI region."""
+    key = _region_key(region)
+    if key is None:
+        return ""
+    return str(_PREVIEW_DEBUG_MESSAGES.get(key, ""))
 
 
 def _translate_scissor(scissor, viewport):
@@ -267,60 +337,41 @@ def _rectangle_line_positions(rect):
     )
 
 
-def _draw_debug_overlay(
-    context, region, layout, viewport, ui_scale, text_color, icon_scale
-):
-    """Draw actual Region/GPU bounds and the measured template-icon estimate."""
+def _draw_debug_overlay(region, layout, viewport, ui_scale, text_color, message):
+    """Draw the estimated slot and viewport, then print the copyable snapshot."""
     width = float(region.width)
     height = float(region.height)
     region_rect = (0.0, 0.0, max(1.0, width), max(1.0, height))
-    view_rect, view_error = _view2d_visible_rect(region)
     slot_rect = (
         float(layout["slot_left"]),
         float(layout["slot_bottom"]),
         float(layout["slot_left"] + layout["slot_side"]),
         float(layout["slot_bottom"] + layout["slot_side"]),
     )
-
-    # Region = red, View2D visible mask = green, GPU viewport local = cyan,
-    # estimated template_icon slot = amber. GPU viewport coordinates already
-    # use the UI region's local framebuffer origin; Region.x/y are window-space.
-    rectangles = [
-        (region_rect, (1.0, 0.12, 0.12, 1.0)),
-    ]
-    if view_rect is not None:
-        rectangles.append((view_rect, (0.12, 1.0, 0.28, 1.0)))
-    rectangles.append((slot_rect, (1.0, 0.72, 0.08, 1.0)))
-
     viewport_x, viewport_y, viewport_width, viewport_height = (
         float(value) for value in viewport
     )
     viewport_rect = (
-        viewport_x,
-        viewport_y,
-        viewport_x + viewport_width,
-        viewport_y + viewport_height,
+        max(0.0, viewport_x),
+        max(0.0, viewport_y),
+        min(width, viewport_x + viewport_width),
+        min(height, viewport_y + viewport_height),
     )
-    if (
-        viewport_width > 0.0
-        and viewport_height > 0.0
-        and viewport_rect[0] < width
-        and viewport_rect[1] < height
-        and viewport_rect[2] > 0.0
-        and viewport_rect[3] > 0.0
-    ):
-        viewport_rect = (
-            max(0.0, viewport_rect[0]),
-            max(0.0, viewport_rect[1]),
-            min(width, viewport_rect[2]),
-            min(height, viewport_rect[3]),
-        )
+
+    rectangles = [
+        (region_rect, (1.0, 0.12, 0.12, 1.0)),
+        (slot_rect, (1.0, 0.72, 0.08, 1.0)),
+    ]
+    if viewport_rect[2] > viewport_rect[0] and viewport_rect[3] > viewport_rect[1]:
         rectangles.append((viewport_rect, (0.12, 0.72, 1.0, 1.0)))
 
     shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
     for rect, color in rectangles:
-        positions = _rectangle_line_positions(rect)
-        batch = batch_for_shader(shader, "LINES", {"pos": positions})
+        batch = batch_for_shader(
+            shader,
+            "LINES",
+            {"pos": _rectangle_line_positions(rect)},
+        )
         shader.bind()
         shader.uniform_float(
             "viewportSize",
@@ -329,29 +380,6 @@ def _draw_debug_overlay(
         shader.uniform_float("lineWidth", max(1.0, 1.6 * ui_scale))
         shader.uniform_float("color", color)
         batch.draw(shader)
-
-    def format_rect(rect):
-        if rect is None:
-            return "unavailable"
-        return ",".join(str(round(value)) for value in rect)
-
-    region_origin = (
-        round(float(getattr(region, "x", 0))),
-        round(float(getattr(region, "y", 0))),
-    )
-    lines = [
-        f"REGION {round(width)}x{round(height)} @ {region_origin[0]},{region_origin[1]}",
-        f"VIEW2D L,B,R,T = {format_rect(view_rect)}",
-        f"EST SLOT L,B,S = {round(slot_rect[0])},{round(slot_rect[1])},{round(layout['slot_side'])}",
-    ]
-    if view_rect is None:
-        lines.append(f"VIEW2D ERROR = {view_error or 'unavailable'}")
-    lines.append(
-        f"UI UNIT~{round(layout['widget_unit'], 1)} ICON SCALE={icon_scale:.2f} SLOT~{round(layout['slot_side'])}"
-    )
-    lines.append(
-        f"GPU VP LOCAL={round(viewport_x)},{round(viewport_y)} {round(viewport_width)}x{round(viewport_height)}"
-    )
 
     font_id = 0
     font_size = max(9, int(10 * ui_scale))
@@ -367,10 +395,11 @@ def _draw_debug_overlay(
         blf.shadow_offset(font_id, 1, -1)
         blf.color(font_id, *text_color)
         label_y = max(4.0, height - 15.0 * ui_scale)
-        for line in lines:
+        line_step = max(11.0, (font_size + 2.0) * 1.15)
+        for line in message.splitlines():
             blf.position(font_id, round(6.0 * ui_scale), round(label_y), 0)
             blf.draw(font_id, line)
-            label_y -= 12.0 * ui_scale
+            label_y -= line_step
     finally:
         blf.disable(font_id, blf.SHADOW)
 
@@ -433,16 +462,26 @@ def _draw_vector_preview():
         gpu.state.blend_set("ALPHA")
         gpu.state.depth_test_set("NONE")
 
+        debug_message = _build_debug_message(
+            context,
+            region,
+            layout,
+            viewport,
+            ui_scale,
+        )
+        region_key = _region_key(region)
+        if region_key is not None:
+            _PREVIEW_DEBUG_MESSAGES[region_key] = debug_message
+
         if getattr(settings, "plan_debug_bounds", False):
             try:
                 _draw_debug_overlay(
-                    context,
                     region,
                     layout,
                     viewport,
                     ui_scale,
                     color,
-                    layout["icon_scale"],
+                    debug_message,
                 )
             except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
                 pass
@@ -563,6 +602,7 @@ def unregister_vector_preview():
     _CACHE_SIGNATURE = None
     _CACHE_GEOMETRY = None
     _PREVIEW_REGION_VISIBILITY.clear()
+    _PREVIEW_DEBUG_MESSAGES.clear()
 
 
 __all__ = [
@@ -573,6 +613,9 @@ __all__ = [
     "_compute_canvas_layout",
     "_view2d_visible_rect",
     "_translate_scissor",
+    "_view2d_mapping_info",
+    "_build_debug_message",
+    "get_preview_debug_message",
     "estimate_widget_unit",
     "preview_icon_scale",
 ]
