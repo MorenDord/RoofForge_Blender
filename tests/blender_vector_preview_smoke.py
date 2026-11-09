@@ -164,18 +164,23 @@ assert fake_context.window_manager.clipboard == message
 assert fake_operator.last_report[0] == {"INFO"}
 module._PREVIEW_DEBUG_MESSAGES.pop(4242, None)
 
-assert not module._is_panel_scrolled(
-    type("Region", (), {"view2d": type("View2D", (), {
-        "cur": type("Rect", (), {"ymax": 100.0})(),
-        "tot": type("Rect", (), {"ymax": 100.0})(),
-    })()})()
-)
-assert module._is_panel_scrolled(
-    type("Region", (), {"view2d": type("View2D", (), {
-        "cur": type("Rect", (), {"ymax": 75.0})(),
-        "tot": type("Rect", (), {"ymax": 100.0})(),
-    })()})()
-)
+scroll_state = {"offset_y": 0.0}
+scroll_view2d = type("View2D", (), {
+    "region_to_view": lambda self, x, y: (x, y + scroll_state["offset_y"]),
+})()
+scroll_region = type("Region", (), {
+    "width": 300,
+    "height": 100,
+    "view2d": scroll_view2d,
+    "as_pointer": lambda self: 5151,
+})()
+assert not module._is_panel_scrolled(scroll_region)
+scroll_state["offset_y"] = -25.0
+assert module._is_panel_scrolled(scroll_region)
+scroll_state["offset_y"] = 0.0
+assert not module._is_panel_scrolled(scroll_region)
+assert "cur" not in module._is_panel_scrolled.__code__.co_names
+assert "tot" not in module._is_panel_scrolled.__code__.co_names
 
 settings.roof_plan_json = json.dumps(plan)
 assert module._DRAW_HANDLE is not None
