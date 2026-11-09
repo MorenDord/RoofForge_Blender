@@ -1,7 +1,11 @@
 """RoofForge's compact workflow panel."""
 import bpy
 
-from .vector_plan_preview import preview_icon_scale, set_preview_slot_visible
+from .vector_plan_preview import (
+    estimate_widget_unit,
+    preview_icon_scale,
+    set_preview_slot_visible,
+)
 
 
 def _draw_common_settings(layout, settings):
@@ -64,7 +68,19 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                 body.prop(settings, "plan_show_vector", text="Show preview")
                 if settings.plan_show_vector:
                     region_width = getattr(context.region, "width", 320)
-                    icon_scale = preview_icon_scale(region_width)
+                    ui_scale = 1.0
+                    try:
+                        ui_scale = max(
+                            0.5,
+                            float(context.preferences.system.ui_scale),
+                        )
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                    widget_unit = estimate_widget_unit(ui_scale)
+                    icon_scale = preview_icon_scale(
+                        region_width,
+                        widget_unit=widget_unit,
+                    )
                     if icon_scale is None:
                         body.label(text="Widen the N-panel to view the plan", icon="INFO")
                     else:
