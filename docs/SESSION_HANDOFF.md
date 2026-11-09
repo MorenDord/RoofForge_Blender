@@ -243,3 +243,13 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Outer artifact digest: `4371e6b4a6b230057803be0da1d0955d264200d2f0914a637c0e90cf70d1e5e4`.
 - Inner installable ZIP: `roof_forge-0.3.6.zip`, 29 files, manifest version `0.3.6`, ZIP integrity check passed.
 - Inner ZIP SHA-256 independently matched its sidecar: `93516d4f3473bb786b9da2a667d5896d403828ffe6e9a0302ebd5c7405d581f5`.
+
+
+## RoofForge 0.3.7 — copyable preview diagnostics
+
+- Added a **Copy debug text** button below the **Debug UI bounds** toggle.
+- The draw handler continuously caches a per-UI-region diagnostic snapshot. The operator `roof_forge.copy_preview_debug` writes the latest snapshot to `context.window_manager.clipboard`.
+- Replaced direct `View2D.cur` access with the public Blender 5.0 API methods `region_to_view(x, y)` and `view_to_region(x, y, clip=False)`. Blender's RNA wrapper does not expose the internal `cur` field; the copied message now reports view-space corners and their pixel round-trip, or the explicit mapping error.
+- The text snapshot includes Blender version, Region size and window-space origin, GPU viewport in local framebuffer coordinates, UI scale, estimated widget unit, `template_icon` scale and estimated slot/draw rectangles.
+- Background Blender smoke covers public View2D mapping, copy operator registration and clipboard string output via a test context.
+- Version: 0.3.7. Clipboard interaction still needs a quick check in an interactive Blender window; the background smoke tests exercise the operator's clipboard assignment with a mock window manager.
