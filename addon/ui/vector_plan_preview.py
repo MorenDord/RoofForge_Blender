@@ -317,7 +317,7 @@ def _draw_debug_overlay(
             min(width, viewport_rect[2]),
             min(height, viewport_rect[3]),
         )
-        rectangles.append((viewport_rect, (0.12, 0.72, 1.0, 1.0))
+        rectangles.append((viewport_rect, (0.12, 0.72, 1.0, 1.0)))
 
     shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
     for rect, color in rectangles:
@@ -344,7 +344,6 @@ def _draw_debug_overlay(
     lines = [
         f"REGION {round(width)}x{round(height)} @ {region_origin[0]},{region_origin[1]}",
         f"VIEW2D L,B,R,T = {format_rect(view_rect)}",
-        f"GPU VP = {round(viewport_x)},{round(viewport_y)} {round(viewport_width)}x{round(viewport_height)}",
         f"EST SLOT L,B,S = {round(slot_rect[0])},{round(slot_rect[1])},{round(layout['slot_side'])}",
     ]
     if view_rect is None:
