@@ -19,6 +19,7 @@ _CACHE_SIGNATURE = None
 _CACHE_GEOMETRY = None
 _PREVIEW_REGION_VISIBILITY = {}
 _PREVIEW_DEBUG_MESSAGES = {}
+_PREVIEW_REGION_TOP_VIEW_Y = {}
 _PANEL_CATEGORY = "RoofForge"
 _DRAW_REGION_TYPE = "UI"
 _LINE_SHADER_NAME = "POLYLINE_UNIFORM_COLOR"
@@ -208,12 +209,25 @@ def _compute_canvas_layout(
     }
 
 def _is_panel_scrolled(region):
-    """Return True when the UI region's vertical view is not at its top."""
+    """Approximate scroll state using public View2D mapping and a top baseline.
+
+    Blender's internal View2D.cur/tot rectangles are not exposed in Python.
+    At first visible draw, remember the view coordinate at the top pixel.
+    Scrolling down decreases that coordinate; expanding content at the top
+    may increase it, in which case the baseline is refreshed.
+    """
+    key = _region_key(region)
+    if key is None:
+        return False
     try:
         view2d = region.view2d
-        current_top = float(view2d.cur.ymax)
-        content_top = float(view2d.tot.ymax)
-        return (content_top - current_top) > 2.0
+        top_pixel = max(0.0, float(region.height) - 1.0)
+        current_top = float(view2d.region_to_view(0.0, top_pixel)[1])
+        baseline = _PREVIEW_REGION_TOP_VIEW_Y.get(key)
+        if baseline is None or current_top > float(baseline) + 2.0:
+            _PREVIEW_REGION_TOP_VIEW_Y[key] = current_top
+            return False
+        return (float(baseline) - current_top) > 2.0
     except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
         return False
 
@@ -603,6 +617,7 @@ def unregister_vector_preview():
     _CACHE_GEOMETRY = None
     _PREVIEW_REGION_VISIBILITY.clear()
     _PREVIEW_DEBUG_MESSAGES.clear()
+    _PREVIEW_REGION_TOP_VIEW_Y.clear()
 
 
 __all__ = [
