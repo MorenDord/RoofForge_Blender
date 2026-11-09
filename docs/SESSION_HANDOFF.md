@@ -233,3 +233,13 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Vertical anchoring is expressed in four UI units for the root panel heading, Create button, nested Roof Plan heading and Show preview row, rather than the old 126 logical-pixel offset.
 - The debug overlay now treats `gpu.state.viewport_get()` as local active-framebuffer coordinates. `Region.x/y` remain window-space and are no longer subtracted from the local GPU viewport. It prints the estimated widget unit and actual `template_icon` slot size, and exposes why View2D mapping is unavailable instead of hiding the exception.
 - Version: 0.3.6. CI must pass before distributing the package. Manual visual QA remains user-confirmed; the UI-unit estimate may still differ slightly with Blender's wide-line/DPI settings.
+
+
+### 0.3.6 validation and package
+
+- PR head: `79958504cfc08fe9dcb8127722599781ebc77d0d`.
+- CI run [42538925796](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42538925796): all seven jobs passed, including Python 3.11/3.13, Blender 5.0.1 smoke, clean extension ZIP, official extension validator and all benchmark jobs.
+- Artifact: `roof_forge-0.3.6-blender-5.0.1`, ID `13639953240`.
+- Outer artifact digest: `4371e6b4a6b230057803be0da1d0955d264200d2f0914a637c0e90cf70d1e5e4`.
+- Inner installable ZIP: `roof_forge-0.3.6.zip`, 29 files, manifest version `0.3.6`, ZIP integrity check passed.
+- Inner ZIP SHA-256 independently matched its sidecar: `93516d4f3473bb786b9da2a667d5896d403828ffe6e9a0302ebd5c7405d581f5`.
