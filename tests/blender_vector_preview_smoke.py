@@ -20,7 +20,13 @@ assert not hasattr(settings, "plan_show_raster")
 assert hasattr(settings, "plan_show_vector")
 assert hasattr(settings, "initial_pitch")
 assert hasattr(bpy.types, "ROOFFORGE_PT_main")
-assert hasattr(bpy.types, "ROOFFORGE_OT_copy_preview_debug")
+# INTERNAL operators are exposed through bpy.ops rather than bpy.types.
+assert hasattr(bpy.ops.roof_forge, "copy_preview_debug")
+registration_module = importlib.import_module(f"{extension.__name__}.addon.registration")
+copy_operator_module = importlib.import_module(
+    f"{extension.__name__}.addon.operators.copy_preview_debug"
+)
+assert copy_operator_module.ROOFFORGE_OT_copy_preview_debug in registration_module._CLASSES
 assert not hasattr(bpy.types, "ROOFFORGE_PT_plan_preview")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_settings")
 assert not hasattr(bpy.types, "ROOFFORGE_PT_vector_preview")
@@ -158,7 +164,7 @@ fake_context = SimpleNamespace(
     region=fake_region,
     window_manager=SimpleNamespace(clipboard=""),
 )
-copy_operator = bpy.types.ROOFFORGE_OT_copy_preview_debug
+copy_operator = copy_operator_module.ROOFFORGE_OT_copy_preview_debug
 assert copy_operator.execute(fake_operator, fake_context) == {"FINISHED"}
 assert fake_context.window_manager.clipboard == message
 assert fake_operator.last_report[0] == {"INFO"}
