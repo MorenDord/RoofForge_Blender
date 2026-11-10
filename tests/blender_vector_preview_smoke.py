@@ -12,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 7)
+assert extension.bl_info["version"] == (0, 3, 8)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -210,4 +210,4 @@ settings.roof_plan_json = ""
 module.unregister_vector_preview()
 assert module._DRAW_HANDLE is None
 extension.unregister()
-print("RoofForge vector preview smoke tests passed")
+print("ROOFFORGE_VECTOR_PREVIEW_SMOKE_OK")

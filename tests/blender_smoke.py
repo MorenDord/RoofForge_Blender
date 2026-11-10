@@ -340,6 +340,52 @@ def main() -> None:
         "roof plan changed source contour coordinates",
     )
 
+    # Recreate after the result is deleted while the source is no longer active.
+    plan_roof = plan_settings.generated_object
+    plan_source.select_set(False)
+    bpy.context.view_layer.objects.active = plan_roof
+    plan_roof.select_set(True)
+    bpy.data.objects.remove(plan_roof, do_unlink=True)
+    bpy.context.view_layer.update()
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Generate did not recover the stored source after deleting the roof",
+    )
+    recreated_plan_roof = plan_settings.generated_object
+    ensure(
+        recreated_plan_roof is not None
+        and recreated_plan_roof.get("roof_forge_generated", False),
+        "deleted roof was not recreated from the stored contour object",
+    )
+
+    # Edit the source contour in Edit Mode, exit, then explicitly rebuild.
+    recreated_plan_roof.select_set(False)
+    plan_source.select_set(True)
+    bpy.context.view_layer.objects.active = plan_source
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm_source = bmesh.from_edit_mesh(plan_source.data)
+    bm_source.verts.ensure_lookup_table()
+    bm_source.verts[0].co.x -= 0.25
+    bmesh.update_edit_mesh(plan_source.data, loop_triangles=False, destructive=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    old_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in recreated_plan_roof.data.vertices
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Create / Update failed after editing the source contour in Edit Mode",
+    )
+    new_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in plan_settings.generated_object.data.vertices
+    )
+    ensure(
+        old_rebuilt_vertices != new_rebuilt_vertices,
+        "manual regeneration did not use the edited source contour",
+    )
+
+
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
     oversized = create_regular_wire_loop("RoofForge_Smoke_OverLimit", 65)
@@ -465,51 +511,6 @@ def main() -> None:
         f"expected exactly one re-created roof, got {len(generated_for_source)}",
     )
 
-
-    # Recreate after the result is deleted while the source is no longer active.
-    plan_roof = plan_settings.generated_object
-    plan_source.select_set(False)
-    bpy.context.view_layer.objects.active = plan_roof
-    plan_roof.select_set(True)
-    bpy.data.objects.remove(plan_roof, do_unlink=True)
-    bpy.context.view_layer.update()
-    ensure(
-        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "Generate did not recover the stored source after deleting the roof",
-    )
-    recreated_plan_roof = plan_settings.generated_object
-    ensure(
-        recreated_plan_roof is not None
-        and recreated_plan_roof.get("roof_forge_generated", False),
-        "deleted roof was not recreated from the stored contour object",
-    )
-
-    # Edit the source contour in Edit Mode, exit, then explicitly rebuild.
-    recreated_plan_roof.select_set(False)
-    plan_source.select_set(True)
-    bpy.context.view_layer.objects.active = plan_source
-    bpy.ops.object.mode_set(mode="EDIT")
-    bm_source = bmesh.from_edit_mesh(plan_source.data)
-    bm_source.verts.ensure_lookup_table()
-    bm_source.verts[0].co.x -= 0.25
-    bmesh.update_edit_mesh(plan_source.data, loop_triangles=False, destructive=False)
-    bpy.ops.object.mode_set(mode="OBJECT")
-    old_rebuilt_vertices = tuple(
-        tuple(float(value) for value in vertex.co)
-        for vertex in recreated_plan_roof.data.vertices
-    )
-    ensure(
-        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
-        "Create / Update failed after editing the source contour in Edit Mode",
-    )
-    new_rebuilt_vertices = tuple(
-        tuple(float(value) for value in vertex.co)
-        for vertex in plan_settings.generated_object.data.vertices
-    )
-    ensure(
-        old_rebuilt_vertices != new_rebuilt_vertices,
-        "manual regeneration did not use the edited source contour",
-    )
 
     # Concave U contour without overhang: preserve the established solver.
     clear_scene()
