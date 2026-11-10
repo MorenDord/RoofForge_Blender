@@ -726,14 +726,23 @@ def main() -> None:
     )
     for item, pitch in zip(concave_settings.slope_settings, stable_u_pitches):
         item.pitch = pitch
-    ensure(
-        bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
-        "over-wide concave offset unexpectedly bypassed the polygon-topology guard",
-    )
+    try:
+        oversized_result = bpy.ops.roof_forge.generate_surface()
+    except RuntimeError as exc:
+        oversized_diagnostic = str(exc).lower()
+        ensure(
+            "самопересекается" in oversized_diagnostic or "схлоп" in oversized_diagnostic,
+            "over-wide concave offset did not report its invalid outer contour",
+        )
+    else:
+        ensure(
+            oversized_result == {"CANCELLED"},
+            "over-wide concave offset unexpectedly bypassed the polygon-topology guard",
+        )
     ensure(
         "самопересекается" in concave_settings.last_status.lower()
         or "схлоп" in concave_settings.last_status.lower(),
-        "over-wide concave offset did not explain why the U outline is invalid",
+        "over-wide concave offset did not preserve its diagnostic in panel status",
     )
 
     extension.unregister()
