@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.7.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.8.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -20,7 +20,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes. The vector plan geometry is cached from the latest successful roof build and redrawn directly by Blender's GPU handler.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- **Source-anchored eaves:** for convex contours, the pitch planes are constructed through the original 3D source edges. The outward domain uses one outer corner per source vertex. With **Converge corners** enabled (default), each outer corner lies on both adjacent pitch planes, so slopes meet at one point; extension length may vary around the perimeter. Disable it to use the previous uniform miter offset. Concave contours still generate normally with zero overhang; nonzero overhang is rejected for concave contours.
+- **Source-anchored eaves:** convex contours continue to use the original 3D support-plane envelope. Concave flat-eave L/U contours now use the weighted wavefront roof plus one exact coplanar overhang strip per source edge. With **Converge corners** enabled (required for concave contours), adjacent strips meet at one shared outer corner while each strip remains on its source slope plane. The source eave line remains fixed.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
 - Coplanar internal edges are dissolved from the generated Blender mesh, while true ridges and the outer boundary remain.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm. Before the first roof build, **Initial Pitch** sets the value copied to every contour edge (default 30°); individual Pitch values can then be edited independently.
@@ -48,7 +48,7 @@ This is a tested family of cases, not a proof for every possible simple polygon.
 
 ### Mixed-height 3D eaves
 
-If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver. With overhang, each source-edge plane still passes through its original endpoints; corner convergence computes a shared outer-corner point on the adjacent planes. Convex mixed-height fixtures are covered by CI. Concave mixed-height contours are not guaranteed and nonzero concave overhang is rejected.
+If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver. With overhang, each source-edge plane still passes through its original endpoints; corner convergence computes a shared outer-corner point on the adjacent planes. Convex mixed-height fixtures are covered by CI. Concave mixed-height contours are not guaranteed; positive concave overhang requires all eaves to share one Z height.
 
 ### Other current limits
 
@@ -56,12 +56,12 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Concave L/U contours remain supported without overhang; positive overhang on concave contours is deliberately rejected until a reflex-corner transition solver is available.
+- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave eaves, offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations are rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.4-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.4.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.8-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.8.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -75,7 +75,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke checks corner-converged convex eaves, equal boundary-vertex count, uniform-offset fallback, source-edge support alignment, concave no-overhang, vector-plan edge extraction and stable label anchors, configurable initial pitch, one-click generation, delete/recreate from a stored source and rebuild after editing the source contour. Manual viewport QA is still required.
+Blender 5.0.1 background smoke checks corner-converged convex eaves, positive L/U concave overhang, equal boundary-vertex count, uniform-offset fallback, source-edge support alignment, concave no-overhang, vector-plan edge extraction and stable label anchors, configurable initial pitch, one-click generation, delete/recreate from a stored source and rebuild after editing the source contour. Manual viewport QA is still required.
 
 ## License
 

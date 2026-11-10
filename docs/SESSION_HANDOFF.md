@@ -265,3 +265,13 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Inner installable ZIP: `roof_forge-0.3.7.zip`, 30 files, manifest version `0.3.7`; ZIP integrity check passed and the copy operator source is included.
 - Inner ZIP SHA-256 (matches the included sidecar and independently computed): `5f160e329f2f6c1c77ba3a14bdf9b7c4276d4395b2397b76dda3dac38a8390f0`.
 - The tested source no longer references `View2D.cur`; scroll-state tracking uses the public `region_to_view()` mapping with a per-region top baseline.
+
+
+## RoofForge 0.3.8 — positive overhang for concave flat-eave contours
+
+- Convex source-anchored overhang remains on the established plane-envelope path.
+- Concave contours with one common eave Z use the tested weighted-wavefront roof as their base surface. A single offset corner per source vertex is projected to the intersection of its adjacent pitch planes. Every original boundary edge is extended by a planar quad strip on that edge's own pitch plane; the strips replace the source boundary and share one outer corner.
+- The assembled upper surface is checked for exact projected ring area, strip-to-edge mapping, source-plane membership, expanded-boundary coverage and edge incidence. The normal shell builder then checks the closed shell for manifold topology.
+- **Converge corners** is required for positive concave overhang. Mixed-height concave eaves are explicitly rejected. Offsets that self-intersect, close an L/U notch, or fail wavefront event validation are rejected rather than repaired.
+- Added pure-Python regression fixtures for L and U shapes, asymmetric L pitch, reversed winding with preserved edge-pitch mapping, flat-eave enforcement, convergence requirement, and an over-wide U offset. Blender background smoke also exercises positive L and U overhang through the actual Generate operator.
+- Version: 0.3.8. The weighted-wavefront solver is still a bounded alpha, not a guarantee for every simple concave polygon. Do not describe arbitrary concave contours or mixed-height concave eaves as supported.
