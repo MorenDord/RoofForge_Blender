@@ -40,6 +40,11 @@ def _is_convex_xy(points: Sequence[Point3], eps: float = 1e-9) -> bool:
     return sign != 0
 
 
+def is_convex_contour_xy(points: Sequence[Point3], eps: float = 1e-9) -> bool:
+    """Public contour predicate shared by the Blender build-path diagnostics."""
+    return _is_convex_xy(points, eps)
+
+
 def offset_contour_outward(
     points: Sequence[Point3],
     distance: float,
@@ -252,12 +257,6 @@ def corner_converged_overhang_contour(
     source = tuple(
         tuple(float(value) for value in point) for point in points
     )
-    if not _is_convex_xy(source):
-        raise GeometryInputError(
-            "OVERHANG_CONCAVE_UNSUPPORTED",
-            "Схождение углов свеса пока поддерживается только для выпуклого контура."
-        )
-
     reference = offset_contour_outward(source, distance, eps)
     planes = build_boundary_planes(source, pitches_degrees, eps)
     winding = 1.0 if signed_area([(p[0], p[1]) for p in source]) > 0.0 else -1.0
@@ -357,6 +356,175 @@ def corner_converged_overhang_contour(
     return tuple(result)
 
 
+def _point_parameter_on_segment(point: Point2, start: Point2, end: Point2, tolerance: float) -> float | None:
+    """Return the point's segment parameter when it lies on the segment."""
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq <= tolerance * tolerance:
+        return None
+    parameter = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_sq
+    length = length_sq ** 0.5
+    if parameter < -tolerance / length or parameter > 1.0 + tolerance / length:
+        return None
+    closest = (start[0] + parameter * dx, start[1] + parameter * dy)
+    if hypot(point[0] - closest[0], point[1] - closest[1]) > tolerance:
+        return None
+    return max(0.0, min(1.0, parameter))
+
+
+def _point_in_polygon(point: Point2, polygon: Sequence[Point2], tolerance: float) -> bool:
+    """Inclusive ray-cast test used to prove that the offset contains its source."""
+    x, y = point
+    inside = False
+    for index, start in enumerate(polygon):
+        end = polygon[(index + 1) % len(polygon)]
+        if _point_parameter_on_segment(point, start, end, tolerance) is not None:
+            return True
+        if (start[1] > y) != (end[1] > y):
+            crossing_x = start[0] + (y - start[1]) * (end[0] - start[0]) / (end[1] - start[1])
+            if x < crossing_x:
+                inside = not inside
+    return inside
+
+
+def _build_concave_wavefront_overhang_surface(points: Sequence[Point3], pitches_degrees: Sequence[float], distance: float, *, eps: float):
+    """Extend a concave wavefront roof with exact planar eave strips."""
+    from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
+    from .wavefront import build_wavefront_roof_surface, is_flat_eave_contour
+
+    if not is_flat_eave_contour(points, eps):
+        raise GeometryInputError(
+            "OVERHANG_CONCAVE_NON_FLAT_EAVES",
+            "Для свеса невыпуклого контура пока нужна одна общая высота всех карнизов. Выровняй исходные вершины по Z.",
+        )
+
+    source = tuple(tuple(float(value) for value in point) for point in points)
+    expanded = corner_converged_overhang_contour(source, pitches_degrees, distance, eps)
+    source_xy = tuple((point[0], point[1]) for point in source)
+    expanded_xy = tuple((point[0], point[1]) for point in expanded)
+    scale = max(
+        1.0,
+        max(point[0] for point in source) - min(point[0] for point in source),
+        max(point[1] for point in source) - min(point[1] for point in source),
+        distance,
+    )
+    linear_tolerance = max(1e-10, eps * scale * 100.0)
+    area_tolerance = max(eps * scale * scale * 100.0, 1e-12)
+    source_area = abs(signed_area(source_xy))
+    expanded_area = abs(signed_area(expanded_xy))
+    if expanded_area <= source_area + area_tolerance:
+        raise GeometryInputError("OVERHANG_OFFSET_NOT_EXPANDED", "Смещённый внешний контур не увеличил площадь крыши.")
+
+    # A valid miter offset must contain the complete source boundary. This rejects offsets that close a narrow notch.
+    for edge_index, start in enumerate(source_xy):
+        end = source_xy[(edge_index + 1) % len(source_xy)]
+        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+            sample = (start[0] + (end[0] - start[0]) * fraction, start[1] + (end[1] - start[1]) * fraction)
+            if not _point_in_polygon(sample, expanded_xy, linear_tolerance * 5.0):
+                raise GeometryInputError(
+                    "OVERHANG_OFFSET_NOT_NESTED",
+                    f"Свес {distance:.6g} схлопывает или пересекает вогнутый участок у ребра {edge_index + 1}. Уменьши ширину свеса.",
+                )
+
+    # Validate offset geometry before invoking wavefront events.
+    base_surface = build_wavefront_roof_surface(source, pitches_degrees, eps=eps)
+    source_boundary_edges = validate_surface_boundary_edges(
+        base_surface.vertices, base_surface.faces, source_xy, linear_tolerance * 5.0
+    )
+    planes = build_boundary_planes(source, pitches_degrees, eps)
+    registry = _VertexRegistry(linear_tolerance)
+    source_index_map = [registry.add(point) for point in base_surface.vertices]
+    faces = [tuple(source_index_map[index] for index in face) for face in base_surface.faces]
+    slope_indices = list(base_surface.face_slope_indices)
+    strip_area = 0.0
+
+    for first_source_index, second_source_index in source_boundary_edges:
+        first_source = base_surface.vertices[first_source_index]
+        second_source = base_surface.vertices[second_source_index]
+        matches = []
+        for edge_index, edge_start in enumerate(source_xy):
+            edge_end = source_xy[(edge_index + 1) % len(source_xy)]
+            first_parameter = _point_parameter_on_segment(
+                (first_source[0], first_source[1]), edge_start, edge_end, linear_tolerance * 5.0
+            )
+            second_parameter = _point_parameter_on_segment(
+                (second_source[0], second_source[1]), edge_start, edge_end, linear_tolerance * 5.0
+            )
+            if first_parameter is not None and second_parameter is not None:
+                matches.append((edge_index, first_parameter, second_parameter))
+        if len(matches) != 1:
+            raise GeometryInputError(
+                "OVERHANG_BOUNDARY_EDGE_MAPPING",
+                "Не удалось однозначно сопоставить сегмент карниза с исходным ребром. Проверь контур на дублирующиеся или нулевые рёбра.",
+            )
+
+        edge_index, first_parameter, second_parameter = matches[0]
+        outer_start = expanded[edge_index]
+        outer_end = expanded[(edge_index + 1) % len(expanded)]
+
+        def outer_point(parameter: float) -> Point3:
+            return tuple(outer_start[axis] + (outer_end[axis] - outer_start[axis]) * parameter for axis in range(3))
+
+        first_outer = outer_point(first_parameter)
+        second_outer = outer_point(second_parameter)
+        plane = planes[edge_index]
+        for point in (first_outer, second_outer):
+            if abs(point[2] - plane.height(point[0], point[1])) > linear_tolerance * 20.0:
+                raise GeometryInputError(
+                    "OVERHANG_STRIP_PLANE_MISMATCH",
+                    f"Полоса свеса у ребра {edge_index + 1} отклоняется от плоскости ската.",
+                )
+
+        first_outer_index = registry.add(first_outer)
+        second_outer_index = registry.add(second_outer)
+        strip_face = (
+            source_index_map[second_source_index],
+            source_index_map[first_source_index],
+            first_outer_index,
+            second_outer_index,
+        )
+        strip_xy = [(registry.vertices[i][0], registry.vertices[i][1]) for i in strip_face]
+        strip_signed_area = signed_area(strip_xy)
+        if strip_signed_area <= area_tolerance:
+            raise GeometryInputError(
+                "OVERHANG_STRIP_DEGENERATE",
+                f"Полоса свеса у ребра {edge_index + 1} выродилась или пересекает соседнюю полосу. Уменьши ширину свеса.",
+            )
+        strip_area += strip_signed_area
+        faces.append(strip_face)
+        slope_indices.append(edge_index)
+
+    expected_strip_area = expanded_area - source_area
+    if abs(strip_area - expected_strip_area) > max(area_tolerance * 100.0, expected_strip_area * 1e-7):
+        raise GeometryInputError(
+            "OVERHANG_STRIP_COVERAGE",
+            "Полосы свеса не покрывают ровно область между исходным и внешним контурами. Уменьши ширину свеса.",
+        )
+
+    edge_usage: dict[tuple[int, int], int] = {}
+    for face in faces:
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_usage[key] = edge_usage.get(key, 0) + 1
+    if any(count > 2 for count in edge_usage.values()):
+        raise GeometryInputError("OVERHANG_NON_MANIFOLD_SURFACE", "Сборка полос свеса создала неманифольное ребро.")
+
+    vertices = tuple(registry.vertices)
+    validate_surface_boundary_edges(vertices, faces, expanded_xy, linear_tolerance * 5.0)
+    return RoofSurface(
+        vertices=vertices,
+        faces=tuple(faces),
+        face_slope_indices=tuple(slope_indices),
+        planes=tuple(planes),
+        source_area_xy=source_area,
+        surface_area_xy=base_surface.surface_area_xy + strip_area,
+        boundary_xy=expanded_xy,
+        approximation_error=base_surface.approximation_error,
+        refinement_depth=base_surface.refinement_depth,
+    )
+
+
 def build_source_anchored_overhang_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
@@ -364,46 +532,31 @@ def build_source_anchored_overhang_surface(
     *,
     corner_convergence: bool = True,
 ):
-    """Extend a roof beyond the original eaves without moving support lines.
-
-    Pitch planes are built through the original 3D contour first. The outward
-    offset is used only as the roof's XY domain, so the same planes continue
-    beyond the source contour and remain exact along every authored eave edge.
-    """
+    """Extend a roof beyond its original eaves while retaining source planes."""
     if len(points) < 3 or len(points) != len(pitches_degrees):
-        raise GeometryInputError(
-            "INPUT_COUNT",
-            "Нужно минимум три вершины и по одному уклону на каждое ребро."
-        )
+        raise GeometryInputError("INPUT_COUNT", "Нужно минимум три вершины и по одному уклону на каждое ребро.")
     distance = float(distance)
     if not isfinite(distance) or distance <= 0.0:
-        raise GeometryInputError(
-            "INVALID_OVERHANG",
-            "Для построения свеса нужно положительное конечное расстояние."
-        )
-    source = tuple(
-        tuple(float(value) for value in point) for point in points
-    )
+        raise GeometryInputError("INVALID_OVERHANG", "Для построения свеса нужно положительное конечное расстояние.")
+    source = tuple(tuple(float(value) for value in point) for point in points)
     if not _is_convex_xy(source):
-        raise GeometryInputError(
-            "OVERHANG_CONCAVE_UNSUPPORTED",
-            "Свес с сохранением исходной опорной поверхности пока поддерживается "
-            "только для выпуклого контура. Для вогнутой крыши отключи свес; "
-            "обычная генерация контура остаётся доступна.",
-        )
+        if not corner_convergence:
+            raise GeometryInputError(
+                "OVERHANG_CONCAVE_NEEDS_CORNER_CONVERGENCE",
+                "Для свеса невыпуклого контура включи «Сводить углы»: соседние полосы свеса должны сходиться в общей точке.",
+            )
+        return _build_concave_wavefront_overhang_surface(source, pitches_degrees, distance, eps=1e-9)
+
     planes = build_boundary_planes(source, pitches_degrees)
     expanded = (
         corner_converged_overhang_contour(source, pitches_degrees, distance)
         if corner_convergence
         else offset_contour_outward(source, distance)
     )
-    conflicts = boundary_envelope_conflicts(
-        source, planes, active_contour=source
-    )
+    conflicts = boundary_envelope_conflicts(source, planes, active_contour=source)
     if conflicts:
         first = conflicts[0]
         raise GeometryInputError(first.code, first.message)
-
     domain = [(point[0], point[1]) for point in expanded]
     source_area = abs(signed_area([(point[0], point[1]) for point in source]))
     return build_roof_surface_from_planes(
@@ -416,5 +569,6 @@ __all__ = [
     "offset_contour_outward",
     "corner_converged_overhang_contour",
     "build_source_anchored_overhang_surface",
+    "is_convex_contour_xy",
 ]
 

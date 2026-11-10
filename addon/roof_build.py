@@ -9,7 +9,10 @@ import bmesh
 
 from ..core.geometry import GeometryInputError
 from ..core.mesh import build_roof_surface
-from ..core.overhang import build_source_anchored_overhang_surface
+from ..core.overhang import (
+    build_source_anchored_overhang_surface,
+    is_convex_contour_xy,
+)
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -74,7 +77,12 @@ def _build_roof_surface(points, pitches, overhang, corner_convergence):
             authored_points, pitches, overhang,
             corner_convergence=corner_convergence,
         )
-        return surface, "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
+        solver = (
+            "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
+            if is_convex_contour_xy(authored_points)
+            else "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING"
+        )
+        return surface, solver
     if is_flat_eave_contour(authored_points):
         return build_wavefront_roof_surface(authored_points, pitches), "WEIGHTED_WAVEFRONT_FLAT_EAVE"
     return build_roof_surface(authored_points, pitches), "SUPPORT_PLANE_ENVELOPE_3D"
