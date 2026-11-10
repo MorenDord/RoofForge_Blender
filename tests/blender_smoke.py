@@ -384,9 +384,14 @@ def main() -> None:
     roof = settings.generated_object
     ensure(roof is not None, "generated roof pointer was not stored")
     ensure(
-        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_FLAT_EAVE_OFFSET_CONTOUR",
-        "flat concave L did not use the weighted wavefront solver",
+        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING",
+        "flat concave L did not use the weighted wavefront overhang-ring solver",
     )
+    l_coords = [vertex.co for vertex in roof.data.vertices]
+    ensure(min(v.x for v in l_coords) < -0.05, "concave L overhang did not extend left")
+    ensure(min(v.y for v in l_coords) < -0.05, "concave L overhang did not extend downward")
+    ensure(max(v.x for v in l_coords) > 8.05, "concave L overhang did not extend right")
+    ensure(max(v.y for v in l_coords) > 8.05, "concave L overhang did not extend upward")
     ensure(
         len(roof.data.attributes["roof_forge_slope_index"].data) > 0,
         "per-face slope metadata is missing",
@@ -529,6 +534,27 @@ def main() -> None:
         len(u_roof.data.polygons) > 0,
         "concave U generated an empty mesh",
     )
+
+    # Positive overhang is now available for a supported flat-eave U contour.
+    u_settings.eave_overhang_cm = 15.0
+    u_settings.live_update = False
+    for item in u_settings.slope_settings:
+        item.pitch = 30.0
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "concave U contour with positive overhang did not generate",
+    )
+    u_overhang_roof = u_settings.generated_object
+    ensure(u_overhang_roof is not None, "concave U overhang roof pointer missing")
+    ensure(
+        u_overhang_roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING",
+        "concave U did not use the weighted wavefront overhang-ring solver",
+    )
+    u_overhang_coords = [vertex.co for vertex in u_overhang_roof.data.vertices]
+    ensure(min(v.x for v in u_overhang_coords) < -0.05, "concave U overhang did not extend left")
+    ensure(min(v.y for v in u_overhang_coords) < -0.05, "concave U overhang did not extend downward")
+    ensure(max(v.x for v in u_overhang_coords) > 4.05, "concave U overhang did not extend right")
+    ensure(max(v.y for v in u_overhang_coords) > 4.05, "concave U overhang did not extend upward")
 
     roof_build_for_units = importlib.import_module(
         f"{extension.__name__}.addon.roof_build"
@@ -679,7 +705,7 @@ def main() -> None:
         "non-flat overhang centimeters were not preserved in metadata",
     )
 
-    # Concave contours are explicitly rejected for the source-anchored overhang mode.
+    # An oversized concave offset that closes the U notch must still be rejected.
     clear_scene()
     concave_source = create_u_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
     concave_settings = bpy.context.scene.roof_forge
@@ -696,11 +722,12 @@ def main() -> None:
         item.pitch = pitch
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"CANCELLED"},
-        "concave overhang unexpectedly bypassed the safe-mode restriction",
+        "over-wide concave offset unexpectedly bypassed the polygon-topology guard",
     )
     ensure(
-        "не выполнено" in concave_settings.last_status,
-        "unsupported concave overhang did not produce an actionable diagnostic",
+        "самопересекается" in concave_settings.last_status.lower()
+        or "схлоп" in concave_settings.last_status.lower(),
+        "over-wide concave offset did not explain why the U outline is invalid",
     )
 
     extension.unregister()
@@ -708,7 +735,7 @@ def main() -> None:
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, transparent facet plan, convex source-aligned overhang, concave no-overhang and live rebuild"
+        "automatic boundary detection, transparent facet plan, convex and concave source-aligned overhang, concave no-overhang and live rebuild"
     )
 
 

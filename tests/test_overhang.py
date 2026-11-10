@@ -195,18 +195,28 @@ class RoofOverhangTests(unittest.TestCase):
             tuple((p[0], p[1]) for p in offset_contour_outward(FLAT_RECTANGLE, 0.2)),
         )
 
-    def test_concave_l_overhang_is_rejected_without_moving_support_edges(self):
+    def test_concave_l_overhang_builds_a_closed_source_aligned_shell(self):
         pitches = [31.0, 32.5, 34.0, 35.5, 37.0, 38.5]
-        with self.assertRaises(GeometryInputError) as context:
-            build_source_anchored_overhang_surface(CONCAVE_L, pitches, 0.15)
-        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_UNSUPPORTED")
+        surface = build_source_anchored_overhang_surface(CONCAVE_L, pitches, 0.1)
+        self.assertGreater(
+            surface.surface_area_xy,
+            abs(signed_area([(p[0], p[1]) for p in CONCAVE_L])),
+        )
+        self._assert_support_planes(CONCAVE_L, surface)
+        shell = build_roof_shell(surface, 0.01, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
-    def test_concave_u_overhang_is_rejected_without_moving_support_edges(self):
+    def test_concave_u_overhang_builds_a_closed_source_aligned_shell(self):
         speeds = [0.8, 0.75, 1.0, 1.25, 1.2, 1.4, 1.0, 0.6]
         pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
-        with self.assertRaises(GeometryInputError) as context:
-            build_source_anchored_overhang_surface(CONCAVE_U, pitches, 0.1)
-        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_UNSUPPORTED")
+        surface = build_source_anchored_overhang_surface(CONCAVE_U, pitches, 0.1)
+        self.assertGreater(
+            surface.surface_area_xy,
+            abs(signed_area([(p[0], p[1]) for p in CONCAVE_U])),
+        )
+        self._assert_support_planes(CONCAVE_U, surface)
+        shell = build_roof_shell(surface, 0.01, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_too_large_u_offset_is_rejected(self):
         with self.assertRaises(GeometryInputError):
