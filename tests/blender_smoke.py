@@ -523,8 +523,12 @@ def main() -> None:
         "could not prepare U contour pitch settings",
     )
     ensure(len(u_settings.slope_settings) == 8, "expected eight U contour slopes")
-    for index, item in enumerate(u_settings.slope_settings):
-        item.pitch = 30.0 + (index % 4) * 2.5
+    for item in u_settings.slope_settings:
+        item.pitch = 30.0
+    ensure(
+        all(abs(item.pitch - 30.0) < 1e-7 for item in u_settings.slope_settings),
+        "U wavefront fixture must use the validated equal-pitch profile",
+    )
     ensure(
         bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
         "concave U contour did not generate with overhang disabled",
@@ -539,6 +543,7 @@ def main() -> None:
     # Positive overhang is now available for a supported flat-eave U contour.
     u_settings.eave_overhang_cm = 15.0
     u_settings.live_update = False
+    u_settings.overhang_corner_convergence = True
     for item in u_settings.slope_settings:
         item.pitch = 30.0
     ensure(
