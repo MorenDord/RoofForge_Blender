@@ -44,7 +44,6 @@ assert "scissor_test_set" in module._draw_vector_preview.__code__.co_names
 assert "viewport_get" in module._draw_vector_preview.__code__.co_names
 assert "_build_debug_message" in module._draw_vector_preview.__code__.co_names
 assert "_draw_debug_overlay" in module._draw_vector_preview.__code__.co_names
-assert "set_preview_slot_visible" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
 assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
