@@ -48,15 +48,15 @@ panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
 assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
-assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
-assert "copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
+assert "copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw_header.__code__.co_names
 fake_region = type("Region", (), {"as_pointer": lambda self: 4242})()
 module.set_preview_slot_visible(fake_region, True)
 assert module._is_preview_slot_visible(fake_region)
 module.set_preview_slot_visible(fake_region, False)
 assert not module._is_preview_slot_visible(fake_region)
-assert "initial_pitch" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "initial_pitch" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
 
 plan = {
     "vertices": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0], [0.0, 3.0, 0.0]],
