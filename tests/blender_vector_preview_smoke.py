@@ -49,7 +49,7 @@ assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
-assert "copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
+assert "roof_forge.copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw_header.__code__.co_names
 fake_region = type("Region", (), {"as_pointer": lambda self: 4242})()
 module.set_preview_slot_visible(fake_region, True)
