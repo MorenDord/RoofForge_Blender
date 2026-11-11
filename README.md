@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.8.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.9.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -32,6 +32,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Stop automatic updating if the source object or generated roof object is renamed.
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
+- Validate the closed shell for geometric self-intersections between non-adjacent face triangles, in addition to edge/vertex manifold topology. Intersecting results are rejected before Blender mesh creation.
 
 The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer are removed. Blender's `POLYLINE_UNIFORM_COLOR` shader draws antialiased edges in a collapsible **Roof Plan** section nested inside the main **RoofForge** N-panel panel. Its transparent `template_icon` slot reserves a square in Blender's normal UI flow, pushing the subsequent Pitch and settings controls down. The GPU output is clipped to that slot with a scissor rectangle, so it cannot paint over Pitch fields or the neighbouring editor. The slot dimensions now follow Blender's actual `UI_UNIT_X/Y * icon_scale` rule (estimated from the exposed UI scale), and its position follows the panel's internal left inset instead of a guessed scrollbar-adjusted centre. The bounding box is fitted with a 7.5% margin. The draw-handler is active only while the nested section is expanded and visible. Facet numbers use an area-weighted centroid across all faces belonging to a slope, with a pole-of-inaccessibility fallback for strongly concave regions. Number size and line thickness remain adjustable.
 
@@ -61,7 +62,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.8-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.8.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.9-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.9.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 

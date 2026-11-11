@@ -1,6 +1,6 @@
-# RoofForge 0.3.5 — Session Handoff
+# RoofForge 0.3.9 — Session Handoff
 
-**Updated:** 2026-11-08  
+**Updated:** 2026-11-12
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
 **PR:** [#6 — WIP RoofForge 0.2.1](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
@@ -275,3 +275,14 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - **Converge corners** is required for positive concave overhang. Mixed-height concave eaves are explicitly rejected. Offsets that self-intersect, close an L/U notch, or fail wavefront event validation are rejected rather than repaired.
 - Added pure-Python regression fixtures for L and U shapes, asymmetric L pitch, reversed winding with preserved edge-pitch mapping, flat-eave enforcement, convergence requirement, and an over-wide U offset. Blender background smoke also exercises positive L and U overhang through the actual Generate operator.
 - Version: 0.3.8. The weighted-wavefront solver is still a bounded alpha, not a guarantee for every simple concave polygon. Do not describe arbitrary concave contours or mixed-height concave eaves as supported.
+
+
+## RoofForge 0.3.9 — geometric self-intersection validation
+
+- Added a pure-Python triangle intersection test for coplanar and non-coplanar triangles.
+- An X-axis sweep and 3D AABB overlap tests reject most candidate pairs before the narrow-phase intersection check.
+- RoofForge-generated roof faces are planar convex cells and are fan-triangulated. Pairs from the same face and pairs of faces sharing a mesh vertex are excluded to avoid reporting expected manifold adjacency.
+- `validate_closed_mesh()` emits `SELF_INTERSECTION` with both one-based face numbers. `build_roof_shell()` raises `GeometryInputError` when detected, which reaches the Blender Generate operator and preserves the last valid roof.
+- Added regressions for a connected self-crossing bipyramid, overlapping/separate closed components, coplanar/non-coplanar triangle intersection, and valid rectangle plus concave L/U roof shells.
+- Local 8/16/32/64-edge wavefront check produced no false positives; 64-edge shell validation took approximately 8.3 seconds in this Python runtime, so performance remains something to monitor.
+- Version 0.3.9. This is an additional guard for non-adjacent face pairs, not a mathematical proof against every pathological configuration.
