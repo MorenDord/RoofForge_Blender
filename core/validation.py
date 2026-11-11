@@ -5,6 +5,7 @@ This module is pure Python and deliberately independent of bpy/bmesh.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from heapq import heappop, heappush
 from math import isfinite, sqrt
 from typing import Sequence
 
@@ -207,14 +208,30 @@ def _self_intersection_diagnostics(
                 continue
             triangles.append((face_index, points, _triangle_aabb(points)))
 
-    triangles.sort(key=lambda item: item[2][0][0])
+    # Pick the sweep axis with the fewest one-dimensional AABB overlaps.
+    # Roof faces are often much thinner in Z than in X/Y, so a fixed X sweep
+    # can leave hundreds of needless candidates active for each triangle.
+    candidate_counts = []
+    for axis in range(3):
+        ordered = sorted(triangles, key=lambda item: item[2][0][axis])
+        maxima = []
+        pair_count = 0
+        for item in ordered:
+            minimum = item[2][0][axis]
+            while maxima and maxima[0] + tolerance < minimum:
+                heappop(maxima)
+            pair_count += len(maxima)
+            heappush(maxima, item[2][1][axis])
+        candidate_counts.append(pair_count)
+    sweep_axis = min(range(3), key=lambda axis: candidate_counts[axis])
+    triangles.sort(key=lambda item: item[2][0][sweep_axis])
     diagnostics = []
     reported_pairs: set[tuple[int, int]] = set()
     active = []
     for current in triangles:
         face_index, current_points, current_bounds = current
-        current_min_x = current_bounds[0][0]
-        active = [item for item in active if item[2][1][0] + tolerance >= current_min_x]
+        current_min = current_bounds[0][sweep_axis]
+        active = [item for item in active if item[2][1][sweep_axis] + tolerance >= current_min]
         for other in active:
             other_face_index, other_points, other_bounds = other
             if face_index == other_face_index:
