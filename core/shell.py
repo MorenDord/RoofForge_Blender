@@ -25,6 +25,95 @@ class RoofShell:
 
 
 
+
+def _orient_shell_faces(
+    faces: Sequence[Face],
+    fixed_face_count: int,
+) -> tuple[Face, ...]:
+    """Orient bottom and wall faces consistently with fixed top-face winding.
+
+    The source roof surface is the authoritative oriented boundary. A breadth-
+    first traversal propagates its winding across the shell's edge adjacency.
+    It never flips a top face; a conflict between two fixed top faces is
+    reported as an invalid roof surface.
+    """
+    edge_uses: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
+    for face_index, face in enumerate(faces):
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_uses.setdefault(key, []).append((face_index, first, second))
+
+    adjacency: list[list[tuple[int, bool]]] = [[] for _ in faces]
+    for edge_key, uses in edge_uses.items():
+        if len(uses) > 2:
+            raise GeometryInputError(
+                "SHELL_NON_MANIFOLD_EDGE",
+                f"Ребро оболочки {edge_key} принадлежит более чем двум граням.",
+            )
+        if len(uses) != 2:
+            continue
+        first_use, second_use = uses
+        same_direction = (
+            first_use[1] == second_use[1]
+            and first_use[2] == second_use[2]
+        )
+        adjacency[first_use[0]].append((second_use[0], same_direction))
+        adjacency[second_use[0]].append((first_use[0], same_direction))
+
+    flips: list[bool | None] = [None] * len(faces)
+    for top_face in range(fixed_face_count):
+        if flips[top_face] is None:
+            flips[top_face] = False
+        queue = [top_face]
+        cursor = 0
+        while cursor < len(queue):
+            current = queue[cursor]
+            cursor += 1
+            current_flip = bool(flips[current])
+            for neighbour, same_direction in adjacency[current]:
+                required_flip = current_flip ^ same_direction
+                if flips[neighbour] is None:
+                    if neighbour < fixed_face_count and required_flip:
+                        raise GeometryInputError(
+                            "TOP_FACE_WINDING_CONFLICT",
+                            f"Исходные верхние грани {current} и {neighbour} имеют несовместимую ориентацию.",
+                        )
+                    flips[neighbour] = required_flip
+                    queue.append(neighbour)
+                elif bool(flips[neighbour]) != required_flip:
+                    raise GeometryInputError(
+                        "SHELL_WINDING_CONFLICT",
+                        f"Нельзя согласовать направление граней {current} и {neighbour} вокруг их общего ребра.",
+                    )
+
+    # Any component not connected to a top face is invalid for this shell
+    # construction, but still orient it deterministically for diagnostics.
+    for start in range(len(faces)):
+        if flips[start] is not None:
+            continue
+        flips[start] = False
+        queue = [start]
+        cursor = 0
+        while cursor < len(queue):
+            current = queue[cursor]
+            cursor += 1
+            for neighbour, same_direction in adjacency[current]:
+                required_flip = bool(flips[current]) ^ same_direction
+                if flips[neighbour] is None:
+                    flips[neighbour] = required_flip
+                    queue.append(neighbour)
+                elif bool(flips[neighbour]) != required_flip:
+                    raise GeometryInputError(
+                        "SHELL_WINDING_CONFLICT",
+                        f"Изолированный компонент оболочки неориентируем: грани {current} и {neighbour}.",
+                    )
+
+    return tuple(
+        tuple(reversed(face)) if flips[index] else tuple(face)
+        for index, face in enumerate(faces)
+    )
+
 def _normal_offset_shell(
     surface: RoofSurface,
     thickness: float,
@@ -191,6 +280,9 @@ def _normal_offset_shell(
         side_faces.append((first, second_bottom, second))
 
     output_faces.extend(side_faces)
+    output_faces = list(_orient_shell_faces(
+        output_faces, len(surface.faces)
+    ))
     diagnostics = validate_closed_mesh(vertices, output_faces, eps)
     if diagnostics:
         first = diagnostics[0]
