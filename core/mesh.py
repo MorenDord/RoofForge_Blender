@@ -491,9 +491,30 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     # A projected-area match alone can hide cracks whose missing and
     # overlapping regions cancel. Validate all open edges against the exact
     # source boundary before exposing the surface to Blender.
-    validate_surface_boundary_edges(
-        registry.vertices, faces, domain, weld_tolerance * 5.0
-    )
+    try:
+        validate_surface_boundary_edges(
+            registry.vertices, faces, domain, weld_tolerance * 5.0
+        )
+    except GeometryInputError as exc:
+        if not mixed_height_concave or exc.code not in {
+            "INTERNAL_OPEN_EDGE", "BOUNDARY_COVERAGE_MISMATCH"
+        }:
+            raise
+
+        # The plane arrangement is not a valid continuous model when an
+        # infinite edge extension changes candidate ownership inside a
+        # concave footprint. Fall back to the continuous finite-segment field:
+        # edge interiors remain on their authored planes and only endpoint
+        # transition zones are adaptively triangulated.
+        from .distance_field import build_distance_field_roof_surface
+
+        return build_distance_field_roof_surface(
+            points,
+            pitches_degrees,
+            height_tolerance=scale * 0.001,
+            max_depth=4,
+            eps=eps,
+        )
 
     return RoofSurface(
         vertices=tuple(registry.vertices),

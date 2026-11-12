@@ -264,7 +264,7 @@ def _roof_face_metadata(mesh, surface, shell):
                 ):
                     matched_slope = slope_index
                     break
-            if matched_slope < 0:
+            if matched_slope < 0 and surface.approximation_error <= 0.0:
                 component = 2
         component_values.append(component)
         slope_values.append(matched_slope if component != 2 else -1)
