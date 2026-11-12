@@ -48,6 +48,7 @@ def wavy_outline(
     outline: list[tuple[float, float]],
     subdivisions: list[int],
     amplitude: float,
+    z_amplitude: float = 0.0,
 ) -> list[tuple[float, float, float]]:
     points = []
     for edge_index, start in enumerate(outline):
@@ -59,10 +60,14 @@ def wavy_outline(
         for step in range(subdivisions[edge_index]):
             t = step / subdivisions[edge_index]
             bend = amplitude * math.sin(math.pi * t)
+            point_index = len(points)
+            z = z_amplitude * math.sin(
+                2.0 * math.pi * point_index / sum(subdivisions)
+            )
             points.append((
                 start[0] + dx * t + normal[0] * bend,
                 start[1] + dy * t + normal[1] * bend,
-                0.0,
+                z,
             ))
     issues = validate_simple_polygon([(p[0], p[1]) for p in points])
     if issues:
@@ -244,6 +249,38 @@ def main() -> int:
             args.repeats,
             pitches,
         ))
+
+    # Exercise the exact spatial path, rather than the flat-eave
+    # wavefront solver, on dense mixed-height concave outlines.
+    mixed_height_l = wavy_outline(
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 3.0),
+         (4.0, 3.0), (4.0, 10.0), (0.0, 10.0)],
+        [16] * 6,
+        0.015,
+        z_amplitude=0.01,
+    )
+    results.append(measure(
+        "exact_spatial_mixed_height_wavy_l_n96",
+        mixed_height_l,
+        build_roof_surface,
+        args.repeats,
+        l_pitch_profile(len(mixed_height_l)),
+    ))
+
+    mixed_height_u = wavy_outline(
+        [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (3.0, 4.0),
+         (3.0, 1.0), (1.0, 1.0), (1.0, 4.0), (0.0, 4.0)],
+        [12] * 8,
+        0.008,
+        z_amplitude=0.01,
+    )
+    results.append(measure(
+        "exact_spatial_mixed_height_wavy_u_n96",
+        mixed_height_u,
+        build_roof_surface,
+        args.repeats,
+        u_pitch_profile(len(mixed_height_u)),
+    ))
 
     report = {
         "python": __import__("sys").version,

@@ -2,6 +2,8 @@ import unittest
 
 from core.exact_spatial import (
     SupportPlane,
+    _PolygonPointLocator,
+    _point_in_polygon,
     build_spatial_junction_patch,
     build_support_planes,
     intersect_support_planes,
@@ -13,6 +15,27 @@ from core.geometry import GeometryInputError
 
 
 class ExactSpatialPrimitiveTests(unittest.TestCase):
+    def test_y_binned_point_locator_matches_boundary_inclusive_reference(self):
+        polygon = (
+            (0.0, 0.0), (5.0, 0.0), (5.0, 1.0), (2.0, 1.0),
+            (2.0, 4.0), (0.0, 4.0),
+        )
+        tolerance = 1e-9
+        locator = _PolygonPointLocator(polygon, tolerance)
+        queries = [
+            (x / 10.0, y / 10.0)
+            for x in range(-10, 61)
+            for y in range(-10, 51)
+        ]
+        queries.extend(polygon)
+        queries.extend(((2.0, 2.0), (4.9, 0.5), (2.5, 2.0), (-0.1, 2.0)))
+        for point in queries:
+            self.assertEqual(
+                locator.contains(point),
+                _point_in_polygon(point, polygon, tolerance),
+                f"point locator disagrees at {point!r}",
+            )
+
     def test_support_planes_pass_through_every_authored_eave_edge(self):
         points = [
             (0.0, 0.0, 0.0),

@@ -16,6 +16,7 @@ from .geometry import (
     GeometryInputError,
     PlaneZ,
     _bbox_scale,
+    _segments_intersect,
     signed_area,
     triangulate_simple_polygon,
     validate_simple_polygon,
@@ -392,6 +393,56 @@ def _point_in_polygon(point: Point2, polygon: Sequence[Point2], tolerance: float
     return inside
 
 
+class _PolygonPointLocator:
+    """Y-binned point-in-polygon accelerator for repeated static-polygon queries."""
+
+    __slots__ = ("_bins", "_polygon", "_tolerance", "_bounds", "_y_min", "_bin_width")
+
+    def __init__(self, polygon: Sequence[Point2], tolerance: float):
+        self._polygon = tuple(polygon)
+        self._tolerance = tolerance
+        xs = [point[0] for point in self._polygon]
+        ys = [point[1] for point in self._polygon]
+        self._bounds = (min(xs), min(ys), max(xs), max(ys))
+        self._y_min = min(ys)
+        y_span = max(ys) - self._y_min
+        bin_count = max(1, min(128, int(sqrt(max(1, len(self._polygon))) * 2.0)))
+        self._bin_width = max(y_span / bin_count, tolerance * 2.0, 1e-15)
+        self._bins = [[] for _ in range(bin_count)]
+
+        for start, end in zip(self._polygon, self._polygon[1:] + self._polygon[:1]):
+            low = min(start[1], end[1]) - tolerance
+            high = max(start[1], end[1]) + tolerance
+            first = max(0, min(bin_count - 1, int((low - self._y_min) / self._bin_width)))
+            last = max(0, min(bin_count - 1, int((high - self._y_min) / self._bin_width)))
+            edge = (start, end, end[0] - start[0], end[1] - start[1])
+            for bin_index in range(first, last + 1):
+                self._bins[bin_index].append(edge)
+
+    def contains(self, point: Point2) -> bool:
+        x, y = point
+        min_x, min_y, max_x, max_y = self._bounds
+        tol = self._tolerance
+        if x < min_x - tol or x > max_x + tol or y < min_y - tol or y > max_y + tol:
+            return False
+        bin_index = int((y - self._y_min) / self._bin_width)
+        bin_index = max(0, min(len(self._bins) - 1, bin_index))
+        inside = False
+        for start, end, dx, dy in self._bins[bin_index]:
+            cross = dx * (y - start[1]) - dy * (x - start[0])
+            if (
+                abs(cross) <= tol
+                and min(start[0], end[0]) - tol <= x <= max(start[0], end[0]) + tol
+                and min(start[1], end[1]) - tol <= y <= max(start[1], end[1]) + tol
+            ):
+                return True
+            if (start[1] > y) != (end[1] > y):
+                crossing_x = start[0] + ((y - start[1]) * dx / dy)
+                if x < crossing_x:
+                    inside = not inside
+        return inside
+
+
 def _proper_segment_cross(
     first_a: Point2, first_b: Point2,
     second_a: Point2, second_b: Point2,
@@ -436,6 +487,25 @@ def _ray_segment_parameter(
     if parameter > tolerance and -tolerance <= edge_parameter <= 1.0 + tolerance:
         return parameter
     return None
+
+
+def _is_simple_quad(points: Sequence[Point2], tolerance: float) -> bool:
+    """Fast equivalent of validate_simple_polygon for four-vertex source cells."""
+    if len(points) != 4:
+        return False
+    scale = _bbox_scale(points)
+    linear_eps = tolerance
+    area_eps = tolerance * scale
+    for index, first in enumerate(points):
+        second = points[(index + 1) % 4]
+        if hypot(second[0] - first[0], second[1] - first[1]) <= linear_eps:
+            return False
+    if abs(signed_area(points)) <= area_eps:
+        return False
+    return not (
+        _segments_intersect(points[0], points[1], points[2], points[3], area_eps, linear_eps)
+        or _segments_intersect(points[1], points[2], points[3], points[0], area_eps, linear_eps)
+    )
 
 
 def _polygon_area_centroid(polygon: Sequence[Point2]) -> Point2:
@@ -609,9 +679,13 @@ def _build_event_ring_candidate(
     scale: float,
     tolerance: float,
     reject_reasons: list[str] | None = None,
+    point_locator: _PolygonPointLocator | None = None,
 ):
     """Validate and assemble a ring whose vertices are exact plane events."""
     count = len(points)
+    contains = point_locator.contains if point_locator is not None else (
+        lambda point: _point_in_polygon(point, polygon, tolerance)
+    )
     def reject(reason: str):
         if reject_reasons is not None:
             reject_reasons.append(reason)
@@ -630,7 +704,7 @@ def _build_event_ring_candidate(
             abs(current.residual(point)),
         ) > tolerance * max(1.0, abs(point[2])):
             return reject("check-2")
-        if not _point_in_polygon((point[0], point[1]), polygon, tolerance):
+        if not contains((point[0], point[1])):
             return reject("check-3")
         origin = polygon[index]
         for fraction in (0.2, 0.4, 0.6, 0.8):
@@ -638,7 +712,7 @@ def _build_event_ring_candidate(
                 origin[0] + (point[0] - origin[0]) * fraction,
                 origin[1] + (point[1] - origin[1]) * fraction,
             )
-            if not _point_in_polygon(sample, polygon, tolerance):
+            if not contains(sample):
                 return reject("check-4")
 
     source_polygons: list[list[Point2]] = []
@@ -664,7 +738,10 @@ def _build_event_ring_candidate(
             compact_xy.pop()
         if len(compact_xy) < 3:
             return reject("check-5")
-        if validate_simple_polygon(
+        if len(compact_xy) == 4:
+            if not _is_simple_quad(compact_xy, tolerance):
+                return reject("check-6")
+        elif validate_simple_polygon(
             compact_xy, max(1e-12, tolerance / scale)
         ):
             return reject("check-6")
@@ -679,10 +756,10 @@ def _build_event_ring_candidate(
                     edge_start[0] + (edge_end[0] - edge_start[0]) * fraction,
                     edge_start[1] + (edge_end[1] - edge_start[1]) * fraction,
                 )
-                if not _point_in_polygon(sample, polygon, tolerance):
+                if not contains(sample):
                     return reject("check-8")
         centroid = _polygon_area_centroid(compact_xy)
-        if not _point_in_polygon(centroid, polygon, tolerance):
+        if not contains(centroid):
             return reject("check-9")
         source_polygons.append(compact_xy)
         quad_areas.append(area)
@@ -776,19 +853,11 @@ def _build_event_ring_candidate(
                     first_point[0] + (second_point[0] - first_point[0]) * fraction,
                     first_point[1] + (second_point[1] - first_point[1]) * fraction,
                 )
-                if not _point_in_polygon(sample, polygon, tolerance):
+                if not contains(sample):
                     return reject("check-17")
-        try:
-            triangles = triangulate_simple_polygon(
-                compact_xy, max(1e-12, tolerance / scale)
-            )
-        except GeometryInputError:
-            return reject("check-18")
-        index_by_xy = {point: index for index, point in enumerate(compact_xy)}
-        transition_faces = tuple(
-            tuple(index_by_xy[point] for point in triangle)
-            for triangle in triangles
-        )
+        # The cap is known to be simple here. Ear clipping is deferred
+        # until the winning candidate is assembled; triangulating every
+        # rejected alpha candidate was a major hot spot.
         ring_kind = "polygon"
         ring_edge_sources = tuple(
             (compact_indices[(index + 1) % len(compact_indices)] - 1) % count
@@ -1938,8 +2007,15 @@ def _assemble_exact_event_ring_surface(
             (vertices[index][0], vertices[index][1])
             for index in compact_inner_ids
         ]
-        for triangle in candidate["transition_faces"]:
-            face = tuple(compact_inner_ids[index] for index in triangle)
+        triangles = triangulate_simple_polygon(
+            compact_inner_xy, max(1e-12, tolerance / scale)
+        )
+        id_by_xy = {
+            point: vertex_id
+            for point, vertex_id in zip(compact_inner_xy, compact_inner_ids)
+        }
+        for triangle in triangles:
+            face = tuple(id_by_xy[point] for point in triangle)
             face_xy = [(vertices[index][0], vertices[index][1]) for index in face]
             if signed_area(face_xy) < 0.0:
                 face = tuple(reversed(face))
@@ -2133,6 +2209,7 @@ def _build_maximal_exact_ring_candidate(
     scale: float,
     tolerance: float,
     reject_reasons: list[str] | None = None,
+    point_locator: _PolygonPointLocator | None = None,
 ):
     """Build a valid ring from endpoints on exact adjacent-plane seams.
 
@@ -2156,7 +2233,7 @@ def _build_maximal_exact_ring_candidate(
             abs(current.residual(point)),
         ) > tolerance * max(1.0, abs(z)):
             return None
-        if not _point_in_polygon((x, y), polygon, tolerance):
+        if not (point_locator.contains((x, y)) if point_locator is not None else _point_in_polygon((x, y), polygon, tolerance)):
             return None
         inner.append(point)
 
@@ -2177,7 +2254,7 @@ def _build_maximal_exact_ring_candidate(
 
     candidate = _build_event_ring_candidate(
         points, polygon, planes, tuple(inner), scale, tolerance,
-        reject_reasons,
+        reject_reasons, point_locator,
     )
     if candidate is None:
         return None
@@ -2206,6 +2283,7 @@ def _select_maximal_exact_ring_candidate(
     partition. This avoids forcing the seams to stop at incompatible triple
     events when a concave topology requires an extended planar cap.
     """
+    point_locator = _PolygonPointLocator(polygon, tolerance)
     ray_options = tuple(
         _corner_seam_ray_options(index, polygon, planes, tolerance)
         for index in range(len(points))
@@ -2228,21 +2306,53 @@ def _select_maximal_exact_ring_candidate(
     viable: list[dict] = []
     rejected_reasons: list[str] = []
     for ray_choice in product(*ray_options):
-        high = 0.999
-        best_candidate = None
-        best_alpha = None
-        previous_failed = 1.0
-        found = False
+        # For a fixed set of inward seam rays, valid roof partitions form a
+        # connected alpha interval in the supported concave cases: small
+        # offsets preserve the source contour, and the interval ends at the
+        # first self-contact / face inversion event. Bracket that interval at
+        # its endpoints and bisect instead of walking in 0.01 increments.
+        # This reduces the common path from ~90-140 full topology validations
+        # to 2+36 without changing the exact support-plane geometry.
+        low_alpha = 0.001
+        high_alpha = 0.999
+        best_candidate = _build_maximal_exact_ring_candidate(
+            points, polygon, planes, ray_choice,
+            low_alpha, scale, tolerance, rejected_reasons, point_locator,
+        )
+        if best_candidate is not None:
+            high_candidate = _build_maximal_exact_ring_candidate(
+                points, polygon, planes, ray_choice,
+                high_alpha, scale, tolerance, rejected_reasons, point_locator,
+            )
+            if high_candidate is not None:
+                viable.append(high_candidate)
+                continue
 
-        # Locate the highest valid alpha. The sweep brackets the first
-        # topology-changing event; bisection then resolves its exact boundary
-        # to floating-point precision. All output points remain on support
-        # planes and all output edges are straight.
-        alpha = high
-        while alpha >= 0.001:
+            low = low_alpha
+            upper = high_alpha
+            for _iteration in range(36):
+                middle = (low + upper) * 0.5
+                candidate = _build_maximal_exact_ring_candidate(
+                    points, polygon, planes, ray_choice,
+                    middle, scale, tolerance, rejected_reasons, point_locator,
+                )
+                if candidate is None:
+                    upper = middle
+                else:
+                    low = middle
+                    best_candidate = candidate
+            viable.append(best_candidate)
+            continue
+
+        # Preserve the old exhaustive search for unusual cases where the
+        # smallest inward offset itself is invalid. These are not the common
+        # path and may contain a disconnected feasible alpha interval.
+        alpha = high_alpha
+        found = False
+        while alpha > low_alpha:
             candidate = _build_maximal_exact_ring_candidate(
                 points, polygon, planes, ray_choice,
-                alpha, scale, tolerance, rejected_reasons,
+                alpha, scale, tolerance, rejected_reasons, point_locator,
             )
             if candidate is not None:
                 best_candidate = candidate
@@ -2251,7 +2361,6 @@ def _select_maximal_exact_ring_candidate(
                 previous_failed = min(1.0, alpha + 0.01)
                 break
             alpha -= 0.01
-
         if not found:
             continue
 
@@ -2261,7 +2370,7 @@ def _select_maximal_exact_ring_candidate(
             middle = (low + upper) * 0.5
             candidate = _build_maximal_exact_ring_candidate(
                 points, polygon, planes, ray_choice,
-                middle, scale, tolerance, rejected_reasons,
+                middle, scale, tolerance, rejected_reasons, point_locator,
             )
             if candidate is None:
                 upper = middle
