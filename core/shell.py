@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite, sqrt
+import re
 
 from .geometry import GeometryInputError, triangulate_simple_polygon
 from .mesh import RoofSurface, validate_surface_boundary_edges
@@ -286,7 +287,19 @@ def _normal_offset_shell(
     diagnostics = validate_closed_mesh(vertices, output_faces, eps)
     if diagnostics:
         first = diagnostics[0]
-        raise GeometryInputError(first.code, first.message)
+        face_indices = [
+            int(value) for value in re.findall(r"\\d+", first.message)
+            if int(value) < len(output_faces)
+        ][:2]
+        details = []
+        for face_index in face_indices:
+            face = output_faces[face_index]
+            details.append(
+                f"face {face_index}: "
+                + repr(tuple(vertices[index] for index in face))
+            )
+        context = (" Геометрия: " + "; ".join(details)) if details else ""
+        raise GeometryInputError(first.code, first.message + context)
 
     return RoofShell(
         vertices=vertices,
