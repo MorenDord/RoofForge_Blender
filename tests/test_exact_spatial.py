@@ -47,9 +47,9 @@ class ExactSpatialPrimitiveTests(unittest.TestCase):
         point = intersect_three_support_planes(*planes)
         for plane in planes:
             self.assertAlmostEqual(plane.residual(point), 0.0, places=9)
-        self.assertAlmostEqual(point[0], 2.0, places=9)
-        self.assertAlmostEqual(point[1], 2.0, places=9)
-        self.assertAlmostEqual(point[2], 2.0, places=9)
+        self.assertAlmostEqual(point[0], 4.0 / 3.0, places=9)
+        self.assertAlmostEqual(point[1], 4.0 / 3.0, places=9)
+        self.assertAlmostEqual(point[2], 4.0 / 3.0, places=9)
 
     def test_parallel_distinct_support_planes_have_no_intersection(self):
         first = SupportPlane(0, 1.0, 0.0, 0.0)
