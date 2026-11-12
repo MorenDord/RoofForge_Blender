@@ -257,10 +257,14 @@ def main() -> int:
          (4.0, 3.0), (4.0, 10.0), (0.0, 10.0)],
         [16] * 6,
         0.015,
-        z_amplitude=0.01,
     )
+    # One raised eave vertex with a distinct pitch on every authored edge:
+    # a dense, but representative, non-planar concave L roof.
+    raised_index = len(mixed_height_l) // 3
+    raised_x, raised_y, _raised_z = mixed_height_l[raised_index]
+    mixed_height_l[raised_index] = (raised_x, raised_y, 0.08)
     results.append(measure(
-        "exact_spatial_mixed_height_wavy_l_n96",
+        "exact_spatial_mixed_height_wavy_l_single_high_eave_n96",
         mixed_height_l,
         build_roof_surface,
         args.repeats,
