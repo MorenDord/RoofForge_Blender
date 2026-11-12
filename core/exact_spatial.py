@@ -568,11 +568,10 @@ def _corner_seam_event_options(
             continue
         events.sort(key=lambda item: (item[0], item[1]))
 
-        # Keep the first two distinct third-plane events on each inward ray.
-        # The nearest event is normally the roof junction, but a reflex
-        # contour can make that event produce a self-crossing inner ring.
-        # Retaining the next exact event lets the global ring validator choose
-        # the first topology that closes without crossing or height averaging.
+        # Keep every distinct third-plane event on each inward ray. A concave
+        # footprint can make the first event produce a self-crossing central
+        # ring; a later event may be the first topologically valid junction.
+        # Every retained location remains an exact three-plane intersection.
         event_groups: list[list[tuple[float, int, Point3]]] = []
         for event in events:
             if (
@@ -583,7 +582,7 @@ def _corner_seam_event_options(
             else:
                 event_groups[-1].append(event)
 
-        for group in event_groups[:2]:
+        for group in event_groups:
             parameter = group[0][0]
             point = group[0][2]
             simultaneous = tuple(sorted(
@@ -831,20 +830,20 @@ def _select_exact_ring_candidate(
     scale: float,
     tolerance: float,
 ):
-    """Select a conforming ring from first exact 3-plane seam events.
+    """Select a conforming ring from exact 3-plane seam events.
 
-    A reflex vertex may have more than one inward direction. Each direction
-    contributes its first exact plane-intersection event. The selector tests
-    the small set of resulting topologies and accepts only a complete simple
-    partition. For large ambiguous sets it fails closed rather than guessing.
+    A reflex vertex may have multiple inward seam directions and each can
+    encounter several support planes. The selector tests the finite set of
+    exact events and accepts only a complete simple partition. Excessive
+    ambiguity is rejected rather than approximated.
     """
     combination_count = 1
     for options in event_options:
         combination_count *= len(options)
-        if combination_count > 50000:
+        if combination_count > 200000:
             raise GeometryInputError(
                 "SPATIAL_EVENT_AMBIGUITY",
-                "Слишком много альтернативных пространственных событий для однозначного выбора топологии.",
+                f"Слишком много альтернативных пространственных событий ({combination_count}); точный поиск остановлен без аппроксимации.",
             )
 
     valid_candidates = []
