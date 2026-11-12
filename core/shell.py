@@ -27,7 +27,7 @@ class RoofShell:
 def build_roof_shell(
     surface: RoofSurface,
     thickness: float,
-    eps: float = 1e-9,
+    eps: float = 1e-11,
     *,
     extrude_up: bool = False,
 ) -> RoofShell:
