@@ -328,11 +328,11 @@ def build_roof_shell(
         thickness,
     )
     tolerance = max(1e-12, eps * scale * 100.0)
-    if -1 in surface.face_slope_indices:
-        return _normal_offset_shell(
-            surface, thickness, eps, extrude_up=bool(extrude_up)
-        )
-
+    # Keep the exact planar roof partition unchanged through shell creation.
+    # A vertex-normal offset averages normals across sharp source-plane seams;
+    # on non-concurrent concave junctions that can fold the underside back
+    # through itself. Global-Z extrusion preserves every planar face and the
+    # XY topology, including exact transition triangles.
     boundary_edges = validate_surface_boundary_edges(
         surface.vertices, surface.faces, surface.boundary_xy, tolerance * 5.0
     )
