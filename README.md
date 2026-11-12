@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.9.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.10.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -22,7 +22,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
 - **Source-anchored eaves:** convex contours continue to use the original 3D support-plane envelope. Concave flat-eave L/U contours now use the weighted wavefront roof plus one exact coplanar overhang strip per source edge. With **Converge corners** enabled (required for concave contours), adjacent strips meet at one shared outer corner while each strip remains on its source slope plane. The source eave line remains fixed.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
-- Coplanar internal edges are dissolved from the generated Blender mesh, while true ridges and the outer boundary remain.
+- Coplanar internal edges are dissolved from the generated Blender mesh, including degree-two vertices and loose points left behind by loop-cut partitions. Planar patches collapse to clean N-gons; straight shell walls become larger quads/N-gons. True ridges, valleys, silhouette corners and the outer boundary remain.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm. Before the first roof build, **Initial Pitch** sets the value copied to every contour edge (default 30°); individual Pitch values can then be edited independently.
 - The first **Create / Update Roof** click reads the active contour and automatically creates the Pitch fields. No separate Load / Refresh Slope Angles action is required.
 - If the generated roof is deleted, Create / Update can recreate it from the stored source. Edit the source contour in Edit Mode, return to Object Mode and press Create / Update to rebuild from the edited boundary.
@@ -81,3 +81,8 @@ Blender 5.0.1 background smoke checks corner-converged convex eaves, positive L/
 ## License
 
 GPL-3.0-or-later.
+
+
+### Clean planar topology (0.3.10)
+
+The final Blender mesh pass now dissolves both coplanar shared edges and the degree-two vertices left between two remaining edges. Any vertices that become completely isolated by that operation are removed. This eliminates redundant loop-cut segments on otherwise planar roof patches and straight eave walls while retaining edges where face planes, ridges, valleys or the silhouette genuinely change. A subdivided-prism regression must reduce to exactly 8 vertices, 12 edges and 6 quads; generated roof smoke checks reject loose or degree-two vertices.

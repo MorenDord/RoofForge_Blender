@@ -286,3 +286,12 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Added regressions for a connected self-crossing bipyramid, overlapping/separate closed components, coplanar/non-coplanar triangle intersection, and valid rectangle plus concave L/U roof shells.
 - Local 8/16/32/64-edge wavefront check produced no false positives; 64-edge shell validation took approximately 8.3 seconds in this Python runtime, so performance remains something to monitor.
 - Version 0.3.9. This is an additional guard for non-adjacent face pairs, not a mathematical proof against every pathological configuration.
+
+
+## RoofForge 0.3.10 — remove redundant loop-cut remnants
+
+- The final BMesh cleanup now calls `bmesh.ops.dissolve_edges(..., use_verts=True)` for edges whose two linked faces lie on the same plane. This removes degree-two vertices remaining between two edges after planar faces merge.
+- Loose edges/vertices left inside a merged planar patch are explicitly deleted.
+- Real plane breaks, ridges, valleys, silhouette corners and non-coplanar wall transitions are preserved because only shared coplanar edges enter the dissolve operation.
+- Blender smoke validates a subdivided cuboid collapsing to exactly 8 vertices, 12 edges and 6 quads, and asserts generated closed shells have no loose or degree-two vertices and no shared coplanar interior edges.
+- Version: 0.3.10. Visual/manual Blender inspection is still required for the user's complex production contours.
