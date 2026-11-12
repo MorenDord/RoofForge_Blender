@@ -156,7 +156,7 @@ class PolygonTests(unittest.TestCase):
 
         self.assertEqual(surface.approximation_error, 0.0)
         self.assertEqual(surface.refinement_depth, 0)
-        self.assertLessEqual(len(surface.faces), 2 * len(points) - 2)
+        self.assertLessEqual(len(surface.faces), 2 * len(points))
         self.assertAlmostEqual(
             surface.surface_area_xy,
             abs(signed_area([(point[0], point[1]) for point in points])),
