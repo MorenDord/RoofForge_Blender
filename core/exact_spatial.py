@@ -1302,28 +1302,44 @@ def _build_exact_spatial_arrangement_surface(
             )
         first_cell, second_cell = tuple(adjacent_cells)
         first_source, second_source = cell_sources[first_cell], cell_sources[second_cell]
+        edge_points = [vertices[edge_key[0]], vertices[edge_key[1]]]
+
         if first_source >= 0 and second_source >= 0 and first_source != second_source:
-            pair = tuple(sorted((first_source, second_source)))
-            if pair not in metadata["pairs"]:
+            first_plane = planes[first_source]
+            second_plane = planes[second_source]
+            residual = max(
+                abs(first_plane.residual(point))
+                for point in edge_points
+            )
+            residual = max(
+                residual,
+                *(abs(second_plane.residual(point)) for point in edge_points),
+            )
+            if residual > tolerance * max(
+                1.0, *(abs(point[2]) for point in edge_points)
+            ):
                 raise GeometryInputError(
                     "SPATIAL_ARRANGEMENT_UNSUPPORTED_ADJACENCY",
-                    f"Скаты {first_source + 1} и {second_source + 1} соприкасаются не по своей точной линии пересечения.",
+                    f"Общее ребро скатов {first_source + 1} и {second_source + 1} "
+                    "не является точной линией пересечения их опорных плоскостей.",
                 )
         elif first_source >= 0 and second_source == -1:
-            if first_source not in metadata["transition"] and not any(
-                first_source in pair for pair in metadata["pairs"]
-            ):
+            if max(
+                abs(planes[first_source].residual(point))
+                for point in edge_points
+            ) > tolerance * max(1.0, *(abs(point[2]) for point in edge_points)):
                 raise GeometryInputError(
                     "SPATIAL_ARRANGEMENT_UNOWNED_TRANSITION_EDGE",
-                    f"Переходная ячейка не имеет корректной границы со скатом {first_source + 1}.",
+                    f"Граница переходной ячейки не лежит на плоскости ската {first_source + 1}.",
                 )
         elif second_source >= 0 and first_source == -1:
-            if second_source not in metadata["transition"] and not any(
-                second_source in pair for pair in metadata["pairs"]
-            ):
+            if max(
+                abs(planes[second_source].residual(point))
+                for point in edge_points
+            ) > tolerance * max(1.0, *(abs(point[2]) for point in edge_points)):
                 raise GeometryInputError(
                     "SPATIAL_ARRANGEMENT_UNOWNED_TRANSITION_EDGE",
-                    f"Переходная ячейка не имеет корректной границы со скатом {second_source + 1}.",
+                    f"Граница переходной ячейки не лежит на плоскости ската {second_source + 1}.",
                 )
 
     faces: list[Face] = []
