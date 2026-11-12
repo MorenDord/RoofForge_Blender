@@ -1506,6 +1506,18 @@ def select_exact_spatial_arrangement(
         except GeometryInputError as exc:
             errors.append((exc.code, exc.message))
             continue
+        used_sources = {
+            source for source in surface.face_slope_indices if source >= 0
+        }
+        missing_sources = sorted(set(range(len(planes))) - used_sources)
+        if missing_sources:
+            errors.append((
+                "SPATIAL_ARRANGEMENT_UNUSED_PLANES",
+                "Не сохранились области опорных плоскостей: "
+                + ", ".join(str(index + 1) for index in missing_sources),
+            ))
+            continue
+
         transition_area = sum(
             abs(signed_area([
                 (surface.vertices[vertex_id][0], surface.vertices[vertex_id][1])
