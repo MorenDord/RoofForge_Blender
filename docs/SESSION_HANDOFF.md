@@ -3,12 +3,12 @@
 **Updated:** 2026-11-12  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**PR:** [#6 — RoofForge 0.3.11 near-coplanar topology cleanup](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Validated code commit:** `e887ce270c7635772f0572c6d8e7b7f3401af532`.  
-**Workflow:** [run 43188379170](https://github.com/MorenDord/RoofForge_Blender/actions/runs/43188379170), all 7 jobs passed; Blender smoke markers and extension validator succeeded.  
-**Installable artifact:** `roof_forge-0.3.11-blender-5.0.1` (artifact ID `13929656882`).  
-**Outer artifact SHA-256:** `d84ebad7c68c51783719589a37be109289b5c4decca3959f8bc8b53d8b7c444c`.  
-**Inner ZIP SHA-256:** `d2979bb94689f71f56155e9c19860e368d11e57429214b8a70c3e891da2c3abb`.  
+**PR:** [#6 — RoofForge 0.3.12 mixed-height concave continuity](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
+**Validated branch head:** `bbc09d86ce9550bac1aa157b4a4a54969612f81a`.  
+**Workflow:** [run 43195693341](https://github.com/MorenDord/RoofForge_Blender/actions/runs/43195693341), all 7 jobs passed. Blender 5.0.1 smoke markers, including the mixed-height concave fallback regression, and official extension validation succeeded.  
+**Installable artifact:** `roof_forge-0.3.12-blender-5.0.1` (artifact ID `13933385871`).  
+**Outer artifact SHA-256:** `041f53b5180c00f3ea59eefa0a336d0fe1d3d477d0b1f3b34514650863e027f4`.  
+**Inner ZIP SHA-256:** `09e55e713c55c7abb1b3a6a9625cfd12cb779f5c631ad67848019bbb300b89a4`.  
 **Important:** main and develop remain unchanged. Manual inspection in Blender's viewport is still required on the user's complex production contour.
 
 ## User feedback addressed
