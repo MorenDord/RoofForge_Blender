@@ -1390,9 +1390,50 @@ def _build_exact_spatial_arrangement_surface(
         )
 
     from .mesh import RoofSurface, validate_surface_boundary_edges
-    validate_surface_boundary_edges(
+    boundary_edges = validate_surface_boundary_edges(
         vertices, faces, polygon, tolerance * 5.0
     )
+    for first, second in boundary_edges:
+        p = vertices[first]
+        q = vertices[second]
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        if dx * dx + dy * dy <= tolerance * tolerance:
+            raise GeometryInputError(
+                "ZERO_LENGTH_XY_EAVE_EDGE",
+                "Точная нижняя огибающая оставила вертикальное ребро на исходной XY-кромке.",
+            )
+        matches = []
+        for edge_index, start_point in enumerate(points):
+            end_point = points[(edge_index + 1) % len(points)]
+            ex, ey = end_point[0] - start_point[0], end_point[1] - start_point[1]
+            length_sq = ex * ex + ey * ey
+            if length_sq <= tolerance * tolerance:
+                continue
+            def parameter_and_distance(point):
+                rx, ry = point[0] - start_point[0], point[1] - start_point[1]
+                parameter = (rx * ex + ry * ey) / length_sq
+                distance = abs(ex * ry - ey * rx) / sqrt(length_sq)
+                return parameter, distance
+            tp, dp = parameter_and_distance(p)
+            tq, dq = parameter_and_distance(q)
+            if (
+                dp <= tolerance * 10.0 and dq <= tolerance * 10.0
+                and -tolerance <= tp <= 1.0 + tolerance
+                and -tolerance <= tq <= 1.0 + tolerance
+            ):
+                zp = start_point[2] + tp * (end_point[2] - start_point[2])
+                zq = start_point[2] + tq * (end_point[2] - start_point[2])
+                if (
+                    abs(p[2] - zp) <= tolerance * max(1.0, abs(zp))
+                    and abs(q[2] - zq) <= tolerance * max(1.0, abs(zq))
+                ):
+                    matches.append(edge_index)
+        if len(matches) != 1:
+            raise GeometryInputError(
+                "SUPPORT_PLANE_EAVE_MISMATCH",
+                "Точная нижняя огибающая не совпадает с исходной 3D-кромкой "
+                f"на сегменте возле точки ({p[0]:.6g}, {p[1]:.6g}).",
+            )
     source_area_xy = abs(signed_area(polygon))
     surface_area_xy = sum(
         abs(signed_area([
@@ -1580,30 +1621,6 @@ def _build_exact_support_plane_envelope(
                 continue
             equality_lines.append((a, b, c))
 
-    # Source-plane activation changes only across the supporting line of its
-    # authored boundary edge. Add those lines to the same exact arrangement.
-    winding = 1.0 if signed_area(polygon) > 0.0 else -1.0
-    for index, start_point in enumerate(points):
-        end_point = points[(index + 1) % len(points)]
-        dx = end_point[0] - start_point[0]
-        dy = end_point[1] - start_point[1]
-        norm = hypot(dx, dy)
-        if norm <= tolerance:
-            raise GeometryInputError(
-                "DEGENERATE_SUPPORT_EDGE",
-                f"Ребро карниза {index + 1} имеет нулевую XY-проекцию.",
-            )
-        a = winding * (-dy) / norm
-        b = winding * dx / norm
-        c = winding * (dy * start_point[0] - dx * start_point[1]) / norm
-        if not any(
-            abs(a - old_a) <= coefficient_tolerance
-            and abs(b - old_b) <= coefficient_tolerance
-            and abs(c - old_c) <= coefficient_tolerance * scale
-            for old_a, old_b, old_c in equality_lines
-        ):
-            equality_lines.append((a, b, c))
-
     triangles = triangulate_simple_polygon(polygon, eps)
     cells: list[tuple[Point2, ...]] = []
     max_cells = 50000
@@ -1676,26 +1693,8 @@ def _build_exact_support_plane_envelope(
     face_sources: list[int] = []
     for cell in cells:
         centroid = _polygon_area_centroid(cell)
-        active_planes = []
-        for plane in planes:
-            edge_start = points[plane.source_index]
-            edge_end = points[(plane.source_index + 1) % len(points)]
-            dx = edge_end[0] - edge_start[0]
-            dy = edge_end[1] - edge_start[1]
-            inward_side = winding * (
-                -dy * centroid[0] + dx * centroid[1]
-                + dy * edge_start[0] - dx * edge_start[1]
-            ) / max(hypot(dx, dy), tolerance)
-            if inward_side >= -tolerance:
-                active_planes.append(plane)
-        if not active_planes:
-            raise GeometryInputError(
-                "NO_ACTIVE_SUPPORT_PLANE",
-                "В одной из областей контура нет активной опорной плоскости. "
-                "Плоскую крышу без произвольного перехода построить нельзя.",
-            )
         winner = min(
-            active_planes,
+            planes,
             key=lambda plane: (
                 plane.height(centroid[0], centroid[1]),
                 plane.source_index,
@@ -1714,9 +1713,7 @@ def _build_exact_support_plane_envelope(
         if signed_area(face_xy) < 0.0:
             compact.reverse()
         validate_planar_face(
-            vertices,
-            compact,
-            support_plane=winner,
+            vertices, compact, support_plane=winner,
             eps=max(eps * 10.0, 1e-10),
         )
         for vertex_index in compact:
@@ -1725,110 +1722,18 @@ def _build_exact_support_plane_envelope(
             if any(
                 other.height(point[0], point[1])
                 < own_height - tolerance * max(1.0, abs(own_height))
-                for other in active_planes
+                for other in planes
                 if other.source_index != winner.source_index
             ):
                 raise GeometryInputError(
                     "SUPPORT_PLANE_CELL_ORDER",
-                    f"Ячейка ската {winner.source_index + 1} пересекает область, где ниже лежит другая активная опорная плоскость.",
+                    f"Ячейка ската {winner.source_index + 1} пересекает область, где ниже лежит другая опорная плоскость.",
                 )
         faces.append(tuple(compact))
         face_sources.append(winner.source_index)
-
-    # Cells may change their active support set along an authored edge's
-    # inward half-plane. When adjacent planar cells have the same XY boundary
-    # but different Z values, close that finite discontinuity with a vertical
-    # transition polygon. Its four vertices lie in the vertical plane through
-    # the shared projected edge, so the transition itself is exactly planar.
-    xy_nodes: list[Point2] = []
-    xy_buckets: dict[tuple[int, int], list[int]] = {}
-
-    def projected_vertex_id(vertex_index: int) -> int:
-        point = vertices[vertex_index]
-        key = (int(round(point[0] / tolerance)), int(round(point[1] / tolerance)))
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for candidate in xy_buckets.get((key[0] + dx, key[1] + dy), ()):
-                    existing = xy_nodes[candidate]
-                    if hypot(existing[0] - point[0], existing[1] - point[1]) <= tolerance:
-                        return candidate
-        projected_id = len(xy_nodes)
-        xy_nodes.append((point[0], point[1]))
-        xy_buckets.setdefault(key, []).append(projected_id)
-        return projected_id
-
-    projected_edge_uses: dict[
-        tuple[int, int], list[tuple[int, int, int, int, int]]
-    ] = {}
-    for face_index, face in enumerate(faces):
-        for local_index, first_vertex in enumerate(face):
-            second_vertex = face[(local_index + 1) % len(face)]
-            first_xy = projected_vertex_id(first_vertex)
-            second_xy = projected_vertex_id(second_vertex)
-            if first_xy == second_xy:
-                raise GeometryInputError(
-                    "ZERO_PROJECTED_CELL_EDGE",
-                    "Плоская опорная ячейка содержит ребро нулевой длины в XY.",
-                )
-            key = (min(first_xy, second_xy), max(first_xy, second_xy))
-            projected_edge_uses.setdefault(key, []).append((
-                face_index, first_vertex, second_vertex, first_xy, second_xy
-            ))
-
-    transition_faces: list[Face] = []
-    for projected_edge, uses in projected_edge_uses.items():
-        if len(uses) > 2:
-            raise GeometryInputError(
-                "SUPPORT_PLANE_PROJECTED_NON_MANIFOLD",
-                f"Проекция ребра {projected_edge} принадлежит более чем двум опорным ячейкам.",
-            )
-        if len(uses) != 2:
-            continue
-
-        first_use, second_use = uses
-        _first_face, a0, a1, a0_xy, a1_xy = first_use
-        _second_face, b0, b1, b0_xy, b1_xy = second_use
-        if a0_xy != b1_xy or a1_xy != b0_xy:
-            raise GeometryInputError(
-                "SUPPORT_PLANE_PROJECTED_WINDING",
-                "Соседние плоские ячейки имеют несовместимую ориентацию общего проецируемого ребра.",
-            )
-
-        same_start = abs(vertices[a0][2] - vertices[b1][2]) <= tolerance * max(
-            1.0, abs(vertices[a0][2]), abs(vertices[b1][2])
-        )
-        same_end = abs(vertices[a1][2] - vertices[b0][2]) <= tolerance * max(
-            1.0, abs(vertices[a1][2]), abs(vertices[b0][2])
-        )
-        if same_start and same_end:
-            continue
-
-        # Reverse the first cell's edge and the second cell's edge to preserve
-        # consistent surface winding. Equal-height endpoints weld to one ID,
-        # reducing a quad to a triangle where appropriate.
-        raw_cap = (a1, a0, b1, b0)
-        cap: list[int] = []
-        for vertex_index in raw_cap:
-            if not cap or cap[-1] != vertex_index:
-                cap.append(vertex_index)
-        if len(cap) > 1 and cap[0] == cap[-1]:
-            cap.pop()
-        if len(set(cap)) < 3:
-            raise GeometryInputError(
-                "DEGENERATE_VERTICAL_TRANSITION",
-                "Переходная грань между двумя активными плоскостями выродилась.",
-            )
-        validate_planar_face(
-            vertices, cap, support_plane=None, eps=max(eps * 10.0, 1e-10)
-        )
-        transition_faces.append(tuple(cap))
-
-    faces.extend(transition_faces)
-    face_sources.extend([-1] * len(transition_faces))
-
-    # After transition faces have been added, every internal 3D edge must be
-    # shared by exactly two faces. Only the original XYZ eave loop may remain
-    # open for the roof-shell extrusion to close.
+    # All neighbouring regions meet on exact pairwise plane-equality lines.
+    # Every internal 3D edge must be shared by exactly two planar cells.
+    # Only the original XYZ eave loop may remain open for shell extrusion.
     edge_uses: dict[tuple[int, int], list[int]] = {}
     for face_index, face in enumerate(faces):
         for local_index, first in enumerate(face):
