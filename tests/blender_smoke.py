@@ -338,11 +338,19 @@ def main() -> None:
 
     ridge_mesh = two_panel_mesh("RoofForge_Real_Ridge", 5.0)
     roof_build_module._dissolve_coplanar_edges(ridge_mesh)
-    ensure(
-        len(ridge_mesh.polygons) == 2
-        and any(len(edge.vertices) == 2 for edge in ridge_mesh.edges),
-        "real 5-degree roof ridge was incorrectly dissolved",
-    )
+    ridge_bm = bmesh.new()
+    try:
+        ridge_bm.from_mesh(ridge_mesh)
+        ridge_bm.normal_update()
+        shared_ridge_edges = [
+            edge for edge in ridge_bm.edges if len(edge.link_faces) == 2
+        ]
+        ensure(
+            len(ridge_mesh.polygons) == 2 and len(shared_ridge_edges) == 1,
+            "real 5-degree roof ridge was incorrectly dissolved",
+        )
+    finally:
+        ridge_bm.free()
     bpy.data.meshes.remove(ridge_mesh)
 
 

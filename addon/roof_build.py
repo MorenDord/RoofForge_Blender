@@ -164,7 +164,7 @@ def _dissolve_coplanar_edges(mesh) -> None:
             span = max(
                 max(v.x for v in coordinates) - min(v.x for v in coordinates),
                 max(v.y for v in coordinates) - min(v.y for v in coordinates),
-                max(v.z for v.z for v in coordinates),
+                max(v.z for v in coordinates),
                 1.0,
             )
         else:
