@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
+from math import isfinite, sqrt
 
-from .geometry import GeometryInputError
+from .geometry import GeometryInputError, triangulate_simple_polygon
 from .mesh import RoofSurface, validate_surface_boundary_edges
 from .validation import validate_closed_mesh
 
@@ -24,10 +24,188 @@ class RoofShell:
     extrude_up: bool = False
 
 
+
+def _normal_offset_shell(
+    surface: RoofSurface,
+    thickness: float,
+    eps: float,
+    *,
+    extrude_up: bool,
+) -> RoofShell:
+    """Build a closed shell around a piecewise-planar surface with vertical caps.
+
+    Unlike global-Z extrusion, vertex-normal offsetting also works for
+    vertical transition faces. The top surface is preserved byte-for-byte.
+    Bottom faces are triangulated individually, so even a mildly warped
+    vertex-normal offset remains a valid piecewise-planar underside.
+    """
+    top_vertices = tuple(tuple(float(value) for value in point) for point in surface.vertices)
+    vertex_count = len(top_vertices)
+    scale = max(
+        1.0,
+        *(
+            max(point[axis] for point in top_vertices)
+            - min(point[axis] for point in top_vertices)
+            for axis in range(3)
+        ),
+    )
+    tolerance = max(1e-12, eps * scale * 10.0)
+
+    face_normals: list[Point3] = []
+    vertex_normal_sums = [[0.0, 0.0, 0.0] for _ in top_vertices]
+
+    for face_index, face in enumerate(surface.faces):
+        if len(face) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_TOP_FACE",
+                f"Верхняя грань {face_index} содержит менее трёх вершин.",
+            )
+        nx = ny = nz = 0.0
+        for local_index, vertex_index in enumerate(face):
+            current = top_vertices[vertex_index]
+            following = top_vertices[face[(local_index + 1) % len(face)]]
+            nx += (current[1] - following[1]) * (current[2] + following[2])
+            ny += (current[2] - following[2]) * (current[0] + following[0])
+            nz += (current[0] - following[0]) * (current[1] + following[1])
+        magnitude = sqrt(nx * nx + ny * ny + nz * nz)
+        if magnitude <= tolerance * tolerance:
+            raise GeometryInputError(
+                "DEGENERATE_TOP_FACE",
+                f"Верхняя грань {face_index} имеет нулевую площадь.",
+            )
+        normal = (nx / magnitude, ny / magnitude, nz / magnitude)
+        face_normals.append(normal)
+        for vertex_index in face:
+            vertex_normal_sums[vertex_index][0] += nx
+            vertex_normal_sums[vertex_index][1] += ny
+            vertex_normal_sums[vertex_index][2] += nz
+
+    offset_sign = 1.0 if extrude_up else -1.0
+    bottom_vertices: list[Point3] = []
+    for vertex_index, point in enumerate(top_vertices):
+        normal_sum = vertex_normal_sums[vertex_index]
+        magnitude = sqrt(sum(value * value for value in normal_sum))
+        if magnitude <= tolerance * tolerance:
+            raise GeometryInputError(
+                "UNDEFINED_OFFSET_NORMAL",
+                f"Не удалось вычислить устойчивую нормаль для вершины {vertex_index}.",
+            )
+        normal = tuple(value / magnitude for value in normal_sum)
+        bottom_vertices.append(tuple(
+            point[axis] + offset_sign * thickness * normal[axis]
+            for axis in range(3)
+        ))
+
+    if extrude_up:
+        output_top_vertices = tuple(bottom_vertices)
+        output_bottom_vertices = top_vertices
+    else:
+        output_top_vertices = top_vertices
+        output_bottom_vertices = tuple(bottom_vertices)
+
+    vertices = tuple(output_top_vertices + output_bottom_vertices)
+    output_faces: list[Face] = [tuple(face) for face in surface.faces]
+    bottom_faces: list[Face] = []
+
+    for face_index, face in enumerate(surface.faces):
+        normal = face_normals[face_index]
+        points = [top_vertices[index] for index in face]
+        drop_axis = max(range(3), key=lambda axis: abs(normal[axis]))
+        keep_axes = tuple(axis for axis in range(3) if axis != drop_axis)
+        projected = [(point[keep_axes[0]], point[keep_axes[1]]) for point in points]
+
+        # Remove projected collinear degree-two points before ear clipping.
+        compact_indices = list(range(len(face)))
+        changed = True
+        while changed and len(compact_indices) > 3:
+            changed = False
+            for local_index in range(len(compact_indices)):
+                previous = projected[compact_indices[local_index - 1]]
+                current = projected[compact_indices[local_index]]
+                following = projected[
+                    compact_indices[(local_index + 1) % len(compact_indices)]
+                ]
+                cross = (
+                    (current[0] - previous[0]) * (following[1] - current[1])
+                    - (current[1] - previous[1]) * (following[0] - current[0])
+                )
+                if abs(cross) <= tolerance * max(
+                    1.0,
+                    sqrt((current[0] - previous[0]) ** 2 + (current[1] - previous[1]) ** 2),
+                    sqrt((following[0] - current[0]) ** 2 + (following[1] - current[1]) ** 2),
+                ):
+                    del compact_indices[local_index]
+                    changed = True
+                    break
+
+        if len(compact_indices) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_BOTTOM_FACE",
+                f"Нижняя грань {face_index} схлопнулась после смещения по нормали.",
+            )
+        compact_projected = [projected[index] for index in compact_indices]
+        coordinate_map = {
+            point: face[original_index]
+            for point, original_index in zip(compact_projected, compact_indices)
+        }
+        try:
+            triangles = triangulate_simple_polygon(compact_projected, max(1e-12, tolerance / scale))
+        except GeometryInputError as exc:
+            raise GeometryInputError(
+                "BOTTOM_TRIANGULATION_FAILED",
+                f"Не удалось триангулировать смещённую нижнюю грань {face_index}: {exc.message}",
+            ) from exc
+
+        for triangle in triangles:
+            original_ids = tuple(coordinate_map[point] for point in triangle)
+            bottom_ids = tuple(index + vertex_count for index in original_ids)
+            a, b, c = (vertices[index] for index in bottom_ids)
+            ux = b[0] - a[0]
+            uy = b[1] - a[1]
+            uz = b[2] - a[2]
+            vx = c[0] - a[0]
+            vy = c[1] - a[1]
+            vz = c[2] - a[2]
+            triangle_normal = (
+                uy * vz - uz * vy,
+                uz * vx - ux * vz,
+                ux * vy - uy * vx,
+            )
+            if sum(triangle_normal[axis] * normal[axis] for axis in range(3)) > 0.0:
+                bottom_ids = tuple(reversed(bottom_ids))
+            bottom_faces.append(bottom_ids)
+
+    output_faces.extend(bottom_faces)
+    boundary_edges = validate_surface_boundary_edges(
+        surface.vertices, surface.faces, surface.boundary_xy, tolerance * 5.0
+    )
+    side_faces: list[Face] = []
+    for first, second in boundary_edges:
+        first_bottom = first + vertex_count
+        second_bottom = second + vertex_count
+        side_faces.append((first, first_bottom, second_bottom))
+        side_faces.append((first, second_bottom, second))
+
+    output_faces.extend(side_faces)
+    diagnostics = validate_closed_mesh(vertices, output_faces, eps)
+    if diagnostics:
+        first = diagnostics[0]
+        raise GeometryInputError(first.code, first.message)
+
+    return RoofShell(
+        vertices=vertices,
+        faces=tuple(output_faces),
+        top_face_count=len(surface.faces),
+        bottom_face_count=len(bottom_faces),
+        side_face_count=len(side_faces),
+        thickness=thickness,
+        extrude_up=bool(extrude_up),
+    )
+
 def build_roof_shell(
     surface: RoofSurface,
     thickness: float,
-    eps: float = 1e-11,
+    eps: float = 1e-9,
     *,
     extrude_up: bool = False,
 ) -> RoofShell:
@@ -54,6 +232,11 @@ def build_roof_shell(
         thickness,
     )
     tolerance = max(1e-12, eps * scale * 100.0)
+    if -1 in surface.face_slope_indices:
+        return _normal_offset_shell(
+            surface, thickness, eps, extrude_up=bool(extrude_up)
+        )
+
     boundary_edges = validate_surface_boundary_edges(
         surface.vertices, surface.faces, surface.boundary_xy, tolerance * 5.0
     )
