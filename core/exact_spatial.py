@@ -2128,6 +2128,7 @@ def _build_maximal_exact_ring_candidate(
     alpha: float,
     scale: float,
     tolerance: float,
+    reject_reasons: list[str] | None = None,
 ):
     """Build a valid ring from endpoints on exact adjacent-plane seams.
 
@@ -2156,7 +2157,8 @@ def _build_maximal_exact_ring_candidate(
         inner.append(point)
 
     candidate = _build_event_ring_candidate(
-        points, polygon, planes, tuple(inner), scale, tolerance
+        points, polygon, planes, tuple(inner), scale, tolerance,
+        reject_reasons,
     )
     if candidate is None:
         return None
@@ -2205,6 +2207,7 @@ def _select_maximal_exact_ring_candidate(
             )
 
     viable: list[dict] = []
+    rejected_reasons: list[str] = []
     for ray_choice in product(*ray_options):
         high = 0.999
         best_candidate = None
@@ -2220,7 +2223,7 @@ def _select_maximal_exact_ring_candidate(
         while alpha >= 0.001:
             candidate = _build_maximal_exact_ring_candidate(
                 points, polygon, planes, ray_choice,
-                alpha, scale, tolerance,
+                alpha, scale, tolerance, rejected_reasons,
             )
             if candidate is not None:
                 best_candidate = candidate
@@ -2239,7 +2242,7 @@ def _select_maximal_exact_ring_candidate(
             middle = (low + upper) * 0.5
             candidate = _build_maximal_exact_ring_candidate(
                 points, polygon, planes, ray_choice,
-                middle, scale, tolerance,
+                middle, scale, tolerance, rejected_reasons,
             )
             if candidate is None:
                 upper = middle
@@ -2253,7 +2256,11 @@ def _select_maximal_exact_ring_candidate(
             "EXACT_RING_PARTITION_UNRESOLVED",
             "Невозможно расположить окончания точных плоских скатов так, чтобы "
             "они вместе с плоской центральной заплатой образовали простую "
-            "неперекрывающуюся поверхность.",
+            "неперекрывающуюся поверхность. Проверки: "
+            + ", ".join(
+                f"{reason}={rejected_reasons.count(reason)}"
+                for reason in sorted(set(rejected_reasons))
+            ),
         )
 
     viable.sort(key=lambda candidate: (
@@ -2287,19 +2294,22 @@ def build_exact_planar_ring_surface(
     # Prefer the topology that maximizes exact source-plane strips while
     # leaving a small central planar cap. Every seam still lies on the exact
     # intersection of its two adjacent support planes.
+    maximal_ring_error = None
+    candidates = ()
     try:
         candidates = _select_maximal_exact_ring_candidate(
             normalized, polygon, planes, scale, tolerance
         )
-    except GeometryInputError:
-        candidates = ()
+    except GeometryInputError as exc:
+        maximal_ring_error = exc
+    maximal_assembly_errors = []
     for candidate in candidates:
         try:
             return _assemble_exact_event_ring_surface(
                 normalized, polygon, planes, candidate, eps
             )
-        except GeometryInputError:
-            continue
+        except GeometryInputError as exc:
+            maximal_assembly_errors.append(f"{exc.code}: {exc.message}")
 
     event_options = tuple(
         _corner_seam_event_options(
@@ -2356,7 +2366,15 @@ def build_exact_planar_ring_surface(
             f"{arrangement_error.code}: {arrangement_error.message} "
             "Кольцевая раскладка: "
             f"{ring_error.code}: {ring_error.message} "
-            "Сглаженная или приблизительная поверхность не создавалась.",
+            "Сглаженная или приблизительная поверхность не создавалась. "
+            + (
+                f"Максимальная событийная заплата: {maximal_ring_error.code}: {maximal_ring_error.message} "
+                if maximal_ring_error is not None else ""
+            )
+            + (
+                "Ошибки сборки максимальной заплаты: " + " | ".join(maximal_assembly_errors[:3]) + " "
+                if maximal_assembly_errors else ""
+            ),
         ) from ring_error
 
 
