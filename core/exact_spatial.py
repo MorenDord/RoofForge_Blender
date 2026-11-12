@@ -1782,19 +1782,41 @@ def build_exact_planar_ring_surface(
     pitches_degrees: Sequence[float],
     eps: float = 1e-9,
 ):
-    """Build the exact lower envelope of the authored 3D eave support planes.
+    """Build a piecewise-planar roof from exact 3D seam events.
 
-    Every output face lies on one authored edge plane. All facet boundaries
-    are exact equal-height intersections of those planes. The XY footprint is
-    partitioned by the complete finite arrangement of plane-equality lines;
-    no sampled distance field, spatial smoothing or arbitrary seam endpoint
-    is used.
+    Each eave edge defines one exact support plane. At each contour vertex,
+    the seam is the exact intersection of the two adjacent support planes.
+    Its endpoint is the first inward event where that seam meets a third
+    support plane. The resulting event nodes define exact planar slope cells
+    and a triangulated planar transition region. No distance field, arbitrary
+    seam parameter, height averaging or smoothed surface is used.
     """
     normalized = tuple(tuple(float(value) for value in point) for point in points)
     planes = build_support_planes(normalized, pitches_degrees, eps)
     polygon = tuple((point[0], point[1]) for point in normalized)
-    return _build_exact_support_plane_envelope(
-        normalized, polygon, planes, eps
+    scale = max(_bbox_scale(polygon), 1.0)
+    tolerance = max(1e-12, eps * scale * 100.0)
+
+    event_options = tuple(
+        _corner_seam_event_options(
+            index, polygon, planes, scale, tolerance
+        )
+        for index in range(len(normalized))
+    )
+    missing = [
+        index + 1 for index, options in enumerate(event_options) if not options
+    ]
+    if missing:
+        raise GeometryInputError(
+            "EXACT_SPATIAL_EVENT_MISSING",
+            "Не удалось найти точное внутреннее пересечение шва с третьей опорной "
+            "плоскостью у вершин: " + ", ".join(map(str, missing))
+            + ". Генерация остановлена без аппроксимации.",
+        )
+
+    return select_exact_spatial_arrangement(
+        normalized, polygon, planes, event_options,
+        scale, tolerance, eps,
     )
 
 
