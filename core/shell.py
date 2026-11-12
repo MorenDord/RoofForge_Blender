@@ -371,7 +371,19 @@ def build_roof_shell(
     diagnostics = validate_closed_mesh(vertices, faces, eps)
     if diagnostics:
         first = diagnostics[0]
-        raise GeometryInputError(first.code, first.message)
+        face_indices = [
+            int(value) for value in re.findall(r"\\d+", first.message)
+            if int(value) < len(faces)
+        ][:2]
+        details = []
+        for face_index in face_indices:
+            face = faces[face_index]
+            details.append(
+                f"face {face_index}: "
+                + repr(tuple(vertices[index] for index in face))
+            )
+        context = (" Геометрия: " + "; ".join(details)) if details else ""
+        raise GeometryInputError(first.code, first.message + context)
     return RoofShell(
         vertices=vertices,
         faces=faces,
