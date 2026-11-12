@@ -2065,12 +2065,46 @@ def build_exact_planar_ring_surface(
             + ". Генерация остановлена без аппроксимации.",
         )
 
-    candidate = _select_exact_ring_candidate(
-        normalized, polygon, planes, event_options, scale, tolerance
-    )
-    return _assemble_exact_event_ring_surface(
-        normalized, polygon, planes, candidate, eps
-    )
+    arrangement_error = None
+    try:
+        surface = select_exact_spatial_arrangement(
+            normalized, polygon, planes, event_options,
+            scale, tolerance, eps,
+        )
+        used_sources = {
+            source for source in surface.face_slope_indices if source >= 0
+        }
+        missing_sources = sorted(set(range(len(planes))) - used_sources)
+        if missing_sources:
+            raise GeometryInputError(
+                "EXACT_SPATIAL_ARRANGEMENT_UNUSED_PLANES",
+                "Пространственная раскладка не сохранила отдельные плоские области "
+                "для рёбер: " + ", ".join(str(index + 1) for index in missing_sources),
+            )
+        return surface
+    except GeometryInputError as exc:
+        arrangement_error = exc
+
+    # A single simple central ring is a second exact topology. Use it only
+    # when the general arrangement has no valid embedding; both paths use
+    # exact triple-plane events and planar faces, never sampled heights.
+    try:
+        candidate = _select_exact_ring_candidate(
+            normalized, polygon, planes, event_options, scale, tolerance
+        )
+        return _assemble_exact_event_ring_surface(
+            normalized, polygon, planes, candidate, eps
+        )
+    except GeometryInputError as ring_error:
+        raise GeometryInputError(
+            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
+            "Не удалось построить замкнутую точную планарную топологию. "
+            "Раскладка событий: "
+            f"{arrangement_error.code}: {arrangement_error.message} "
+            "Кольцевая раскладка: "
+            f"{ring_error.code}: {ring_error.message} "
+            "Сглаженная или приблизительная поверхность не создавалась.",
+        ) from ring_error
 
 
 def validate_planar_face(
