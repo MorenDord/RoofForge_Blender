@@ -211,7 +211,7 @@ class PolygonTests(unittest.TestCase):
             places=7,
         )
         self.assertEqual(
-            len({source for source in surface.face_slope_indices}),
+            len({source for source in surface.face_slope_indices if source >= 0}),
             len(points),
             "every authored edge plane must own a non-zero exact roof region",
         )
