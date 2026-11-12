@@ -2039,6 +2039,231 @@ def _assemble_exact_event_ring_surface(
     )
 
 
+def _corner_seam_ray_options(
+    vertex_index: int,
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    tolerance: float,
+) -> tuple[tuple[Point2, float], ...]:
+    """Return all inward directions of the exact adjacent-plane seam.
+
+    Each ray lies on the 3D intersection of the two support planes adjacent
+    to the source corner. Its maximum distance is the first exact hit on the
+    footprint boundary. No point is projected to an approximate height.
+    """
+    count = len(polygon)
+    previous_index = (vertex_index - 1) % count
+    line = intersect_support_planes(
+        planes[previous_index], planes[vertex_index],
+        max(1e-12, tolerance / max(_bbox_scale(polygon), 1.0)),
+    )
+    if line is None:
+        return ()
+    dx, dy = line.direction[0], line.direction[1]
+    magnitude = hypot(dx, dy)
+    if magnitude <= tolerance:
+        return ()
+    base = (dx / magnitude, dy / magnitude)
+    origin = polygon[vertex_index]
+    probe_distance = max(
+        _bbox_scale(polygon) * 1e-7,
+        tolerance * 20.0,
+    )
+    options: list[tuple[Point2, float]] = []
+    for sign in (1.0, -1.0):
+        direction = (base[0] * sign, base[1] * sign)
+        probe = (
+            origin[0] + direction[0] * probe_distance,
+            origin[1] + direction[1] * probe_distance,
+        )
+        if not _point_in_polygon(probe, polygon, tolerance):
+            continue
+
+        exit_parameters = []
+        for edge_index, (start, end) in enumerate(
+            zip(polygon, polygon[1:] + polygon[:1])
+        ):
+            if edge_index in {previous_index, vertex_index}:
+                continue
+            parameter = _ray_segment_parameter(
+                origin, direction, start, end, tolerance
+            )
+            if parameter is not None:
+                exit_parameters.append(parameter)
+        if not exit_parameters:
+            continue
+        max_distance = min(exit_parameters)
+        if max_distance <= tolerance:
+            continue
+
+        # The segment up to its first boundary hit must stay in the footprint.
+        if not all(
+            _point_in_polygon(
+                (
+                    origin[0] + direction[0] * max_distance * fraction,
+                    origin[1] + direction[1] * max_distance * fraction,
+                ),
+                polygon,
+                tolerance,
+            )
+            for fraction in (0.1, 0.25, 0.5, 0.75, 0.9)
+        ):
+            continue
+        if not any(
+            hypot(
+                direction[0] - existing[0][0],
+                direction[1] - existing[0][1],
+            ) <= 1e-10
+            for existing in options
+        ):
+            options.append((direction, max_distance))
+    return tuple(options)
+
+
+def _build_maximal_exact_ring_candidate(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    ray_choice: Sequence[tuple[Point2, float]],
+    alpha: float,
+    scale: float,
+    tolerance: float,
+):
+    """Build a valid ring from endpoints on exact adjacent-plane seams.
+
+    The scalar alpha is not a height-field approximation: it only selects
+    where each planar support strip terminates along its exact 3D seam line.
+    The objective is to maximize the source-plane strip area while keeping
+    every strip and the remaining planar cap inside a simple, non-overlapping
+    partition of the original footprint.
+    """
+    inner: list[Point3] = []
+    for index, (direction, maximum_distance) in enumerate(ray_choice):
+        origin = polygon[index]
+        x = origin[0] + alpha * maximum_distance * direction[0]
+        y = origin[1] + alpha * maximum_distance * direction[1]
+        previous = planes[(index - 1) % len(planes)]
+        current = planes[index]
+        z = current.height(x, y)
+        point = (x, y, z)
+        if max(
+            abs(previous.residual(point)),
+            abs(current.residual(point)),
+        ) > tolerance * max(1.0, abs(z)):
+            return None
+        if not _point_in_polygon((x, y), polygon, tolerance):
+            return None
+        inner.append(point)
+
+    candidate = _build_event_ring_candidate(
+        points, polygon, planes, tuple(inner), scale, tolerance
+    )
+    if candidate is None:
+        return None
+    candidate["event_distance_sum"] = sum(
+        alpha * maximum_distance
+        for _direction, maximum_distance in ray_choice
+    )
+    candidate["seam_alpha"] = alpha
+    return candidate
+
+
+def _select_maximal_exact_ring_candidate(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    scale: float,
+    tolerance: float,
+):
+    """Maximize exact planar source facets subject to a valid planar cap.
+
+    Every source strip remains on its authored support plane. Its inner edge
+    is on the exact intersection of adjacent support planes. A central polygon
+    bounded by those straight seams is closed with planar triangles. The
+    endpoint scale is selected by a deterministic geometric optimization:
+    maximize alpha while maintaining a simple, positive-area footprint
+    partition. This avoids forcing the seams to stop at incompatible triple
+    events when a concave topology requires an extended planar cap.
+    """
+    ray_options = tuple(
+        _corner_seam_ray_options(index, polygon, planes, tolerance)
+        for index in range(len(points))
+    )
+    if any(not options for options in ray_options):
+        raise GeometryInputError(
+            "EXACT_RING_INWARD_SEAM_MISSING",
+            "У одной или нескольких вершин нет направления внутрь по точному пересечению соседних опорных плоскостей.",
+        )
+
+    combinations = 1
+    for options in ray_options:
+        combinations *= len(options)
+        if combinations > 4096:
+            raise GeometryInputError(
+                "EXACT_RING_RAY_AMBIGUITY",
+                f"Слишком много комбинаций внутренних направлений швов ({combinations}).",
+            )
+
+    viable: list[dict] = []
+    for ray_choice in product(*ray_options):
+        high = 0.999
+        best_candidate = None
+        best_alpha = None
+        previous_failed = 1.0
+        found = False
+
+        # Locate the highest valid alpha. The sweep brackets the first
+        # topology-changing event; bisection then resolves its exact boundary
+        # to floating-point precision. All output points remain on support
+        # planes and all output edges are straight.
+        alpha = high
+        while alpha >= 0.001:
+            candidate = _build_maximal_exact_ring_candidate(
+                points, polygon, planes, ray_choice,
+                alpha, scale, tolerance,
+            )
+            if candidate is not None:
+                best_candidate = candidate
+                best_alpha = alpha
+                found = True
+                previous_failed = min(1.0, alpha + 0.01)
+                break
+            alpha -= 0.01
+
+        if not found:
+            continue
+
+        low = best_alpha
+        upper = previous_failed
+        for _iteration in range(40):
+            middle = (low + upper) * 0.5
+            candidate = _build_maximal_exact_ring_candidate(
+                points, polygon, planes, ray_choice,
+                middle, scale, tolerance,
+            )
+            if candidate is None:
+                upper = middle
+            else:
+                low = middle
+                best_candidate = candidate
+        viable.append(best_candidate)
+
+    if not viable:
+        raise GeometryInputError(
+            "EXACT_RING_PARTITION_UNRESOLVED",
+            "Невозможно расположить окончания точных плоских скатов так, чтобы "
+            "они вместе с плоской центральной заплатой образовали простую "
+            "неперекрывающуюся поверхность.",
+        )
+
+    viable.sort(key=lambda candidate: (
+        -candidate["seam_alpha"],
+        candidate["ring_area"],
+        candidate["event_distance_sum"],
+    ))
+    return viable
+
+
 def build_exact_planar_ring_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
@@ -2058,6 +2283,23 @@ def build_exact_planar_ring_surface(
     polygon = tuple((point[0], point[1]) for point in normalized)
     scale = max(_bbox_scale(polygon), 1.0)
     tolerance = max(1e-12, eps * scale * 100.0)
+
+    # Prefer the topology that maximizes exact source-plane strips while
+    # leaving a small central planar cap. Every seam still lies on the exact
+    # intersection of its two adjacent support planes.
+    try:
+        candidates = _select_maximal_exact_ring_candidate(
+            normalized, polygon, planes, scale, tolerance
+        )
+    except GeometryInputError:
+        candidates = ()
+    for candidate in candidates:
+        try:
+            return _assemble_exact_event_ring_surface(
+                normalized, polygon, planes, candidate, eps
+            )
+        except GeometryInputError:
+            continue
 
     event_options = tuple(
         _corner_seam_event_options(
