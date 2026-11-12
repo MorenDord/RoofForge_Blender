@@ -146,13 +146,12 @@ def clear_surface_cache() -> None:
     _SURFACE_CACHE.clear()
 
 
-def _dissolve_coplanar_edges(mesh) -> None:
-    """Merge planar and practically coplanar patches without flattening ridges.
+def _dissolve_coplanar_edges(mesh, *, exact_planar: bool = False) -> None:
+    """Merge planar patches without relaxing exact-surface planarity.
 
-    Adjacent faces are merged only when their dihedral angle is at most 0.05
-    degrees and their mutual distance from the opposite face plane is within
-    10 ppm of the mesh span. This small tolerance absorbs solver round-off and
-    narrow near-flat sliver facets, while ordinary roof-plane breaks remain.
+    Legacy approximate surfaces retain the historical near-coplanar cleanup.
+    Exact surfaces use a far tighter angular and distance tolerance so a
+    shallow but real roof-plane break is never dissolved into a warped n-gon.
     The operation is repeated because a dissolve can expose new coplanar
     neighbours. Degree-two remnants and loose internal geometry are removed.
     """
@@ -169,8 +168,12 @@ def _dissolve_coplanar_edges(mesh) -> None:
             )
         else:
             span = 1.0
-        distance_tolerance = span * 1.0e-5
-        minimum_normal_dot = cos(radians(0.05))
+        if exact_planar:
+            distance_tolerance = span * 1.0e-7
+            minimum_normal_dot = cos(radians(1.0e-5))
+        else:
+            distance_tolerance = span * 1.0e-5
+            minimum_normal_dot = cos(radians(0.05))
 
         # Each successful pass removes at least one face; the bound is a
         # defensive guard against unexpected BMesh behaviour on malformed data.
@@ -285,7 +288,9 @@ def create_roof_mesh_data(name: str, surface, shell):
     try:
         mesh.from_pydata(shell.vertices, [], shell.faces)
         mesh.update(calc_edges=True)
-        _dissolve_coplanar_edges(mesh)
+        _dissolve_coplanar_edges(
+            mesh, exact_planar=(surface.approximation_error <= 0.0)
+        )
         _roof_face_metadata(mesh, surface, shell)
         return mesh
     except Exception:
