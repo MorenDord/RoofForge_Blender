@@ -831,6 +831,10 @@ def main() -> None:
         len({index for index in mixed_surface.face_slope_indices if index >= 0}) == len(mixed_concave_points),
         "each original eave edge must own an exact planar roof region",
     )
+    ensure(
+        any(index == -1 for index in mixed_surface.face_slope_indices),
+        "exact spatial builder did not create a transition patch for this fixture",
+    )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
     )
@@ -844,16 +848,35 @@ def main() -> None:
     )
     component_values = [item.value for item in component_attribute.data]
     slope_values = [item.value for item in slope_attribute.data]
-    ensure(
-        any(component == 0 and slope == -1 for component, slope in zip(component_values, slope_values)),
-        "planar transition faces were not retained as roof faces",
-    )
     mixed_bm = bmesh.new()
     try:
         mixed_bm.from_mesh(mixed_mesh)
         ensure(
             all(len(edge.link_faces) == 2 for edge in mixed_bm.edges),
-            "mixed-height concave fallback shell is not edge-manifold",
+            "mixed-height concave shell is not edge-manifold",
+        )
+        mixed_bm.normal_update()
+        span = max(
+            max((vertex.co[axis] for vertex in mixed_bm.verts), default=0.0)
+            - min((vertex.co[axis] for vertex in mixed_bm.verts), default=0.0)
+            for axis in range(3)
+        )
+        planarity_tolerance = max(1e-7, span * 1e-6)
+        non_planar_faces = []
+        for face in mixed_bm.faces:
+            if len(face.verts) < 4:
+                continue
+            origin = face.verts[0].co
+            normal = face.normal
+            residual = max(
+                abs(normal.dot(vertex.co - origin))
+                for vertex in face.verts
+            )
+            if residual > planarity_tolerance:
+                non_planar_faces.append((face.index, residual))
+        ensure(
+            not non_planar_faces,
+            f"mixed-height concave output contains non-planar polygons: {non_planar_faces[:8]}",
         )
     finally:
         mixed_bm.free()
