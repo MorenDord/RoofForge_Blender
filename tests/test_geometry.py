@@ -73,6 +73,30 @@ def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
                     )
     testcase.assertTrue(has_exact_seam, "roof should contain at least one exact plane-intersection seam")
 
+    directed_uses = {}
+    for face_index, face in enumerate(surface.faces):
+        source = surface.face_slope_indices[face_index]
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            directed_uses.setdefault(key, []).append(
+                (face_index, source, first, second)
+            )
+    for edge_key, uses in directed_uses.items():
+        testcase.assertLessEqual(
+            len(uses), 2,
+            f"top roof edge {edge_key} is used by {len(uses)} faces",
+        )
+        if len(uses) == 2:
+            first_use, second_use = uses
+            testcase.assertEqual(
+                (first_use[2], first_use[3]),
+                (second_use[3], second_use[2]),
+                "top surface edge winding is inconsistent: "
+                f"edge={edge_key}, uses={uses}, "
+                f"coords=({surface.vertices[edge_key[0]]}, {surface.vertices[edge_key[1]]})",
+            )
+
 
 class PolygonTests(unittest.TestCase):
     def test_rectangle_area(self):
