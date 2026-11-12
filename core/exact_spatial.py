@@ -1777,6 +1777,242 @@ def _build_exact_support_plane_envelope(
         refinement_depth=0,
     )
 
+def _assemble_exact_event_ring_surface(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    candidate: dict,
+    eps: float,
+):
+    """Assemble source-plane strips and their exact planar central cap.
+
+    Every strip is bounded by one authored eave segment and two exact seam
+    segments. Its four corners lie on the source support plane. The central
+    polygon is triangulated into planar faces whose boundary edges lie on the
+    corresponding source planes. No half-edge face guessing or sampled height
+    interpolation is involved.
+    """
+    from .mesh import RoofSurface, validate_surface_boundary_edges
+
+    scale = max(_bbox_scale(polygon), 1.0)
+    tolerance = max(1e-12, eps * scale * 100.0)
+    count = len(points)
+    inner = tuple(candidate["inner"])
+    compact_indices = tuple(candidate["compact_indices"])
+
+    vertices: list[Point3] = []
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+
+    def add_vertex(point: Point3) -> int:
+        key = tuple(int(round(value / tolerance)) for value in point)
+        for dx, dy, dz in product((-1, 0, 1), repeat=3):
+            for vertex_index in buckets.get(
+                (key[0] + dx, key[1] + dy, key[2] + dz), ()
+            ):
+                existing = vertices[vertex_index]
+                if sqrt(sum(
+                    (existing[axis] - point[axis]) ** 2
+                    for axis in range(3)
+                )) <= tolerance:
+                    return vertex_index
+        vertex_index = len(vertices)
+        vertices.append(tuple(float(value) for value in point))
+        buckets.setdefault(key, []).append(vertex_index)
+        return vertex_index
+
+    outer_ids = [add_vertex(point) for point in points]
+    inner_ids = [add_vertex(point) for point in inner]
+    faces: list[Face] = []
+    face_sources: list[int] = []
+
+    for source_index in range(count):
+        next_index = (source_index + 1) % count
+        raw = (
+            outer_ids[source_index],
+            outer_ids[next_index],
+            inner_ids[next_index],
+            inner_ids[source_index],
+        )
+        compact: list[int] = []
+        for vertex_index in raw:
+            if not compact or compact[-1] != vertex_index:
+                compact.append(vertex_index)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_SOURCE_SLOPE_FACE",
+                f"Плоский скат по ребру {source_index + 1} схлопнулся в линию.",
+            )
+
+        face_xy = [(vertices[index][0], vertices[index][1]) for index in compact]
+        issues = validate_simple_polygon(
+            face_xy, max(1e-12, tolerance / scale)
+        )
+        if issues:
+            raise GeometryInputError(
+                "INVALID_SOURCE_SLOPE_FACE",
+                f"Область ската {source_index + 1} не является простым контуром: "
+                + issues[0].message,
+            )
+        if signed_area(face_xy) < 0.0:
+            compact.reverse()
+            face_xy.reverse()
+
+        validate_planar_face(
+            vertices, compact,
+            support_plane=planes[source_index],
+            eps=max(eps * 10.0, 1e-10),
+        )
+
+        # Keep convex source regions as one editable quad/N-gon. Only concave
+        # planar regions are ear-clipped so the shell validator never uses an
+        # invalid fan triangulation. Blender can dissolve these exact coplanar
+        # triangles back into the original plane region.
+        turns = []
+        for local_index in range(len(face_xy)):
+            a = face_xy[local_index]
+            b = face_xy[(local_index + 1) % len(face_xy)]
+            c = face_xy[(local_index + 2) % len(face_xy)]
+            turns.append(
+                (b[0] - a[0]) * (c[1] - b[1])
+                - (b[1] - a[1]) * (c[0] - b[0])
+            )
+        has_positive = any(value > tolerance * tolerance for value in turns)
+        has_negative = any(value < -tolerance * tolerance for value in turns)
+        if has_positive and has_negative:
+            triangles = triangulate_simple_polygon(
+                face_xy, max(1e-12, tolerance / scale)
+            )
+            id_by_xy = {
+                point: vertex_id for point, vertex_id in zip(face_xy, compact)
+            }
+            for triangle in triangles:
+                face = tuple(id_by_xy[point] for point in triangle)
+                validate_planar_face(
+                    vertices, face,
+                    support_plane=planes[source_index],
+                    eps=max(eps * 10.0, 1e-10),
+                )
+                faces.append(face)
+                face_sources.append(source_index)
+        else:
+            faces.append(tuple(compact))
+            face_sources.append(source_index)
+
+    if candidate["ring_kind"] == "polygon":
+        compact_inner_ids = [
+            inner_ids[index] for index in compact_indices
+        ]
+        compact_inner_xy = [
+            (vertices[index][0], vertices[index][1])
+            for index in compact_inner_ids
+        ]
+        for triangle in candidate["transition_faces"]:
+            face = tuple(compact_inner_ids[index] for index in triangle)
+            face_xy = [(vertices[index][0], vertices[index][1]) for index in face]
+            if signed_area(face_xy) < 0.0:
+                face = tuple(reversed(face))
+            validate_planar_face(
+                vertices, face, support_plane=None,
+                eps=max(eps * 10.0, 1e-10),
+            )
+            faces.append(face)
+            face_sources.append(-1)
+
+    edge_uses: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(faces):
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_uses.setdefault(key, []).append(face_index)
+    if any(len(uses) > 2 for uses in edge_uses.values()):
+        raise GeometryInputError(
+            "EXACT_EVENT_RING_NON_MANIFOLD",
+            "Плоские скаты и центральная заплата образовали ребро с более чем двумя гранями.",
+        )
+
+    boundary_edges = validate_surface_boundary_edges(
+        vertices, faces, polygon, tolerance * 5.0
+    )
+    for first, second in boundary_edges:
+        p, q = vertices[first], vertices[second]
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        if dx * dx + dy * dy <= tolerance * tolerance:
+            raise GeometryInputError(
+                "ZERO_LENGTH_XY_EAVE_EDGE",
+                "Точная событийная раскладка оставила вертикальное ребро на карнизной границе.",
+            )
+        matching = []
+        for edge_index, start in enumerate(points):
+            end = points[(edge_index + 1) % count]
+            ex, ey = end[0] - start[0], end[1] - start[1]
+            length_sq = ex * ex + ey * ey
+            if length_sq <= tolerance * tolerance:
+                continue
+            def distance_and_parameter(point):
+                rx, ry = point[0] - start[0], point[1] - start[1]
+                parameter = (rx * ex + ry * ey) / length_sq
+                distance = abs(ex * ry - ey * rx) / sqrt(length_sq)
+                return distance, parameter
+            dp, tp = distance_and_parameter(p)
+            dq, tq = distance_and_parameter(q)
+            if (
+                dp <= tolerance * 10.0 and dq <= tolerance * 10.0
+                and -tolerance <= tp <= 1.0 + tolerance
+                and -tolerance <= tq <= 1.0 + tolerance
+            ):
+                expected_p = start[2] + tp * (end[2] - start[2])
+                expected_q = start[2] + tq * (end[2] - start[2])
+                if (
+                    abs(p[2] - expected_p) <= tolerance * max(1.0, abs(expected_p))
+                    and abs(q[2] - expected_q) <= tolerance * max(1.0, abs(expected_q))
+                ):
+                    matching.append(edge_index)
+        if len(matching) != 1:
+            raise GeometryInputError(
+                "EXACT_EVENT_EAVE_HEIGHT_MISMATCH",
+                "Событийная поверхность не совпадает с исходным 3D-карнизом.",
+            )
+
+    source_area_xy = abs(signed_area(polygon))
+    surface_area_xy = sum(
+        abs(signed_area([
+            (vertices[index][0], vertices[index][1]) for index in face
+        ]))
+        for face in faces
+    )
+    if abs(surface_area_xy - source_area_xy) > max(
+        tolerance * scale * 10.0, source_area_xy * 1e-7
+    ):
+        raise GeometryInputError(
+            "EXACT_EVENT_RING_COVERAGE",
+            "Плоские скаты и переходные треугольники не покрывают контур без зазоров или перекрытий.",
+        )
+
+    if set(source for source in face_sources if source >= 0) != set(range(count)):
+        missing = sorted(set(range(count)) - {
+            source for source in face_sources if source >= 0
+        })
+        raise GeometryInputError(
+            "EXACT_EVENT_UNUSED_SUPPORT_PLANE",
+            "Некоторые заданные рёбра не получили собственную плоскую область ската: "
+            + ", ".join(str(index + 1) for index in missing),
+        )
+
+    return RoofSurface(
+        vertices=tuple(vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_sources),
+        planes=tuple(PlaneZ(plane.a, plane.b, plane.c) for plane in planes),
+        source_area_xy=source_area_xy,
+        surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(polygon),
+        approximation_error=0.0,
+        refinement_depth=0,
+    )
+
+
 def build_exact_planar_ring_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
@@ -1814,9 +2050,11 @@ def build_exact_planar_ring_surface(
             + ". Генерация остановлена без аппроксимации.",
         )
 
-    return select_exact_spatial_arrangement(
-        normalized, polygon, planes, event_options,
-        scale, tolerance, eps,
+    candidate = _select_exact_ring_candidate(
+        normalized, polygon, planes, event_options, scale, tolerance
+    )
+    return _assemble_exact_event_ring_surface(
+        normalized, polygon, planes, candidate, eps
     )
 
 
