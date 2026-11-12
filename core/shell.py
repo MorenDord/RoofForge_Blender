@@ -159,7 +159,11 @@ def _normal_offset_shell(
         for triangle in triangles:
             original_ids = tuple(coordinate_map[point] for point in triangle)
             bottom_ids = tuple(index + vertex_count for index in original_ids)
-            a, b, c = (vertices[index] for index in bottom_ids)
+            # Preserve the original top-face winding when orienting the
+            # underside triangle. The normal-offset bottom may be warped
+            # slightly at creases, so its local triangle normal must not be
+            # allowed to flip the combinatorial face orientation.
+            a, b, c = (top_vertices[index] for index in original_ids)
             ux = b[0] - a[0]
             uy = b[1] - a[1]
             uz = b[2] - a[2]
