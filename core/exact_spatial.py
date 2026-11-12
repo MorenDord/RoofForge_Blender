@@ -567,21 +567,36 @@ def _corner_seam_event_options(
         if not events:
             continue
         events.sort(key=lambda item: (item[0], item[1]))
-        first_parameter = events[0][0]
-        simultaneous = tuple(
-            sorted(
-                third_index
-                for parameter, third_index, _point in events
-                if abs(parameter - first_parameter) <= tolerance * 10.0
-            )
-        )
-        point = events[0][2]
-        if not any(
-            sqrt(sum((point[axis] - other[0][axis]) ** 2 for axis in range(3)))
-            <= tolerance
-            for other in options
-        ):
-            options.append((point, first_parameter, simultaneous))
+
+        # Keep the first two distinct third-plane events on each inward ray.
+        # The nearest event is normally the roof junction, but a reflex
+        # contour can make that event produce a self-crossing inner ring.
+        # Retaining the next exact event lets the global ring validator choose
+        # the first topology that closes without crossing or height averaging.
+        event_groups: list[list[tuple[float, int, Point3]]] = []
+        for event in events:
+            if (
+                not event_groups
+                or abs(event[0] - event_groups[-1][0][0]) > tolerance * 10.0
+            ):
+                event_groups.append([event])
+            else:
+                event_groups[-1].append(event)
+
+        for group in event_groups[:2]:
+            parameter = group[0][0]
+            point = group[0][2]
+            simultaneous = tuple(sorted(
+                third_index for _event_parameter, third_index, _point in group
+            ))
+            if not any(
+                sqrt(sum(
+                    (point[axis] - other[0][axis]) ** 2
+                    for axis in range(3)
+                )) <= tolerance
+                for other in options
+            ):
+                options.append((point, parameter, simultaneous))
 
     options.sort(key=lambda item: (item[1], item[0][0], item[0][1]))
     return tuple(options)
