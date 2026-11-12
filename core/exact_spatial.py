@@ -2399,11 +2399,17 @@ def validate_planar_face(
     tolerance = eps * scale
 
     if support_plane is not None:
-        residual = max(abs(support_plane.residual(point)) for point in points)
+        residuals = [
+            (abs(support_plane.residual(point)), tuple(point))
+            for point in points
+        ]
+        residual, worst_point = max(residuals, key=lambda item: item[0])
         if residual > tolerance:
             raise GeometryInputError(
                 "NON_PLANAR_SUPPORT_FACE",
-                f"Грань не лежит на точной опорной плоскости ската {support_plane.source_index + 1}.",
+                f"Грань не лежит на точной опорной плоскости ската "
+                f"{support_plane.source_index + 1}: остаток {residual:.12g} "
+                f"в точке {worst_point!r} (допуск {tolerance:.12g}).",
             )
         return
 
