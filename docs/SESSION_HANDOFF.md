@@ -1,14 +1,12 @@
-# RoofForge 0.3.9 — Session Handoff
+# RoofForge 0.3.11 — Session Handoff
 
-**Updated:** 2026-11-12
+**Updated:** 2026-11-12  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
 **Active branch:** `feature/0.2.0-arbitrary-contours-live-pitch`  
-**PR:** [#6 — WIP RoofForge 0.2.1](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
-**Installable build:** `roof_forge-0.2.1.zip`, artifact `roof_forge-0.2.1-blender-5.0.1` (artifact ID `13595999237`).  
-**Workflow:** [run 42429419184](https://github.com/MorenDord/RoofForge_Blender/actions/runs/42429419184), all jobs passed on PR head `c01778aa1dd931f5761d8971ddf88f26dae759f3`.  
-**Inner ZIP SHA-256:** `e9cb79d17128318e2fd2fd81d151806f0dd86b1eca4054e0f062c4b5b7a980b6`.  
-**Outer artifact digest:** `53b851e926f21550db85dccebeaa05ab316b7b0f9e3dde26171e737122df3db6`.  
-**Important:** main and develop remain unchanged.
+**PR:** [#6 — RoofForge 0.3.11 near-coplanar topology cleanup](https://github.com/MorenDord/RoofForge_Blender/pull/6), open and draft.  
+**Current head:** `ef30db56c80c46744edd1cc48af927fce8870cf2` (before the documentation snapshot commit).  
+**Build:** `0.3.11`; CI package and checksum are produced by the current workflow run.  
+**Important:** main and develop remain unchanged. Manual inspection in Blender's viewport is still required on the user's complex production contour.
 
 ## User feedback addressed
 
@@ -295,3 +293,12 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - Real plane breaks, ridges, valleys, silhouette corners and non-coplanar wall transitions are preserved because only shared coplanar edges enter the dissolve operation.
 - Blender smoke validates a subdivided cuboid collapsing to exactly 8 vertices, 12 edges and 6 quads, and asserts generated closed shells have no loose or degree-two vertices and no shared coplanar interior edges.
 - Version: 0.3.10. Visual/manual Blender inspection is still required for the user's complex production contours.
+
+
+## RoofForge 0.3.11 — near-coplanar seam cleanup
+
+- The final BMesh pass now accepts only practically coplanar neighbouring faces: dihedral angle <= 0.05 degrees and reciprocal plane deviation <= 1e-5 of the mesh span.
+- Dissolution is iterative; after one merge creates new neighbours, the mesh is checked again until no eligible seam remains.
+- A Blender smoke regression creates a narrow 0.04-degree sliver and requires it to dissolve. A second 5-degree ridge fixture must retain its shared edge.
+- The existing subdivided-prism regression still requires 8 vertices, 12 edges and 6 quads.
+- This does not collapse significant pitch transitions or promise full quad retopology. It only removes narrow near-flat seams within the stated tolerance.

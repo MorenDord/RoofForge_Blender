@@ -328,7 +328,7 @@ def main() -> None:
         panel_mesh.update(calc_edges=True)
         return panel_mesh
 
-    near_flat_mesh = two_panel_mesh("RoofForge_NearFlat_Seam", 0.05)
+    near_flat_mesh = two_panel_mesh("RoofForge_NearFlat_Seam", 0.04)
     roof_build_module._dissolve_coplanar_edges(near_flat_mesh)
     ensure(
         len(near_flat_mesh.polygons) == 1,
