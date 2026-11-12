@@ -1,4 +1,4 @@
-# RoofForge 0.3.11 — Session Handoff
+# RoofForge 0.3.12 — Session Handoff
 
 **Updated:** 2026-11-12  
 **Repository:** https://github.com/MorenDord/RoofForge_Blender  
@@ -305,3 +305,12 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 - A Blender smoke regression creates a narrow 0.04-degree sliver and requires it to dissolve. A second 5-degree ridge fixture must retain its shared edge.
 - The existing subdivided-prism regression still requires 8 vertices, 12 edges and 6 quads.
 - This does not collapse significant pitch transitions or promise full quad retopology. It only removes narrow near-flat seams within the stated tolerance.
+
+
+## RoofForge 0.3.12 — mixed-height concave support-plane continuity
+
+- Root cause: the non-flat concave 3D path split the contour by infinite inward supporting lines, then removed a candidate slope on the opposite side of each line. Where such a line crossed the polygon interior, the active plane set could change discontinuously and leave a single-use internal edge.
+- Fix: for non-flat concave XY contours, pass the original contour as the finite active support. Each slope competes only where the perpendicular projection lies on its finite authored source edge; local vertex wedges are handled by the two incident edge planes.
+- Convex mixed-height roofs and flat-eave weighted-wavefront roofs keep their existing paths.
+- Added an L-shaped mixed-Z regression with per-edge pitches; it must assemble a complete upper surface and a closed manifold shell.
+- Positive overhang on mixed-height concave contours remains unsupported.

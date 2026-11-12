@@ -12,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 11)
+assert extension.bl_info["version"] == (0, 3, 12)
 extension.register()
 
 settings = bpy.context.scene.roof_forge

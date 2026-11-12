@@ -26,9 +26,9 @@ def boundary_envelope_conflicts(
 ) -> list[Diagnostic]:
     """Check support edges against roof planes.
 
-    Standard roofs preserve the historical inward-halfspace check. For the
-    source-anchored convex-overhang path, a competitor is active only on the
-    finite projection interval of its authored edge.
+    Standard roofs preserve the historical inward-halfspace check. For
+    source-aligned overhangs and mixed-height concave contours, a competitor
+    is active only on the finite projection interval of its authored edge.
     """
     active_points = points if active_contour is None else active_contour
     if len(points) != len(planes) or len(active_points) != len(planes):
@@ -88,7 +88,7 @@ def boundary_envelope_conflicts(
                         break
         return diagnostics
 
-    # Source-anchored overhang: do not let the infinite extension of a
+    # Finite source-edge support: do not let the infinite extension of a
     # reflex/remote edge plane undercut a support edge outside its segment.
     for edge_index, start in enumerate(points):
         end = points[(edge_index + 1) % len(points)]

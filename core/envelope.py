@@ -74,17 +74,21 @@ def lower_envelope_restricted_cells(
     A source plane competes where the orthogonal projection onto its finite
     authored edge lies between the edge endpoints. Supporting-edge lines and
     the perpendicular endpoint lines partition the domain into cells where
-    that candidate set is constant. For the overhang corner wedges, where no
-    segment projection is valid, the two planes incident to the nearest source
-    vertex are allowed to meet and form the corner transition.
+    that candidate set is constant. In corner wedges where no segment
+    projection is valid, the two planes incident to the nearest source vertex
+    are allowed to meet and form the corner transition.
+
+    Mixed-height concave roofs also pass the source contour as active_contour
+    to prevent infinite supporting-line extensions from switching candidate
+    planes off along an internal line.
     """
     support = tuple(domain if active_contour is None else active_contour)
     if len(domain) < 3 or len(support) != len(planes):
         raise GeometryInputError("PLANE_COUNT", "Для каждого ребра контура нужна одна плоскость ската.")
 
-    # Preserve the original concave-roof solver unchanged when no overhang
-    # support contour is supplied. The finite-edge continuation is an
-    # overhang-specific mode only.
+    # Without an active support contour, preserve the historical half-plane
+    # activation mode. Finite-edge activation is used by source-aligned
+    # overhangs and mixed-height concave contours.
     if active_contour is None:
         triangles = triangulate_simple_polygon(domain, eps)
         output: list[list[list[Point2]]] = [[] for _ in planes]
@@ -195,7 +199,7 @@ def lower_envelope_restricted_cells(
                 break
 
         # Miter connectors partition the exterior around corners into
-        # stable vertex-transition wedges.
+        # stable vertex-transition wedges when domain differs from support.
         if active_contour is not None and len(domain) == len(support):
             for index, (sx, sy, _dx, _dy, _length_sq, _length) in enumerate(edge_data):
                 ex, ey = domain[index]

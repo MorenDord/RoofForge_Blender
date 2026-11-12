@@ -267,6 +267,27 @@ def build_roof_surface_from_planes(
     )
 
 
+def _has_reflex_vertex(domain: Sequence[Point2], eps: float) -> bool:
+    """Return whether a simple XY contour contains a genuine reflex turn."""
+    area = signed_area(domain)
+    if abs(area) <= eps:
+        return False
+    winding = 1.0 if area > 0.0 else -1.0
+    scale = max(_bbox_scale(domain), 1.0)
+    turn_tolerance = eps * scale * scale
+    count = len(domain)
+    for index, current in enumerate(domain):
+        previous = domain[index - 1]
+        following = domain[(index + 1) % count]
+        turn = (
+            (current[0] - previous[0]) * (following[1] - current[1])
+            - (current[1] - previous[1]) * (following[0] - current[0])
+        )
+        if turn * winding < -turn_tolerance:
+            return True
+    return False
+
+
 def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> RoofSurface:
     """Build an open planar upper surface from a closed 3D boundary loop.
@@ -276,10 +297,6 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     The source contour is never modified.
     """
     planes = build_boundary_planes(points, pitches_degrees, eps)
-    conflicts = boundary_envelope_conflicts(points, planes)
-    if conflicts:
-        raise GeometryInputError(conflicts[0].code, conflicts[0].message)
-
     domain = [(point[0], point[1]) for point in points]
     domain_area = abs(signed_area(domain))
     scale = max(
@@ -288,10 +305,31 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
         max(point[1] for point in points) - min(point[1] for point in points),
         max(point[2] for point in points) - min(point[2] for point in points),
     )
+
+    # Infinite inward half-planes are not valid influence regions for a
+    # concave contour. Their extensions cross the polygon interior and can
+    # switch candidate planes off along an internal line. For a mixed-height
+    # concave contour, use each authored edge's finite projection interval.
+    mixed_height_concave = (
+        _has_reflex_vertex(domain, eps)
+        and max(point[2] for point in points) - min(point[2] for point in points)
+        > eps * scale * 10.0
+    )
+    active_support = points if mixed_height_concave else None
+    active_support_xy = domain if mixed_height_concave else None
+
+    conflicts = boundary_envelope_conflicts(
+        points, planes, eps, active_contour=active_support
+    )
+    if conflicts:
+        raise GeometryInputError(conflicts[0].code, conflicts[0].message)
+
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = eps * scale * scale
 
-    cells_by_slope = lower_envelope_restricted_cells(domain, planes, eps)
+    cells_by_slope = lower_envelope_restricted_cells(
+        domain, planes, eps, active_contour=active_support_xy
+    )
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []

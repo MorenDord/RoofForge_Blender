@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.11.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.12.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -57,12 +57,12 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave eaves, offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations are rejected.
+- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave contours without overhang now use finite source-edge influence regions in the support-plane solver and are accepted only when boundary compatibility checks pass. Positive overhang on mixed-height concave eaves, offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain unsupported/rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.11-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.11.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.12-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.12.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -91,3 +91,8 @@ The final Blender mesh pass now dissolves both coplanar shared edges and the deg
 ### Near-coplanar topology cleanup (0.3.11)
 
 The 0.3.10 exact-coplanar pass could leave narrow seams when independently solved roof facets differed by tiny numeric or angular errors. The final BMesh pass now repeats until no new eligible neighbours remain and accepts only seams within a 0.05° dihedral / 10 ppm distance window. A new Blender regression checks that a 0.04° narrow sliver disappears while a 5° ridge is preserved. This tolerance is intended for practically flat sliver facets, not as a general ridge simplifier.
+
+
+### Mixed-height concave contours (0.3.12)
+
+The 3D support-plane path now uses finite source-edge influence regions on mixed-height concave contours. Previously, extending each concave edge's inward supporting half-plane across the whole polygon could switch an edge plane off along an internal line, leaving a crack in the upper surface. The finite mode partitions by perpendicular endpoint lines and lets only planes whose projection falls on their authored source segment compete; the two incident planes handle local vertex wedges. The resulting surface remains subject to source-boundary compatibility and closed-shell validation. This change does not enable positive overhang on mixed-height concave contours.

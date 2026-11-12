@@ -140,6 +140,35 @@ class PolygonTests(unittest.TestCase):
                                          for i in face]) > 0.0
                             for face in surface.faces))
 
+    def test_mixed_height_concave_surface_uses_finite_edge_support(self):
+        # A Z-varying L contour selects the 3D support-plane solver rather than
+        # the flat-eave weighted wavefront. Infinite supporting half-planes
+        # change candidate sets across an internal line and leave a crack.
+        points = [
+            (0.0, 0.0, 0.00),
+            (3.0, 0.0, 0.05),
+            (3.0, 1.0, 0.08),
+            (1.0, 1.0, 0.12),
+            (1.0, 3.0, 0.16),
+            (0.0, 3.0, 0.10),
+        ]
+        pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
+        surface = build_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=7,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+        for index, start in enumerate(points):
+            end = points[(index + 1) % len(points)]
+            plane = surface.planes[index]
+            self.assertAlmostEqual(plane.height(start[0], start[1]), start[2], places=7)
+            self.assertAlmostEqual(plane.height(end[0], end[1]), end[2], places=7)
+
     def test_discontinuous_concave_surface_is_rejected(self):
         fixtures = [
             [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
