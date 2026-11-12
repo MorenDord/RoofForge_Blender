@@ -805,8 +805,8 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
-    # A mixed-height concave contour must fall back to the continuous
-    # finite-segment field instead of returning a cracked upper surface.
+    # A mixed-height concave contour must use exact planar source faces
+    # and a small planar transition patch, never a continuous distance field.
     mixed_concave_points = [
         (0.0, 0.0, 0.00),
         (3.0, 0.0, 0.05),
@@ -820,12 +820,16 @@ def main() -> None:
         mixed_concave_points, mixed_concave_pitches, 0.01, 0.0
     )
     ensure(
-        mixed_surface.approximation_error > 0.0 and mixed_surface.refinement_depth > 0,
-        "mixed-height concave continuity fallback was not selected",
+        mixed_surface.approximation_error == 0.0 and mixed_surface.refinement_depth == 0,
+        "mixed-height concave roof must not use a sampled or smoothed height field",
     )
     ensure(
-        len(mixed_surface.faces) < 256,
-        "mixed-height concave fallback globally over-refined planar roof regions",
+        len(mixed_surface.faces) <= 2 * len(mixed_concave_points) - 2,
+        "mixed-height concave roof contains more than one source face per edge plus a minimal transition patch",
+    )
+    ensure(
+        sum(index >= 0 for index in mixed_surface.face_slope_indices) == len(mixed_concave_points),
+        "each original eave edge must own exactly one planar roof face",
     )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
@@ -842,7 +846,7 @@ def main() -> None:
     slope_values = [item.value for item in slope_attribute.data]
     ensure(
         any(component == 0 and slope == -1 for component, slope in zip(component_values, slope_values)),
-        "approximated upward transition patches were not retained as roof faces",
+        "planar transition faces were not retained as roof faces",
     )
     mixed_bm = bmesh.new()
     try:

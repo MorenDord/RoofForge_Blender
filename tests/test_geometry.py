@@ -12,6 +12,7 @@ from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
+from core.exact_spatial import build_exact_planar_ring_surface, validate_planar_face
 from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
     advance_wavefront_state, apply_split_event, build_moving_lines,
@@ -140,10 +141,8 @@ class PolygonTests(unittest.TestCase):
                                          for i in face]) > 0.0
                             for face in surface.faces))
 
-    def test_mixed_height_concave_surface_falls_back_to_continuous_field(self):
-        # A Z-varying L contour selects the 3D support-plane solver rather than
-        # the flat-eave weighted wavefront. Infinite supporting half-planes
-        # change candidate sets across an internal line and leave a crack.
+    def test_mixed_height_concave_surface_uses_exact_planar_ring(self):
+        # Mixed-height concave roofs must keep exact support-plane faces.
         points = [
             (0.0, 0.0, 0.00),
             (3.0, 0.0, 0.05),
@@ -154,27 +153,41 @@ class PolygonTests(unittest.TestCase):
         ]
         pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
         surface = build_roof_surface(points, pitches)
-        self.assertGreater(surface.approximation_error, 0.0)
-        self.assertGreater(surface.refinement_depth, 0)
-        self.assertLess(
-            len(surface.faces), 256,
-            "mixed-height fallback must refine locally, not subdivide the entire roof",
-        )
+
+        self.assertEqual(surface.approximation_error, 0.0)
+        self.assertEqual(surface.refinement_depth, 0)
+        self.assertLessEqual(len(surface.faces), 2 * len(points) - 2)
         self.assertAlmostEqual(
             surface.surface_area_xy,
             abs(signed_area([(point[0], point[1]) for point in points])),
             places=7,
         )
         self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        self.assertEqual(
+            sum(source >= 0 for source in surface.face_slope_indices),
+            len(points),
+            "every authored edge must own one exact planar roof face",
+        )
+        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
+
+        for face, source in zip(surface.faces, surface.face_slope_indices):
+            if source >= 0:
+                plane = surface.planes[source]
+                for vertex_index in face:
+                    point = surface.vertices[vertex_index]
+                    self.assertAlmostEqual(
+                        point[2], plane.height(point[0], point[1]), places=7
+                    )
+            else:
+                self.assertEqual(len(face), 3)
+                validate_planar_face(surface.vertices, face)
+
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
-        for index, start in enumerate(points):
-            end = points[(index + 1) % len(points)]
-            plane = surface.planes[index]
-            self.assertAlmostEqual(plane.height(start[0], start[1]), start[2], places=7)
-            self.assertAlmostEqual(plane.height(end[0], end[1]), end[2], places=7)
-
+        direct = build_exact_planar_ring_surface(points, pitches)
+        self.assertEqual(direct.faces, surface.faces)
+        self.assertEqual(direct.face_slope_indices, surface.face_slope_indices)
     def test_discontinuous_concave_surface_is_rejected(self):
         fixtures = [
             [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),

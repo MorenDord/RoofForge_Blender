@@ -13,6 +13,7 @@ from typing import Sequence
 
 from .geometry import (
     GeometryInputError,
+    PlaneZ,
     _bbox_scale,
     signed_area,
     triangulate_simple_polygon,
@@ -363,6 +364,496 @@ def build_spatial_junction_patch(
 
     return SpatialJunction(points, tuple(faces), boundary_sources, False)
 
+
+
+def _point_in_polygon(point: Point2, polygon: Sequence[Point2], tolerance: float) -> bool:
+    """Boundary-inclusive point-in-polygon test used only for topology checks."""
+    x, y = point
+    inside = False
+    for index, start in enumerate(polygon):
+        end = polygon[(index + 1) % len(polygon)]
+        cross = (
+            (end[0] - start[0]) * (y - start[1])
+            - (end[1] - start[1]) * (x - start[0])
+        )
+        if (
+            abs(cross) <= tolerance
+            and min(start[0], end[0]) - tolerance <= x <= max(start[0], end[0]) + tolerance
+            and min(start[1], end[1]) - tolerance <= y <= max(start[1], end[1]) + tolerance
+        ):
+            return True
+        if (start[1] > y) != (end[1] > y):
+            crossing_x = start[0] + (
+                (y - start[1]) * (end[0] - start[0]) / (end[1] - start[1])
+            )
+            if x < crossing_x:
+                inside = not inside
+    return inside
+
+
+def _proper_segment_cross(
+    first_a: Point2, first_b: Point2,
+    second_a: Point2, second_b: Point2,
+    tolerance: float,
+) -> bool:
+    def orient(a, b, c):
+        return (
+            (b[0] - a[0]) * (c[1] - a[1])
+            - (b[1] - a[1]) * (c[0] - a[0])
+        )
+
+    o1 = orient(first_a, first_b, second_a)
+    o2 = orient(first_a, first_b, second_b)
+    o3 = orient(second_a, second_b, first_a)
+    o4 = orient(second_a, second_b, first_b)
+    return (
+        ((o1 > tolerance and o2 < -tolerance) or (o1 < -tolerance and o2 > tolerance))
+        and ((o3 > tolerance and o4 < -tolerance) or (o3 < -tolerance and o4 > tolerance))
+    )
+
+
+def _ray_segment_parameter(
+    origin: Point2,
+    direction: Point2,
+    segment_start: Point2,
+    segment_end: Point2,
+    tolerance: float,
+) -> float | None:
+    edge_x = segment_end[0] - segment_start[0]
+    edge_y = segment_end[1] - segment_start[1]
+    relative_x = segment_start[0] - origin[0]
+    relative_y = segment_start[1] - origin[1]
+    denominator = direction[0] * (-edge_y) - direction[1] * (-edge_x)
+    if abs(denominator) <= tolerance:
+        return None
+    parameter = (
+        relative_x * (-edge_y) - relative_y * (-edge_x)
+    ) / denominator
+    edge_parameter = (
+        direction[0] * relative_y - direction[1] * relative_x
+    ) / denominator
+    if parameter > tolerance and -tolerance <= edge_parameter <= 1.0 + tolerance:
+        return parameter
+    return None
+
+
+def _polygon_area_centroid(polygon: Sequence[Point2]) -> Point2:
+    area_twice = 2.0 * signed_area(polygon)
+    if abs(area_twice) <= 1e-20:
+        return (
+            sum(point[0] for point in polygon) / len(polygon),
+            sum(point[1] for point in polygon) / len(polygon),
+        )
+    cx = cy = 0.0
+    for first, second in zip(polygon, polygon[1:] + polygon[:1]):
+        cross = first[0] * second[1] - second[0] * first[1]
+        cx += (first[0] + second[0]) * cross
+        cy += (first[1] + second[1]) * cross
+    factor = 1.0 / (6.0 * signed_area(polygon))
+    return cx * factor, cy * factor
+
+
+def _corner_seam_ray(
+    vertex_index: int,
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    scale: float,
+    tolerance: float,
+) -> tuple[Point2, float] | None:
+    """Find the inward ray of the exact adjacent-plane intersection."""
+    count = len(polygon)
+    previous = planes[(vertex_index - 1) % count]
+    current = planes[vertex_index]
+    intersection = intersect_support_planes(previous, current, max(1e-12, tolerance / scale))
+    if intersection is None:
+        return None
+
+    dx, dy = intersection.direction[0], intersection.direction[1]
+    direction_length = hypot(dx, dy)
+    if direction_length <= tolerance:
+        return None
+    direction = (dx / direction_length, dy / direction_length)
+    origin = polygon[vertex_index]
+    probe_distance = max(scale * 1e-7, tolerance * 20.0)
+    centroid = _polygon_area_centroid(polygon)
+    candidate_directions = (direction, (-direction[0], -direction[1]))
+    valid: list[tuple[float, float, Point2]] = []
+
+    for candidate in candidate_directions:
+        probe = (
+            origin[0] + candidate[0] * probe_distance,
+            origin[1] + candidate[1] * probe_distance,
+        )
+        if not _point_in_polygon(probe, polygon, tolerance):
+            continue
+
+        distances = []
+        for edge_index, (start, end) in enumerate(
+            zip(polygon, polygon[1:] + polygon[:1])
+        ):
+            if edge_index in {
+                (vertex_index - 1) % count,
+                vertex_index,
+            }:
+                continue
+            parameter = _ray_segment_parameter(
+                origin, candidate, start, end, tolerance
+            )
+            if parameter is not None:
+                distances.append(parameter)
+        max_distance = min(distances) if distances else scale
+        if max_distance <= tolerance:
+            continue
+        centre_alignment = (
+            (centroid[0] - origin[0]) * candidate[0]
+            + (centroid[1] - origin[1]) * candidate[1]
+        )
+        valid.append((max_distance, centre_alignment, candidate))
+
+    if not valid:
+        return None
+    max_distance, _alignment, chosen = max(
+        valid, key=lambda item: (item[0], item[1])
+    )
+    return chosen, max_distance
+
+
+def _build_ring_candidate(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    corner_rays: Sequence[tuple[Point2, float] | None],
+    alpha: float,
+    scale: float,
+    tolerance: float,
+):
+    """Return a valid exact planar ring partition for one inward event time."""
+    count = len(points)
+    inner: list[Point3] = []
+    for index, point in enumerate(points):
+        ray = corner_rays[index]
+        if ray is None:
+            inner.append(tuple(float(value) for value in point))
+            continue
+        direction, max_distance = ray
+        x = point[0] + alpha * max_distance * direction[0]
+        y = point[1] + alpha * max_distance * direction[1]
+        previous = planes[(index - 1) % count]
+        current = planes[index]
+        z = previous.height(x, y)
+        candidate = (x, y, z)
+        if abs(current.residual(candidate)) > tolerance * max(1.0, abs(z)):
+            return None
+        if not _point_in_polygon((x, y), polygon, tolerance):
+            return None
+        inner.append(candidate)
+
+    winding = 1.0 if signed_area(polygon) > 0.0 else -1.0
+    quad_loops: list[tuple[int, ...]] = []
+    quad_areas: list[float] = []
+    for index in range(count):
+        next_index = (index + 1) % count
+        raw_xy = [
+            polygon[index],
+            polygon[next_index],
+            (inner[next_index][0], inner[next_index][1]),
+            (inner[index][0], inner[index][1]),
+        ]
+        compact_xy: list[Point2] = []
+        for point in raw_xy:
+            if not compact_xy or hypot(
+                point[0] - compact_xy[-1][0],
+                point[1] - compact_xy[-1][1],
+            ) > tolerance:
+                compact_xy.append(point)
+        if len(compact_xy) > 1 and hypot(
+            compact_xy[0][0] - compact_xy[-1][0],
+            compact_xy[0][1] - compact_xy[-1][1],
+        ) <= tolerance:
+            compact_xy.pop()
+        if len(compact_xy) < 3:
+            return None
+        if validate_simple_polygon(compact_xy, max(1e-12, tolerance / scale)):
+            return None
+        area = signed_area(compact_xy)
+        if area * winding <= tolerance * tolerance:
+            return None
+        quad_loops.append(tuple(range(len(compact_xy))))
+        quad_areas.append(area)
+
+    # The inward spokes and the central ring may touch only at their intended
+    # endpoints. A crossing would invert the projected polygon partition.
+    for first in range(count):
+        for second in range(first + 1, count):
+            if second == first + 1 or (first == 0 and second == count - 1):
+                continue
+            if _proper_segment_cross(
+                polygon[first], (inner[first][0], inner[first][1]),
+                polygon[second], (inner[second][0], inner[second][1]),
+                tolerance * tolerance,
+            ):
+                return None
+
+    inner_xy = [(point[0], point[1]) for point in inner]
+    compact_indices: list[int] = []
+    for index, point in enumerate(inner):
+        if not compact_indices or sqrt(sum(
+            (point[axis] - inner[compact_indices[-1]][axis]) ** 2
+            for axis in range(3)
+        )) > tolerance:
+            compact_indices.append(index)
+    if len(compact_indices) > 1:
+        first_point = inner[compact_indices[0]]
+        last_point = inner[compact_indices[-1]]
+        if sqrt(sum(
+            (first_point[axis] - last_point[axis]) ** 2
+            for axis in range(3)
+        )) <= tolerance:
+            compact_indices.pop()
+
+    compact_inner = [inner[index] for index in compact_indices]
+    compact_xy = [(point[0], point[1]) for point in compact_inner]
+    ring_area = signed_area(compact_xy) if len(compact_xy) >= 3 else 0.0
+    if ring_area * winding < -tolerance * tolerance:
+        return None
+
+    ring_kind = "empty"
+    transition_faces: tuple[Face, ...] = ()
+    ring_edge_sources: tuple[int, ...] = ()
+    if len(compact_inner) == 1:
+        ring_kind = "point"
+    elif len(compact_inner) == 2:
+        ring_kind = "line"
+    elif abs(ring_area) <= tolerance * tolerance:
+        # A collinear multi-point ridge is accepted only if every point lies
+        # on one 3D line. The final edge-incidence check validates its fan.
+        first = compact_inner[0]
+        last = compact_inner[-1]
+        direction = tuple(last[axis] - first[axis] for axis in range(3))
+        direction_sq = sum(value * value for value in direction)
+        if direction_sq <= tolerance * tolerance:
+            return None
+        for point in compact_inner[1:-1]:
+            relative = tuple(point[axis] - first[axis] for axis in range(3))
+            projection = sum(
+                relative[axis] * direction[axis] for axis in range(3)
+            ) / direction_sq
+            closest = tuple(
+                first[axis] + projection * direction[axis] for axis in range(3)
+            )
+            if sqrt(sum(
+                (point[axis] - closest[axis]) ** 2 for axis in range(3)
+            )) > tolerance:
+                return None
+        ring_kind = "line"
+    else:
+        if len(validate_simple_polygon(compact_xy, max(1e-12, tolerance / scale))) > 0:
+            return None
+        if ring_area * winding <= tolerance * tolerance:
+            return None
+        try:
+            triangles = triangulate_simple_polygon(
+                compact_xy, max(1e-12, tolerance / scale)
+            )
+        except GeometryInputError:
+            return None
+        index_by_xy = {point: index for index, point in enumerate(compact_xy)}
+        transition_faces = tuple(
+            tuple(index_by_xy[point] for point in triangle)
+            for triangle in triangles
+        )
+        ring_kind = "polygon"
+
+        sources = []
+        for start_compact_index, original_index in enumerate(compact_indices):
+            next_original = compact_indices[(start_compact_index + 1) % len(compact_indices)]
+            source_index = (next_original - 1) % count
+            sources.append(source_index)
+        ring_edge_sources = tuple(sources)
+
+    total_area = sum(quad_areas) + ring_area
+    domain_area = signed_area(polygon)
+    if abs(total_area - domain_area) > max(
+        tolerance * scale * 10.0,
+        abs(domain_area) * 1e-7,
+    ):
+        return None
+
+    return {
+        "inner": tuple(inner),
+        "compact_indices": tuple(compact_indices),
+        "compact_inner": tuple(compact_inner),
+        "quad_areas": tuple(quad_areas),
+        "ring_kind": ring_kind,
+        "transition_faces": transition_faces,
+        "ring_edge_sources": ring_edge_sources,
+        "alpha": alpha,
+        "ring_area": abs(ring_area),
+    }
+
+
+def build_exact_planar_ring_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float = 1e-9,
+):
+    """Build a piecewise-planar roof from exact edge planes and their seams.
+
+    Each original eave edge receives one flat source-plane face. Adjacent
+    source faces meet on the exact 3D intersection line of their support
+    planes. Their inner seam endpoints form a compact central ring; if the
+    seams converge to a line or point, no transition patch is needed. A
+    remaining polygonal ring is filled with planar triangles. The builder
+    searches only for a simple, non-overlapping partition of the footprint;
+    it rejects the contour if such a partition cannot be formed.
+
+    Unlike the historical distance-field route, this surface is never
+    smoothed or approximated. Every source face is checked against its exact
+    support plane, and every transition face is checked for planarity.
+    """
+    normalized = tuple(tuple(float(value) for value in point) for point in points)
+    planes = build_support_planes(normalized, pitches_degrees, eps)
+    polygon = tuple((point[0], point[1]) for point in normalized)
+    scale = max(_bbox_scale(polygon), 1.0)
+    tolerance = max(1e-12, eps * scale * 100.0)
+    corner_rays = tuple(
+        _corner_seam_ray(index, polygon, planes, scale, tolerance)
+        for index in range(len(normalized))
+    )
+
+    candidate = None
+    # The largest valid alpha advances each exact seam as far as the footprint
+    # topology allows, minimizing the residual transition region.
+    for step in range(98, 1, -1):
+        alpha = step / 100.0
+        candidate = _build_ring_candidate(
+            normalized, polygon, planes, corner_rays,
+            alpha, scale, tolerance,
+        )
+        if candidate is not None:
+            break
+    if candidate is None:
+        raise GeometryInputError(
+            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
+            "Опорные плоскости построены точно, но их внутренние линии пересечения "
+            "не образуют простой замкнутый набор скатов. Поверхность не создана; "
+            "уменьшенная или сглаженная аппроксимация не применяется.",
+        )
+
+    # Weld only geometrically identical 3D points. The selected alpha and
+    # support-plane intersections remain untouched.
+    vertices: list[Point3] = []
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+
+    def add_vertex(point: Point3) -> int:
+        key = tuple(int(round(value / tolerance)) for value in point)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    nearby = buckets.get((key[0] + dx, key[1] + dy, key[2] + dz), ())
+                    for vertex_index in nearby:
+                        existing = vertices[vertex_index]
+                        distance_sq = sum(
+                            (existing[axis] - point[axis]) ** 2
+                            for axis in range(3)
+                        )
+                        if distance_sq <= tolerance * tolerance:
+                            return vertex_index
+        index = len(vertices)
+        vertices.append(tuple(float(value) for value in point))
+        buckets.setdefault(key, []).append(index)
+        return index
+
+    outer_ids = [add_vertex(point) for point in normalized]
+    inner_ids = [add_vertex(point) for point in candidate["inner"]]
+    faces: list[Face] = []
+    face_sources: list[int] = []
+
+    for index in range(len(normalized)):
+        next_index = (index + 1) % len(normalized)
+        raw_face = (
+            outer_ids[index],
+            outer_ids[next_index],
+            inner_ids[next_index],
+            inner_ids[index],
+        )
+        compact: list[int] = []
+        for vertex_index in raw_face:
+            if not compact or compact[-1] != vertex_index:
+                compact.append(vertex_index)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_SOURCE_SLOPE_FACE",
+                f"Плоский скат по ребру {index + 1} схлопнулся в линию.",
+            )
+        face_xy = [(vertices[v][0], vertices[v][1]) for v in compact]
+        if signed_area(face_xy) < 0.0:
+            compact.reverse()
+        validate_planar_face(
+            vertices, compact, support_plane=planes[index], eps=max(eps * 10.0, 1e-10)
+        )
+        faces.append(tuple(compact))
+        face_sources.append(index)
+
+    if candidate["ring_kind"] == "polygon":
+        compact_inner_ids = [
+            inner_ids[index] for index in candidate["compact_indices"]
+        ]
+        for triangle in candidate["transition_faces"]:
+            face = tuple(compact_inner_ids[index] for index in triangle)
+            face_xy = [(vertices[v][0], vertices[v][1]) for v in face]
+            if signed_area(face_xy) < 0.0:
+                face = tuple(reversed(face))
+            validate_planar_face(
+                vertices, face, support_plane=None, eps=max(eps * 10.0, 1e-10)
+            )
+            faces.append(face)
+            face_sources.append(-1)
+
+    # Every internal seam must be used twice. Single-use edges are permitted
+    # only on the exact authored XYZ contour.
+    edge_uses: dict[tuple[int, int], int] = {}
+    for face in faces:
+        for edge_index, first in enumerate(face):
+            second = face[(edge_index + 1) % len(face)]
+            edge = (min(first, second), max(first, second))
+            edge_uses[edge] = edge_uses.get(edge, 0) + 1
+    if any(count > 2 for count in edge_uses.values()):
+        raise GeometryInputError(
+            "EXACT_SPATIAL_NON_MANIFOLD",
+            "Пространственная топология создала внутреннее ребро более чем с двумя гранями.",
+        )
+
+    from .mesh import RoofSurface, validate_surface_boundary_edges
+    validate_surface_boundary_edges(
+        vertices, faces, polygon, tolerance * 5.0
+    )
+    surface_area_xy = sum(
+        abs(signed_area([(vertices[index][0], vertices[index][1]) for index in face]))
+        for face in faces
+    )
+    source_area_xy = abs(signed_area(polygon))
+    if abs(surface_area_xy - source_area_xy) > max(
+        tolerance * scale * 10.0, source_area_xy * 1e-7
+    ):
+        raise GeometryInputError(
+            "EXACT_SPATIAL_COVERAGE",
+            "Плоские скаты и центральная переходная заплата не покрывают исходный контур без зазоров и перекрытий.",
+        )
+
+    return RoofSurface(
+        vertices=tuple(vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_sources),
+        planes=tuple(PlaneZ(plane.a, plane.b, plane.c) for plane in planes),
+        source_area_xy=source_area_xy,
+        surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(polygon),
+        approximation_error=0.0,
+        refinement_depth=0,
+    )
 
 def validate_planar_face(
     vertices: Sequence[Point3],

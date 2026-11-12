@@ -421,6 +421,14 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     active_support = points if mixed_height_concave else None
     active_support_xy = domain if mixed_height_concave else None
 
+    # A mixed-height concave contour is constructed by the independent exact
+    # spatial planar solver. It produces one source-plane face per eave edge
+    # and a small planar transition patch; no distance-field fallback is used.
+    if mixed_height_concave:
+        from .exact_spatial import build_exact_planar_ring_surface
+
+        return build_exact_planar_ring_surface(points, pitches_degrees, eps)
+
     conflicts = boundary_envelope_conflicts(
         points, planes, eps, active_contour=active_support
     )
@@ -491,30 +499,9 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     # A projected-area match alone can hide cracks whose missing and
     # overlapping regions cancel. Validate all open edges against the exact
     # source boundary before exposing the surface to Blender.
-    try:
-        validate_surface_boundary_edges(
-            registry.vertices, faces, domain, weld_tolerance * 5.0
-        )
-    except GeometryInputError as exc:
-        if not mixed_height_concave or exc.code not in {
-            "INTERNAL_OPEN_EDGE", "BOUNDARY_COVERAGE_MISMATCH"
-        }:
-            raise
-
-        # The plane arrangement is not a valid continuous model when an
-        # infinite edge extension changes candidate ownership inside a
-        # concave footprint. Fall back to the continuous finite-segment field:
-        # edge interiors remain on their authored planes and only endpoint
-        # transition zones are adaptively triangulated.
-        from .distance_field import build_distance_field_roof_surface
-
-        return build_distance_field_roof_surface(
-            points,
-            pitches_degrees,
-            height_tolerance=scale * 0.001,
-            max_depth=4,
-            eps=eps,
-        )
+    validate_surface_boundary_edges(
+        registry.vertices, faces, domain, weld_tolerance * 5.0
+    )
 
     return RoofSurface(
         vertices=tuple(registry.vertices),
