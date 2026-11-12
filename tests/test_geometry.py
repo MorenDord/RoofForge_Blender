@@ -23,6 +23,46 @@ from core.wavefront import (
 )
 
 
+def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
+    testcase.assertEqual(surface.approximation_error, 0.0)
+    testcase.assertEqual(surface.refinement_depth, 0)
+    testcase.assertLessEqual(len(surface.faces), max_faces)
+    testcase.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+    testcase.assertTrue(surface.faces)
+    testcase.assertTrue(
+        all(0 <= source < len(surface.planes) for source in surface.face_slope_indices),
+        "every roof cell must belong to an authored exact support plane",
+    )
+
+    edge_sources = {}
+    for face, source in zip(surface.faces, surface.face_slope_indices):
+        plane = surface.planes[source]
+        for vertex_index in face:
+            point = surface.vertices[vertex_index]
+            testcase.assertAlmostEqual(
+                point[2], plane.height(point[0], point[1]), places=7
+            )
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            edge_sources.setdefault(
+                (min(first, second), max(first, second)), []
+            ).append(source)
+
+    has_exact_seam = False
+    for edge, sources in edge_sources.items():
+        testcase.assertLessEqual(len(sources), 2)
+        if len(sources) == 2 and sources[0] != sources[1]:
+            has_exact_seam = True
+            for vertex_index in edge:
+                point = surface.vertices[vertex_index]
+                for source in sources:
+                    plane = surface.planes[source]
+                    testcase.assertAlmostEqual(
+                        point[2], plane.height(point[0], point[1]), places=7
+                    )
+    testcase.assertTrue(has_exact_seam, "roof should contain at least one exact plane-intersection seam")
+
+
 class PolygonTests(unittest.TestCase):
     def test_rectangle_area(self):
         poly = [(0, 0), (4, 0), (4, 3), (0, 3)]
@@ -141,8 +181,7 @@ class PolygonTests(unittest.TestCase):
                                          for i in face]) > 0.0
                             for face in surface.faces))
 
-    def test_mixed_height_concave_surface_uses_exact_planar_ring(self):
-        # Mixed-height concave roofs must keep exact support-plane faces.
+    def test_mixed_height_concave_surface_uses_exact_planar_envelope(self):
         points = [
             (0.0, 0.0, 0.00),
             (3.0, 0.0, 0.05),
@@ -154,33 +193,17 @@ class PolygonTests(unittest.TestCase):
         pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
         surface = build_roof_surface(points, pitches)
 
-        self.assertEqual(surface.approximation_error, 0.0)
-        self.assertEqual(surface.refinement_depth, 0)
-        self.assertLessEqual(len(surface.faces), 2 * len(points))
+        assert_exact_support_plane_partition(self, surface)
         self.assertAlmostEqual(
             surface.surface_area_xy,
             abs(signed_area([(point[0], point[1]) for point in points])),
             places=7,
         )
-        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
         self.assertEqual(
-            len({source for source in surface.face_slope_indices if source >= 0}),
+            len({source for source in surface.face_slope_indices}),
             len(points),
-            "every authored edge must own an exact planar roof region",
+            "every authored edge plane must own a non-zero exact roof region",
         )
-        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
-
-        for face, source in zip(surface.faces, surface.face_slope_indices):
-            if source >= 0:
-                plane = surface.planes[source]
-                for vertex_index in face:
-                    point = surface.vertices[vertex_index]
-                    self.assertAlmostEqual(
-                        point[2], plane.height(point[0], point[1]), places=7
-                    )
-            else:
-                self.assertEqual(len(face), 3)
-                validate_planar_face(surface.vertices, face)
 
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
@@ -188,6 +211,7 @@ class PolygonTests(unittest.TestCase):
         direct = build_exact_planar_ring_surface(points, pitches)
         self.assertEqual(direct.faces, surface.faces)
         self.assertEqual(direct.face_slope_indices, surface.face_slope_indices)
+
     def test_single_nonplanar_vertex_l_contour_uses_exact_spatial_events(self):
         points = [
             (0.0, 0.0, 0.0),
@@ -199,37 +223,8 @@ class PolygonTests(unittest.TestCase):
         ]
         pitches = [40.0] * len(points)
         surface = build_roof_surface(points, pitches)
-        self.assertEqual(surface.approximation_error, 0.0)
-        self.assertEqual(surface.refinement_depth, 0)
+        assert_exact_support_plane_partition(self, surface)
         self.assertAlmostEqual(surface.surface_area_xy, 5.0, places=7)
-        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
-
-        for face, source in zip(surface.faces, surface.face_slope_indices):
-            if source >= 0:
-                plane = surface.planes[source]
-                for vertex_index in face:
-                    point = surface.vertices[vertex_index]
-                    self.assertAlmostEqual(
-                        point[2], plane.height(point[0], point[1]), places=7
-                    )
-            else:
-                self.assertEqual(len(face), 3)
-                validate_planar_face(surface.vertices, face)
-
-        boundary_vertices = {(round(point[0], 8), round(point[1], 8), round(point[2], 8))
-                             for point in points}
-        for point in surface.vertices:
-            key = tuple(round(value, 8) for value in point)
-            if key in boundary_vertices:
-                continue
-            incident_planes = sum(
-                abs(plane.height(point[0], point[1]) - point[2]) <= 1e-6
-                for plane in surface.planes
-            )
-            self.assertGreaterEqual(
-                incident_planes, 3,
-                "every interior seam endpoint must be an exact three-plane event",
-            )
 
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
@@ -247,23 +242,8 @@ class PolygonTests(unittest.TestCase):
         ]
         pitches = [40.0] * len(points)
         surface = build_roof_surface(points, pitches)
-        self.assertEqual(surface.approximation_error, 0.0)
-        self.assertEqual(surface.refinement_depth, 0)
+        assert_exact_support_plane_partition(self, surface)
         self.assertAlmostEqual(surface.surface_area_xy, 10.0, places=7)
-        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
-        self.assertLessEqual(len(surface.faces), 2 * len(points))
-
-        for face, source in zip(surface.faces, surface.face_slope_indices):
-            if source >= 0:
-                plane = surface.planes[source]
-                for vertex_index in face:
-                    point = surface.vertices[vertex_index]
-                    self.assertAlmostEqual(
-                        point[2], plane.height(point[0], point[1]), places=7
-                    )
-            else:
-                self.assertEqual(len(face), 3)
-                validate_planar_face(surface.vertices, face)
 
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])

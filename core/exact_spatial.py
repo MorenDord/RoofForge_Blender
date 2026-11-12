@@ -1479,43 +1479,340 @@ def select_exact_spatial_arrangement(
     candidates.sort(key=lambda item: item[:3])
     return candidates[0][3]
 
+
+def _clip_affine_cell(
+    polygon: Sequence[Point2],
+    a: float,
+    b: float,
+    c: float,
+    keep_negative: bool,
+    tolerance: float,
+) -> list[Point2]:
+    """Clip a convex cell to one side of an exact affine plane-equality line."""
+    if not polygon:
+        return []
+    sign = 1.0 if keep_negative else -1.0
+    output: list[Point2] = []
+    previous = polygon[-1]
+    previous_value = sign * (a * previous[0] + b * previous[1] + c)
+    previous_inside = previous_value <= tolerance
+    for current in polygon:
+        current_value = sign * (a * current[0] + b * current[1] + c)
+        current_inside = current_value <= tolerance
+        if current_inside != previous_inside:
+            denominator = previous_value - current_value
+            if abs(denominator) > tolerance * 1e-6:
+                factor = max(0.0, min(1.0, previous_value / denominator))
+                intersection = (
+                    previous[0] + (current[0] - previous[0]) * factor,
+                    previous[1] + (current[1] - previous[1]) * factor,
+                )
+                if not output or hypot(
+                    intersection[0] - output[-1][0],
+                    intersection[1] - output[-1][1],
+                ) > tolerance * 0.1:
+                    output.append(intersection)
+        if current_inside:
+            if not output or hypot(
+                current[0] - output[-1][0],
+                current[1] - output[-1][1],
+            ) > tolerance * 0.1:
+                output.append((float(current[0]), float(current[1])))
+        previous = current
+        previous_value = current_value
+        previous_inside = current_inside
+
+    if len(output) > 1 and hypot(
+        output[0][0] - output[-1][0],
+        output[0][1] - output[-1][1],
+    ) <= tolerance * 0.1:
+        output.pop()
+    return output
+
+
+def _build_exact_support_plane_envelope(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    eps: float,
+):
+    """Partition the footprint by every exact pairwise support-plane equality.
+
+    The result is the lower envelope of the authored edge planes, clipped to
+    the original simple footprint. Every cell is convex and belongs to one
+    exact support plane. There is no interpolated height field and no
+    arbitrarily positioned transition patch.
+    """
+    scale = max(_bbox_scale(polygon), 1.0)
+    tolerance = max(1e-12, eps * scale * 100.0)
+    area_tolerance = tolerance * scale * 1e-4
+
+    # The eave boundary is immutable. A support plane belonging to another
+    # edge may not undercut it anywhere along that authored boundary segment.
+    for edge_index, start in enumerate(points):
+        end = points[(edge_index + 1) % len(points)]
+        own = planes[edge_index]
+        for other in planes:
+            if other.source_index == edge_index:
+                continue
+            differences = (
+                other.height(start[0], start[1]) - start[2],
+                other.height(end[0], end[1]) - end[2],
+            )
+            if min(differences) < -tolerance * max(
+                1.0, abs(start[2]), abs(end[2])
+            ):
+                raise GeometryInputError(
+                    "SUPPORT_PLANE_UNDERCUTS_EAVE",
+                    f"Опорная плоскость ската {other.source_index + 1} опускается ниже "
+                    f"заданной кромки карниза {edge_index + 1}. "
+                    "Точный нижний конверт не может одновременно сохранить этот карниз.",
+                )
+
+    # Build unique equality lines. Coincident planes are handled by a stable
+    # source-index tie break; distinct parallel planes never exchange order.
+    equality_lines: list[tuple[float, float, float]] = []
+    coefficient_tolerance = max(1e-12, eps * 10.0)
+    for first_index, first in enumerate(planes):
+        for second in planes[first_index + 1:]:
+            a = first.a - second.a
+            b = first.b - second.b
+            c = first.c - second.c
+            norm = hypot(a, b)
+            coefficient_scale = max(
+                1.0, abs(first.a), abs(first.b), abs(first.c),
+                abs(second.a), abs(second.b), abs(second.c),
+            )
+            if norm <= coefficient_tolerance * coefficient_scale:
+                # Parallel or coincident planes have no finite equality line.
+                continue
+            line_scale = hypot(a, b)
+            a, b, c = a / line_scale, b / line_scale, c / line_scale
+            # Canonical sign makes duplicate line removal deterministic.
+            if a < -coefficient_tolerance or (
+                abs(a) <= coefficient_tolerance and b < 0.0
+            ):
+                a, b, c = -a, -b, -c
+            if any(
+                abs(a - old_a) <= coefficient_tolerance
+                and abs(b - old_b) <= coefficient_tolerance
+                and abs(c - old_c) <= coefficient_tolerance * scale
+                for old_a, old_b, old_c in equality_lines
+            ):
+                continue
+            equality_lines.append((a, b, c))
+
+    triangles = triangulate_simple_polygon(polygon, eps)
+    cells: list[tuple[Point2, ...]] = []
+    max_cells = 50000
+
+    for triangle in triangles:
+        local_cells: list[list[Point2]] = [list(triangle)]
+        for a, b, c in equality_lines:
+            split_cells: list[list[Point2]] = []
+            for cell in local_cells:
+                values = [a * point[0] + b * point[1] + c for point in cell]
+                minimum = min(values)
+                maximum = max(values)
+                if minimum < -tolerance and maximum > tolerance:
+                    negative = _clip_affine_cell(
+                        cell, a, b, c, True, tolerance
+                    )
+                    positive = _clip_affine_cell(
+                        cell, a, b, c, False, tolerance
+                    )
+                    if len(negative) >= 3 and abs(signed_area(negative)) > area_tolerance:
+                        split_cells.append(negative)
+                    if len(positive) >= 3 and abs(signed_area(positive)) > area_tolerance:
+                        split_cells.append(positive)
+                else:
+                    split_cells.append(cell)
+            local_cells = split_cells
+            if len(local_cells) + len(cells) > max_cells:
+                raise GeometryInputError(
+                    "SUPPORT_PLANE_ARRANGEMENT_BUDGET",
+                    "Точная раскладка опорных плоскостей превысила лимит ячеек.",
+                )
+        for cell in local_cells:
+            if len(cell) >= 3 and abs(signed_area(cell)) > area_tolerance:
+                cells.append(tuple(cell))
+
+    if not cells:
+        raise GeometryInputError(
+            "EMPTY_SUPPORT_PLANE_ENVELOPE",
+            "Опорные плоскости не образовали ни одной ограниченной ячейки крыши.",
+        )
+
+    vertices: list[Point3] = []
+    vertex_buckets: dict[tuple[int, int], list[int]] = {}
+
+    def add_vertex(point_xy: Point2, source_plane: SupportPlane) -> int:
+        key = (
+            int(round(point_xy[0] / tolerance)),
+            int(round(point_xy[1] / tolerance)),
+        )
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for vertex_index in vertex_buckets.get((key[0] + dx, key[1] + dy), ()):
+                    existing = vertices[vertex_index]
+                    if hypot(
+                        existing[0] - point_xy[0],
+                        existing[1] - point_xy[1],
+                    ) <= tolerance:
+                        expected_z = source_plane.height(point_xy[0], point_xy[1])
+                        if abs(existing[2] - expected_z) > tolerance * max(
+                            1.0, abs(existing[2]), abs(expected_z)
+                        ):
+                            raise GeometryInputError(
+                                "SUPPORT_PLANE_VERTEX_HEIGHT_CONFLICT",
+                                "Соседние ячейки нижнего конверта назначили одной XY-вершине разные высоты.",
+                            )
+                        return vertex_index
+        point = (
+            float(point_xy[0]),
+            float(point_xy[1]),
+            float(source_plane.height(point_xy[0], point_xy[1])),
+        )
+        vertex_index = len(vertices)
+        vertices.append(point)
+        vertex_buckets.setdefault(key, []).append(vertex_index)
+        return vertex_index
+
+    faces: list[Face] = []
+    face_sources: list[int] = []
+    for cell in cells:
+        centroid = _polygon_area_centroid(cell)
+        winner = min(
+            planes,
+            key=lambda plane: (
+                plane.height(centroid[0], centroid[1]),
+                plane.source_index,
+            ),
+        )
+        face = tuple(add_vertex(point, winner) for point in cell)
+        compact: list[int] = []
+        for vertex_index in face:
+            if not compact or compact[-1] != vertex_index:
+                compact.append(vertex_index)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            continue
+        face_xy = [(vertices[index][0], vertices[index][1]) for index in compact]
+        if signed_area(face_xy) < 0.0:
+            compact.reverse()
+        validate_planar_face(
+            vertices,
+            compact,
+            support_plane=winner,
+            eps=max(eps * 10.0, 1e-10),
+        )
+        # Arrangement cells are convex intersections of an ear triangle and
+        # affine half-planes. Confirm the winning plane remains the lower
+        # support at every cell vertex, as well as at its interior centroid.
+        for vertex_index in compact:
+            point = vertices[vertex_index]
+            own_height = winner.height(point[0], point[1])
+            if any(
+                other.height(point[0], point[1])
+                < own_height - tolerance * max(1.0, abs(own_height))
+                for other in planes
+                if other.source_index != winner.source_index
+            ):
+                raise GeometryInputError(
+                    "SUPPORT_PLANE_CELL_ORDER",
+                    f"Ячейка ската {winner.source_index + 1} пересекает область, где ниже лежит другая опорная плоскость.",
+                )
+        faces.append(tuple(compact))
+        face_sources.append(winner.source_index)
+
+    edge_uses: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(faces):
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_uses.setdefault(key, []).append(face_index)
+
+    for edge_key, face_ids in edge_uses.items():
+        if len(face_ids) > 2:
+            raise GeometryInputError(
+                "SUPPORT_PLANE_NON_MANIFOLD_EDGE",
+                f"Ребро {edge_key} принадлежит более чем двум плоским ячейкам.",
+            )
+        if len(face_ids) == 2:
+            first_source, second_source = (
+                face_sources[face_ids[0]], face_sources[face_ids[1]]
+            )
+            if first_source != second_source:
+                first_plane = planes[first_source]
+                second_plane = planes[second_source]
+                edge_points = (vertices[edge_key[0]], vertices[edge_key[1]])
+                residual = max(
+                    abs(first_plane.residual(point))
+                    for point in edge_points
+                )
+                residual = max(
+                    residual,
+                    *(abs(second_plane.residual(point)) for point in edge_points),
+                )
+                if residual > tolerance * max(
+                    1.0, *(abs(point[2]) for point in edge_points)
+                ):
+                    raise GeometryInputError(
+                        "SUPPORT_PLANE_NON_INTERSECTION_SEAM",
+                        f"Скаты {first_source + 1} и {second_source + 1} не сходятся по точной линии пересечения своих плоскостей.",
+                    )
+
+    from .mesh import RoofSurface, validate_surface_boundary_edges
+    validate_surface_boundary_edges(
+        vertices, faces, polygon, tolerance * 5.0
+    )
+    source_area_xy = abs(signed_area(polygon))
+    surface_area_xy = sum(
+        abs(signed_area([
+            (vertices[vertex_index][0], vertices[vertex_index][1])
+            for vertex_index in face
+        ]))
+        for face in faces
+    )
+    if abs(surface_area_xy - source_area_xy) > max(
+        tolerance * scale * 10.0, source_area_xy * 1e-7
+    ):
+        raise GeometryInputError(
+            "SUPPORT_PLANE_COVERAGE",
+            "Точные ячейки опорных плоскостей не покрывают исходный контур без дыр и перекрытий.",
+        )
+
+    return RoofSurface(
+        vertices=tuple(vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_sources),
+        planes=tuple(PlaneZ(plane.a, plane.b, plane.c) for plane in planes),
+        source_area_xy=source_area_xy,
+        surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(polygon),
+        approximation_error=0.0,
+        refinement_depth=0,
+    )
+
 def build_exact_planar_ring_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
     eps: float = 1e-9,
 ):
-    """Build a roof from exact support planes and a finite spatial arrangement.
+    """Build the exact lower envelope of the authored 3D eave support planes.
 
-    Source facets remain on their authored support planes. Their seams end
-    only at exact triple-plane events. Multiple disconnected transition
-    regions are allowed; the algorithm does not force a concave footprint
-    into one central ring or interpolate a height field.
+    Every output face lies on one authored edge plane. All facet boundaries
+    are exact equal-height intersections of those planes. The XY footprint is
+    partitioned by the complete finite arrangement of plane-equality lines;
+    no sampled distance field, spatial smoothing or arbitrary seam endpoint
+    is used.
     """
     normalized = tuple(tuple(float(value) for value in point) for point in points)
     planes = build_support_planes(normalized, pitches_degrees, eps)
     polygon = tuple((point[0], point[1]) for point in normalized)
-    scale = max(_bbox_scale(polygon), 1.0)
-    tolerance = max(1e-12, eps * scale * 100.0)
-
-    event_options = tuple(
-        _corner_seam_event_options(
-            index, polygon, planes, scale, tolerance
-        )
-        for index in range(len(normalized))
-    )
-    if any(not options for options in event_options):
-        missing = [
-            index + 1 for index, options in enumerate(event_options) if not options
-        ]
-        raise GeometryInputError(
-            "SPATIAL_SEAM_WITHOUT_EVENT",
-            "Для пространственных швов у вершин {} не найдено конечное пересечение "
-            "с третьей опорной плоскостью внутри исходного контура. "
-            "Произвольное удлинение или сглаживание не применяется.".format(missing),
-        )
-
-    return select_exact_spatial_arrangement(
-        normalized, polygon, planes, event_options, scale, tolerance, eps
+    return _build_exact_support_plane_envelope(
+        normalized, polygon, planes, eps
     )
 
 

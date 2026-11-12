@@ -806,7 +806,7 @@ def main() -> None:
     )
 
     # A mixed-height concave contour must use exact planar source faces
-    # and a small planar transition patch, never a continuous distance field.
+    # and the exact planar support-plane arrangement, never a distance field.
     mixed_concave_points = [
         (0.0, 0.0, 0.00),
         (3.0, 0.0, 0.05),
@@ -824,16 +824,13 @@ def main() -> None:
         "mixed-height concave roof must not use a sampled or smoothed height field",
     )
     ensure(
-        len(mixed_surface.faces) <= 2 * len(mixed_concave_points),
-        "mixed-height concave roof contains more than one exact source-plane split plus a minimal transition patch",
+        len(mixed_surface.faces) <= 512,
+        "mixed-height concave exact plane arrangement exceeded the cell budget",
     )
     ensure(
-        len({index for index in mixed_surface.face_slope_indices if index >= 0}) == len(mixed_concave_points),
-        "each original eave edge must own an exact planar roof region",
-    )
-    ensure(
-        any(index == -1 for index in mixed_surface.face_slope_indices),
-        "exact spatial builder did not create a transition patch for this fixture",
+        len(set(mixed_surface.face_slope_indices)) == len(mixed_concave_points)
+        and all(0 <= index < len(mixed_concave_points) for index in mixed_surface.face_slope_indices),
+        "every mixed-height roof cell must belong to one authored exact support plane",
     )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
@@ -905,8 +902,9 @@ def main() -> None:
     )
     ensure(
         abs(mixed_u_surface.surface_area_xy - 10.0) < 1e-7
-        and any(index == -1 for index in mixed_u_surface.face_slope_indices),
-        "mixed-height U contour did not create an exact planar transition patch",
+        and len(mixed_u_surface.faces) <= 512
+        and all(0 <= index < len(mixed_u_points) for index in mixed_u_surface.face_slope_indices),
+        "mixed-height U contour did not create a bounded exact planar support-plane arrangement",
     )
     mixed_u_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_U", mixed_u_surface, mixed_u_shell
