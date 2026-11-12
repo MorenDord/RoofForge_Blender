@@ -57,7 +57,12 @@ def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
     has_exact_seam = False
     for edge, sources in edge_sources.items():
         testcase.assertLessEqual(len(sources), 2)
-        if len(sources) == 2 and sources[0] != sources[1]:
+        if (
+            len(sources) == 2
+            and sources[0] >= 0
+            and sources[1] >= 0
+            and sources[0] != sources[1]
+        ):
             has_exact_seam = True
             for vertex_index in edge:
                 point = surface.vertices[vertex_index]
