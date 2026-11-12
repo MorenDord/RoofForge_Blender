@@ -601,7 +601,7 @@ def _build_event_ring_candidate(
     def reject(reason: str):
         if reject_reasons is not None:
             reject_reasons.append(reason)
-        return reject("inner-count")
+        return None
     if len(inner) != count:
         return reject("inner-count")
 
