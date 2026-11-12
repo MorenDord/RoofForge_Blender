@@ -827,9 +827,19 @@ def _build_event_ring_candidate(
                 return reject("check-13")
         ring_kind = "line"
     else:
-        if validate_simple_polygon(
-            compact_xy, max(1e-12, tolerance / scale)
-        ):
+        ring_eps = max(1e-12, tolerance / scale)
+        ring_scale = _bbox_scale(compact_xy)
+        ring_area_eps = ring_eps * ring_scale * ring_scale
+        for index, current in enumerate(compact_xy):
+            previous = compact_xy[index - 1]
+            following = compact_xy[(index + 1) % len(compact_xy)]
+            turn = (
+                (current[0] - previous[0]) * (following[1] - current[1])
+                - (current[1] - previous[1]) * (following[0] - current[0])
+            )
+            if abs(turn) <= ring_area_eps:
+                return reject("check-20")
+        if validate_simple_polygon(compact_xy, ring_eps):
             return reject("check-14")
         if ring_area * winding <= tolerance * tolerance:
             return reject("check-15")
