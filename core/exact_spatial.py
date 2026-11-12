@@ -861,182 +861,536 @@ def _select_exact_ring_candidate(
     )
     return valid_candidates[0]
 
-def build_exact_planar_ring_surface(
-    points: Sequence[Point3],
-    pitches_degrees: Sequence[float],
-    eps: float = 1e-9,
-):
-    """Build a piecewise-planar roof from exact edge planes and their seams.
 
-    Each original eave edge receives one flat source-plane face. Adjacent
-    source faces meet on the exact 3D intersection line of their support
-    planes. Their inner seam endpoints form a compact central ring; if the
-    seams converge to a line or point, no transition patch is needed. A
-    remaining polygonal ring is filled with planar triangles. The builder
-    searches only for a simple, non-overlapping partition of the footprint;
-    it rejects the contour if such a partition cannot be formed.
 
-    Unlike the historical distance-field route, this surface is never
-    smoothed or approximated. Every source face is checked against its exact
-    support plane, and every transition face is checked for planarity.
+def _segment_pair_parameters(
+    first_start: Point2,
+    first_end: Point2,
+    second_start: Point2,
+    second_end: Point2,
+    tolerance: float,
+) -> tuple[tuple[float, float], ...]:
+    """Return all split parameters for a finite 2D segment pair.
+
+    Collinear overlaps are split at every endpoint of the overlap so the
+    resulting planar graph has one canonical edge for each geometric interval.
     """
-    normalized = tuple(tuple(float(value) for value in point) for point in points)
-    planes = build_support_planes(normalized, pitches_degrees, eps)
-    polygon = tuple((point[0], point[1]) for point in normalized)
+    rx = first_end[0] - first_start[0]
+    ry = first_end[1] - first_start[1]
+    sx = second_end[0] - second_start[0]
+    sy = second_end[1] - second_start[1]
+    qx = second_start[0] - first_start[0]
+    qy = second_start[1] - first_start[1]
+    first_length_sq = rx * rx + ry * ry
+    second_length_sq = sx * sx + sy * sy
+    if first_length_sq <= tolerance * tolerance or second_length_sq <= tolerance * tolerance:
+        return ()
+
+    denominator = rx * sy - ry * sx
+    scale = max(1.0, sqrt(first_length_sq), sqrt(second_length_sq))
+    cross_tolerance = tolerance * scale
+    output: list[tuple[float, float]] = []
+
+    if abs(denominator) > cross_tolerance:
+        first_parameter = (qx * sy - qy * sx) / denominator
+        second_parameter = (qx * ry - qy * rx) / denominator
+        parameter_tolerance = tolerance / scale
+        if (
+            -parameter_tolerance <= first_parameter <= 1.0 + parameter_tolerance
+            and -parameter_tolerance <= second_parameter <= 1.0 + parameter_tolerance
+        ):
+            output.append((
+                max(0.0, min(1.0, first_parameter)),
+                max(0.0, min(1.0, second_parameter)),
+            ))
+        return tuple(output)
+
+    # Parallel but not collinear.
+    if abs(qx * ry - qy * rx) > cross_tolerance:
+        return ()
+
+    # Collinear: project both pairs of endpoints onto the opposite segment.
+    for point, is_first_segment in (
+        (second_start, False),
+        (second_end, False),
+        (first_start, True),
+        (first_end, True),
+    ):
+        if is_first_segment:
+            first_parameter = (
+                (point[0] - first_start[0]) * rx
+                + (point[1] - first_start[1]) * ry
+            ) / first_length_sq
+            projected = (
+                first_start[0] + first_parameter * rx,
+                first_start[1] + first_parameter * ry,
+            )
+            second_parameter = (
+                (projected[0] - second_start[0]) * sx
+                + (projected[1] - second_start[1]) * sy
+            ) / second_length_sq
+        else:
+            second_parameter = (
+                (point[0] - second_start[0]) * sx
+                + (point[1] - second_start[1]) * sy
+            ) / second_length_sq
+            projected = (
+                second_start[0] + second_parameter * sx,
+                second_start[1] + second_parameter * sy,
+            )
+            first_parameter = (
+                (projected[0] - first_start[0]) * rx
+                + (projected[1] - first_start[1]) * ry
+            ) / first_length_sq
+
+        parameter_tolerance = tolerance / scale
+        if (
+            -parameter_tolerance <= first_parameter <= 1.0 + parameter_tolerance
+            and -parameter_tolerance <= second_parameter <= 1.0 + parameter_tolerance
+            and hypot(projected[0] - point[0], projected[1] - point[1]) <= tolerance
+        ):
+            pair = (
+                max(0.0, min(1.0, first_parameter)),
+                max(0.0, min(1.0, second_parameter)),
+            )
+            if not any(
+                abs(pair[0] - existing[0]) <= parameter_tolerance
+                and abs(pair[1] - existing[1]) <= parameter_tolerance
+                for existing in output
+            ):
+                output.append(pair)
+    return tuple(output)
+
+
+def _interpolate_point3(first: Point3, second: Point3, parameter: float) -> Point3:
+    return tuple(
+        first[axis] + (second[axis] - first[axis]) * parameter
+        for axis in range(3)
+    )
+
+
+def _clean_collinear_cell_loop(
+    loop: Sequence[int],
+    vertices: Sequence[Point3],
+    tolerance: float,
+) -> list[int]:
+    """Remove only 3D-collinear degree-two vertices from one planar cell loop."""
+    result = list(loop)
+    changed = True
+    while changed and len(result) > 3:
+        changed = False
+        for index in range(len(result)):
+            a = vertices[result[index - 1]]
+            b = vertices[result[index]]
+            c = vertices[result[(index + 1) % len(result)]]
+            u = tuple(b[axis] - a[axis] for axis in range(3))
+            v = tuple(c[axis] - b[axis] for axis in range(3))
+            cross = (
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            )
+            cross_length = sqrt(sum(value * value for value in cross))
+            u_length = sqrt(sum(value * value for value in u))
+            v_length = sqrt(sum(value * value for value in v))
+            dot = sum(u[axis] * v[axis] for axis in range(3))
+            if (
+                cross_length <= tolerance * max(1.0, u_length, v_length)
+                and dot >= -tolerance * tolerance
+            ):
+                del result[index]
+                changed = True
+                break
+    return result
+
+
+def _build_exact_spatial_arrangement_surface(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    event_nodes: Sequence[Point3],
+    eps: float,
+):
+    """Build a planar-cell arrangement from exact boundary and seam segments.
+
+    The graph can contain multiple transition regions, coincident seam
+    intervals, reflex-corner split events and repeated triple-plane nodes.
+    It is not forced into one simple central ring. Every arrangement vertex
+    has a single XYZ location; projected crossings at different heights are
+    rejected as self-intersections.
+    """
+    count = len(points)
     scale = max(_bbox_scale(polygon), 1.0)
     tolerance = max(1e-12, eps * scale * 100.0)
-    event_options = tuple(
-        _corner_seam_event_options(
-            index, polygon, planes, scale, tolerance
-        )
-        for index in range(len(normalized))
-    )
-    if any(not options for options in event_options):
-        missing = [
-            index + 1 for index, options in enumerate(event_options) if not options
-        ]
-        raise GeometryInputError(
-            "SPATIAL_SEAM_WITHOUT_EVENT",
-            "Для швов у вершин {} не найдено конечное пересечение с третьей опорной плоскостью внутри контура. "
-            "Нельзя достраивать такие швы произвольной длиной.".format(missing),
-        )
+    area_tolerance = tolerance * scale
 
-    candidate = _select_exact_ring_candidate(
-        normalized, polygon, planes, event_options, scale, tolerance
-    )
+    segments: list[dict] = []
+    for index in range(count):
+        segments.append({
+            "a": tuple(points[index]),
+            "b": tuple(points[(index + 1) % count]),
+            "kind": "boundary",
+            "label": index,
+            "params": [0.0, 1.0],
+        })
+        previous = planes[(index - 1) % count]
+        current = planes[index]
+        event = event_nodes[index]
+        if max(abs(previous.residual(event)), abs(current.residual(event))) > tolerance * max(1.0, abs(event[2])):
+            raise GeometryInputError(
+                "SPATIAL_EVENT_OFF_SEAM",
+                f"Точка события у вершины {index + 1} не лежит на обеих соседних опорных плоскостях.",
+            )
+        segments.append({
+            "a": tuple(points[index]),
+            "b": tuple(event),
+            "kind": "seam",
+            "label": tuple(sorted(((index - 1) % count, index))),
+            "params": [0.0, 1.0],
+        })
 
-    # Weld only geometrically identical 3D points. The selected alpha and
-    # support-plane intersections remain untouched.
+    for index in range(count):
+        first = event_nodes[index]
+        second = event_nodes[(index + 1) % count]
+        distance = sqrt(sum((first[axis] - second[axis]) ** 2 for axis in range(3)))
+        if distance <= tolerance:
+            continue
+        source = planes[index]
+        if max(abs(source.residual(first)), abs(source.residual(second))) > tolerance * max(1.0, abs(first[2]), abs(second[2])):
+            raise GeometryInputError(
+                "SPATIAL_EVENT_EDGE_OFF_PLANE",
+                f"Внутреннее событийное ребро между узлами {index + 1} и {(index + 2) % count + 1} не лежит на плоскости ската {index + 1}.",
+            )
+        segments.append({
+            "a": tuple(first),
+            "b": tuple(second),
+            "kind": "transition_boundary",
+            "label": index,
+            "params": [0.0, 1.0],
+        })
+
+    # All authored and event segments must remain within the footprint.
+    for segment in segments:
+        if segment["kind"] == "boundary":
+            continue
+        a = segment["a"]
+        b = segment["b"]
+        for fraction in (0.2, 0.4, 0.6, 0.8):
+            sample = (
+                a[0] + (b[0] - a[0]) * fraction,
+                a[1] + (b[1] - a[1]) * fraction,
+            )
+            if not _point_in_polygon(sample, polygon, tolerance):
+                raise GeometryInputError(
+                    "SPATIAL_EVENT_SEGMENT_OUTSIDE",
+                    "Сегмент пространственного события выходит за пределы исходного контура.",
+                )
+
+    # Split every finite segment at exact projected intersections. Any two
+    # segments that cross in XY must have the same Z at the crossing.
+    for first_index, first in enumerate(segments):
+        for second in segments[first_index + 1:]:
+            intersections = _segment_pair_parameters(
+                first["a"][:2], first["b"][:2],
+                second["a"][:2], second["b"][:2],
+                tolerance,
+            )
+            for first_parameter, second_parameter in intersections:
+                first_point = _interpolate_point3(
+                    first["a"], first["b"], first_parameter
+                )
+                second_point = _interpolate_point3(
+                    second["a"], second["b"], second_parameter
+                )
+                if hypot(
+                    first_point[0] - second_point[0],
+                    first_point[1] - second_point[1],
+                ) > tolerance:
+                    continue
+                if abs(first_point[2] - second_point[2]) > tolerance * max(
+                    1.0, abs(first_point[2]), abs(second_point[2])
+                ):
+                    raise GeometryInputError(
+                        "SPATIAL_SEGMENT_CROSSING_HEIGHT",
+                        "Два пространственных шва пересекаются в плане, но имеют разную высоту. "
+                        "Такая крыша самопересекается и не может быть собрана.",
+                    )
+                first["params"].append(first_parameter)
+                second["params"].append(second_parameter)
+
     vertices: list[Point3] = []
-    buckets: dict[tuple[int, int, int], list[int]] = {}
+    xy_buckets: dict[tuple[int, int], list[int]] = {}
 
     def add_vertex(point: Point3) -> int:
-        key = tuple(int(round(value / tolerance)) for value in point)
+        key = (int(round(point[0] / tolerance)), int(round(point[1] / tolerance)))
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    nearby = buckets.get((key[0] + dx, key[1] + dy, key[2] + dz), ())
-                    for vertex_index in nearby:
-                        existing = vertices[vertex_index]
-                        distance_sq = sum(
-                            (existing[axis] - point[axis]) ** 2
-                            for axis in range(3)
-                        )
-                        if distance_sq <= tolerance * tolerance:
-                            return vertex_index
-        index = len(vertices)
+                for vertex_index in xy_buckets.get((key[0] + dx, key[1] + dy), ()):
+                    existing = vertices[vertex_index]
+                    xy_distance = hypot(existing[0] - point[0], existing[1] - point[1])
+                    if xy_distance <= tolerance:
+                        if abs(existing[2] - point[2]) > tolerance * max(
+                            1.0, abs(existing[2]), abs(point[2])
+                        ):
+                            raise GeometryInputError(
+                                "SPATIAL_VERTEX_HEIGHT_CONFLICT",
+                                "Одна XY-точка получила две разные высоты от пространственных швов.",
+                            )
+                        return vertex_index
+        vertex_index = len(vertices)
         vertices.append(tuple(float(value) for value in point))
-        buckets.setdefault(key, []).append(index)
-        return index
+        xy_buckets.setdefault(key, []).append(vertex_index)
+        return vertex_index
 
-    outer_ids = [add_vertex(point) for point in normalized]
-    inner_ids = [add_vertex(point) for point in candidate["inner"]]
+    edges: dict[tuple[int, int], dict[str, set]] = {}
+    for segment in segments:
+        a = segment["a"]
+        b = segment["b"]
+        length = hypot(b[0] - a[0], b[1] - a[1])
+        if length <= tolerance:
+            if abs(b[2] - a[2]) > tolerance:
+                raise GeometryInputError(
+                    "VERTICAL_SPATIAL_SEGMENT",
+                    "Пространственная поверхность требует вертикального ребра с нулевой XY-проекцией.",
+                )
+            continue
+        parameter_tolerance = tolerance / max(length, tolerance)
+        params = sorted(segment["params"])
+        unique_params = []
+        for parameter in params:
+            clipped = max(0.0, min(1.0, float(parameter)))
+            if not unique_params or clipped - unique_params[-1] > parameter_tolerance:
+                unique_params.append(clipped)
+        for first_parameter, second_parameter in zip(unique_params, unique_params[1:]):
+            if second_parameter - first_parameter <= parameter_tolerance:
+                continue
+            first_point = _interpolate_point3(a, b, first_parameter)
+            second_point = _interpolate_point3(a, b, second_parameter)
+            first_id = add_vertex(first_point)
+            second_id = add_vertex(second_point)
+            if first_id == second_id:
+                continue
+            key = (min(first_id, second_id), max(first_id, second_id))
+            metadata = edges.setdefault(
+                key,
+                {"pairs": set(), "boundaries": set(), "transition": set()},
+            )
+            if segment["kind"] == "boundary":
+                metadata["boundaries"].add(int(segment["label"]))
+            elif segment["kind"] == "seam":
+                metadata["pairs"].add(tuple(segment["label"]))
+            else:
+                metadata["transition"].add(int(segment["label"]))
+
+    if not edges:
+        raise GeometryInputError("EMPTY_SPATIAL_ARRANGEMENT", "Пространственная раскладка не содержит рёбер.")
+
+    outgoing: dict[int, list[tuple[int, int]]] = {}
+    for first_id, second_id in edges:
+        outgoing.setdefault(first_id, []).append((first_id, second_id))
+        outgoing.setdefault(second_id, []).append((second_id, first_id))
+    for vertex_id, half_edges in outgoing.items():
+        half_edges.sort(key=lambda edge: atan2(
+            vertices[edge[1]][1] - vertices[vertex_id][1],
+            vertices[edge[1]][0] - vertices[vertex_id][0],
+        ))
+
+    outgoing_indices = {
+        vertex_id: {edge: index for index, edge in enumerate(half_edges)}
+        for vertex_id, half_edges in outgoing.items()
+    }
+    next_half_edge = {}
+    all_half_edges = [
+        edge
+        for first_id, second_id in edges
+        for edge in ((first_id, second_id), (second_id, first_id))
+    ]
+    for first_id, second_id in all_half_edges:
+        ordered = outgoing.get(second_id, ())
+        reverse = (second_id, first_id)
+        reverse_index = outgoing_indices[second_id].get(reverse)
+        if reverse_index is None:
+            raise GeometryInputError(
+                "SPATIAL_ARRANGEMENT_HALF_EDGE",
+                "Не удалось построить согласованную half-edge структуру.",
+            )
+        next_half_edge[(first_id, second_id)] = ordered[
+            (reverse_index - 1) % len(ordered)
+        ]
+
+    cell_loops: list[tuple[int, ...]] = []
+    half_edge_cell: dict[tuple[int, int], int] = {}
+    visited: set[tuple[int, int]] = set()
+    for start_edge in all_half_edges:
+        if start_edge in visited:
+            continue
+        current = start_edge
+        local: set[tuple[int, int]] = set()
+        loop: list[int] = []
+        for _guard in range(len(all_half_edges) + 2):
+            if current in local:
+                break
+            if current in visited and current != start_edge:
+                break
+            local.add(current)
+            visited.add(current)
+            loop.append(current[0])
+            current = next_half_edge.get(current)
+            if current is None:
+                break
+            if current == start_edge:
+                break
+        if current != start_edge or len(loop) < 3:
+            continue
+        compact_loop: list[int] = []
+        for vertex_id in loop:
+            if not compact_loop or compact_loop[-1] != vertex_id:
+                compact_loop.append(vertex_id)
+        if len(compact_loop) > 1 and compact_loop[0] == compact_loop[-1]:
+            compact_loop.pop()
+        if len(set(compact_loop)) != len(compact_loop):
+            raise GeometryInputError(
+                "SPATIAL_ARRANGEMENT_REPEATED_VERTEX",
+                "Ячейка пространственной раскладки имеет самокасание или незамкнутую ветвь.",
+            )
+        loop_xy = [(vertices[index][0], vertices[index][1]) for index in compact_loop]
+        loop_area = signed_area(loop_xy)
+        if loop_area <= area_tolerance * 1e-4:
+            continue
+        cell_id = len(cell_loops)
+        cell_loops.append(tuple(compact_loop))
+        for first_id, second_id in zip(compact_loop, compact_loop[1:] + compact_loop[:1]):
+            half_edge_cell[(first_id, second_id)] = cell_id
+
+    if not cell_loops:
+        raise GeometryInputError(
+            "SPATIAL_ARRANGEMENT_EMPTY_CELLS",
+            "Пространственная раскладка не образовала ограниченных ячеек крыши.",
+        )
+
+    edge_cells: dict[tuple[int, int], set[int]] = {}
+    for (first_id, second_id), cell_id in half_edge_cell.items():
+        key = (min(first_id, second_id), max(first_id, second_id))
+        edge_cells.setdefault(key, set()).add(cell_id)
+
+    cell_sources: list[int] = []
+    for loop in cell_loops:
+        matching = []
+        for plane in planes:
+            if max(
+                abs(plane.residual(vertices[vertex_id])) for vertex_id in loop
+            ) <= tolerance * max(
+                1.0,
+                max(abs(vertices[vertex_id][2]) for vertex_id in loop),
+            ):
+                matching.append(plane.source_index)
+        cell_sources.append(min(matching) if matching else -1)
+
+    for edge_key, adjacent_cells in edge_cells.items():
+        metadata = edges[edge_key]
+        if len(adjacent_cells) == 1:
+            if not metadata["boundaries"]:
+                raise GeometryInputError(
+                    "SPATIAL_ARRANGEMENT_OPEN_INTERNAL_EDGE",
+                    f"Внутреннее ребро {edge_key} осталось открытым после построения ячеек.",
+                )
+            continue
+        if len(adjacent_cells) != 2:
+            raise GeometryInputError(
+                "SPATIAL_ARRANGEMENT_NON_MANIFOLD_EDGE",
+                f"Ребро {edge_key} принадлежит {len(adjacent_cells)} ячейкам.",
+            )
+        first_cell, second_cell = tuple(adjacent_cells)
+        first_source, second_source = cell_sources[first_cell], cell_sources[second_cell]
+        if first_source >= 0 and second_source >= 0 and first_source != second_source:
+            pair = tuple(sorted((first_source, second_source)))
+            if pair not in metadata["pairs"]:
+                raise GeometryInputError(
+                    "SPATIAL_ARRANGEMENT_UNSUPPORTED_ADJACENCY",
+                    f"Скаты {first_source + 1} и {second_source + 1} соприкасаются не по своей точной линии пересечения.",
+                )
+        elif first_source >= 0 and second_source == -1:
+            if first_source not in metadata["transition"] and not any(
+                first_source in pair for pair in metadata["pairs"]
+            ):
+                raise GeometryInputError(
+                    "SPATIAL_ARRANGEMENT_UNOWNED_TRANSITION_EDGE",
+                    f"Переходная ячейка не имеет корректной границы со скатом {first_source + 1}.",
+                )
+        elif second_source >= 0 and first_source == -1:
+            if second_source not in metadata["transition"] and not any(
+                second_source in pair for pair in metadata["pairs"]
+            ):
+                raise GeometryInputError(
+                    "SPATIAL_ARRANGEMENT_UNOWNED_TRANSITION_EDGE",
+                    f"Переходная ячейка не имеет корректной границы со скатом {second_source + 1}.",
+                )
+
     faces: list[Face] = []
     face_sources: list[int] = []
-
-    for index in range(len(normalized)):
-        next_index = (index + 1) % len(normalized)
-        raw_face = (
-            outer_ids[index],
-            outer_ids[next_index],
-            inner_ids[next_index],
-            inner_ids[index],
+    for loop, source_index in zip(cell_loops, cell_sources):
+        clean_loop = _clean_collinear_cell_loop(loop, vertices, tolerance)
+        cell_xy = [(vertices[index][0], vertices[index][1]) for index in clean_loop]
+        issues = validate_simple_polygon(
+            cell_xy, max(1e-12, tolerance / scale)
         )
-        compact: list[int] = []
-        for vertex_index in raw_face:
-            if not compact or compact[-1] != vertex_index:
-                compact.append(vertex_index)
-        if len(compact) > 1 and compact[0] == compact[-1]:
-            compact.pop()
-        if len(set(compact)) < 3:
+        if issues:
             raise GeometryInputError(
-                "DEGENERATE_SOURCE_SLOPE_FACE",
-                f"Плоский скат по ребру {index + 1} схлопнулся в линию.",
+                "SPATIAL_ARRANGEMENT_INVALID_CELL",
+                "Ячейка пространственной раскладки не является простым контуром: "
+                + issues[0].message,
             )
-        face_xy = [(vertices[v][0], vertices[v][1]) for v in compact]
-        if signed_area(face_xy) < 0.0:
-            compact.reverse()
-        validate_planar_face(
-            vertices, compact, support_plane=planes[index], eps=max(eps * 10.0, 1e-10)
-        )
-
-        # The shell validator and Blender's triangulators must never interpret
-        # a concave source n-gon as a fan outside its true boundary. Split only
-        # concave planar source faces into exact in-plane triangles. Blender's
-        # coplanar dissolve stage can merge them back into one editable slope.
-        turn_values = []
-        for local_index in range(len(face_xy)):
-            first = face_xy[local_index]
-            second = face_xy[(local_index + 1) % len(face_xy)]
-            third = face_xy[(local_index + 2) % len(face_xy)]
-            turn_values.append(
-                (second[0] - first[0]) * (third[1] - second[1])
-                - (second[1] - first[1]) * (third[0] - second[0])
+        try:
+            triangles = triangulate_simple_polygon(
+                cell_xy, max(1e-12, tolerance / scale)
             )
-        positive = any(value > tolerance * tolerance for value in turn_values)
-        negative = any(value < -tolerance * tolerance for value in turn_values)
-        if positive and negative:
-            triangulated = triangulate_simple_polygon(
-                face_xy, max(1e-12, tolerance / scale)
-            )
-            index_by_xy = {point: vertex_id for point, vertex_id in zip(face_xy, compact)}
-            for triangle in triangulated:
-                triangle_face = tuple(index_by_xy[point] for point in triangle)
-                validate_planar_face(
-                    vertices, triangle_face,
-                    support_plane=planes[index],
-                    eps=max(eps * 10.0, 1e-10),
-                )
-                faces.append(triangle_face)
-                face_sources.append(index)
-        else:
-            faces.append(tuple(compact))
-            face_sources.append(index)
-
-    if candidate["ring_kind"] == "polygon":
-        compact_inner_ids = [
-            inner_ids[index] for index in candidate["compact_indices"]
-        ]
-        for triangle in candidate["transition_faces"]:
-            face = tuple(compact_inner_ids[index] for index in triangle)
-            face_xy = [(vertices[v][0], vertices[v][1]) for v in face]
-            if signed_area(face_xy) < 0.0:
-                face = tuple(reversed(face))
+        except GeometryInputError as exc:
+            raise GeometryInputError(
+                "SPATIAL_ARRANGEMENT_TRIANGULATION",
+                "Не удалось разбить ячейку точной плоской раскладки: " + exc.message,
+            ) from exc
+        index_by_xy = {point: vertex_id for point, vertex_id in zip(cell_xy, clean_loop)}
+        support_plane = planes[source_index] if source_index >= 0 else None
+        for triangle in triangles:
+            face = tuple(index_by_xy[point] for point in triangle)
             validate_planar_face(
-                vertices, face, support_plane=None, eps=max(eps * 10.0, 1e-10)
+                vertices, face,
+                support_plane=support_plane,
+                eps=max(eps * 10.0, 1e-10),
             )
             faces.append(face)
-            face_sources.append(-1)
+            face_sources.append(source_index)
 
-    # Every internal seam must be used twice. Single-use edges are permitted
-    # only on the exact authored XYZ contour.
     edge_uses: dict[tuple[int, int], int] = {}
     for face in faces:
-        for edge_index, first in enumerate(face):
-            second = face[(edge_index + 1) % len(face)]
-            edge = (min(first, second), max(first, second))
-            edge_uses[edge] = edge_uses.get(edge, 0) + 1
-    if any(count > 2 for count in edge_uses.values()):
+        for edge_index, first_id in enumerate(face):
+            second_id = face[(edge_index + 1) % len(face)]
+            key = (min(first_id, second_id), max(first_id, second_id))
+            edge_uses[key] = edge_uses.get(key, 0) + 1
+    if any(value > 2 for value in edge_uses.values()):
         raise GeometryInputError(
-            "EXACT_SPATIAL_NON_MANIFOLD",
-            "Пространственная топология создала внутреннее ребро более чем с двумя гранями.",
+            "SPATIAL_ARRANGEMENT_TRIANGLE_NON_MANIFOLD",
+            "Триангуляция ячеек создала неманифолдное внутреннее ребро.",
         )
 
     from .mesh import RoofSurface, validate_surface_boundary_edges
     validate_surface_boundary_edges(
         vertices, faces, polygon, tolerance * 5.0
     )
+    source_area_xy = abs(signed_area(polygon))
     surface_area_xy = sum(
-        abs(signed_area([(vertices[index][0], vertices[index][1]) for index in face]))
+        abs(signed_area([
+            (vertices[vertex_id][0], vertices[vertex_id][1])
+            for vertex_id in face
+        ]))
         for face in faces
     )
-    source_area_xy = abs(signed_area(polygon))
     if abs(surface_area_xy - source_area_xy) > max(
         tolerance * scale * 10.0, source_area_xy * 1e-7
     ):
         raise GeometryInputError(
-            "EXACT_SPATIAL_COVERAGE",
-            "Плоские скаты и центральная переходная заплата не покрывают исходный контур без зазоров и перекрытий.",
+            "SPATIAL_ARRANGEMENT_COVERAGE",
+            "Пространственные плоские ячейки не покрывают контур точно без дыр и перекрытий.",
         )
 
     return RoofSurface(
@@ -1050,6 +1404,104 @@ def build_exact_planar_ring_surface(
         approximation_error=0.0,
         refinement_depth=0,
     )
+
+
+def select_exact_spatial_arrangement(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    event_options: Sequence[Sequence[tuple[Point3, float, tuple[int, ...]]]],
+    scale: float,
+    tolerance: float,
+    eps: float,
+):
+    """Choose a valid exact arrangement when a reflex event has two inward rays."""
+    combinations = 1
+    for options in event_options:
+        combinations *= len(options)
+        if combinations > 50000:
+            raise GeometryInputError(
+                "SPATIAL_EVENT_AMBIGUITY",
+                "Слишком много альтернативных событий в вогнутых углах для однозначной топологии.",
+            )
+    candidates = []
+    errors = []
+    for combination in product(*event_options):
+        event_nodes = tuple(option[0] for option in combination)
+        try:
+            surface = _build_exact_spatial_arrangement_surface(
+                points, polygon, planes, event_nodes, eps
+            )
+        except GeometryInputError as exc:
+            errors.append((exc.code, exc.message))
+            continue
+        transition_area = sum(
+            abs(signed_area([
+                (surface.vertices[vertex_id][0], surface.vertices[vertex_id][1])
+                for vertex_id in face
+            ]))
+            for face, source in zip(surface.faces, surface.face_slope_indices)
+            if source == -1
+        )
+        candidates.append((
+            transition_area,
+            len(surface.faces),
+            sum(option[1] for option in combination),
+            surface,
+        ))
+    if not candidates:
+        unique = []
+        for code, message in errors:
+            entry = f"{code}: {message}"
+            if entry not in unique:
+                unique.append(entry)
+        raise GeometryInputError(
+            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
+            "Не удалось построить точную пространственную раскладку: "
+            + " | ".join(unique[:4]),
+        )
+    candidates.sort(key=lambda item: item[:3])
+    return candidates[0][3]
+
+def build_exact_planar_ring_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float = 1e-9,
+):
+    """Build a roof from exact support planes and a finite spatial arrangement.
+
+    Source facets remain on their authored support planes. Their seams end
+    only at exact triple-plane events. Multiple disconnected transition
+    regions are allowed; the algorithm does not force a concave footprint
+    into one central ring or interpolate a height field.
+    """
+    normalized = tuple(tuple(float(value) for value in point) for point in points)
+    planes = build_support_planes(normalized, pitches_degrees, eps)
+    polygon = tuple((point[0], point[1]) for point in normalized)
+    scale = max(_bbox_scale(polygon), 1.0)
+    tolerance = max(1e-12, eps * scale * 100.0)
+
+    event_options = tuple(
+        _corner_seam_event_options(
+            index, polygon, planes, scale, tolerance
+        )
+        for index in range(len(normalized))
+    )
+    if any(not options for options in event_options):
+        missing = [
+            index + 1 for index, options in enumerate(event_options) if not options
+        ]
+        raise GeometryInputError(
+            "SPATIAL_SEAM_WITHOUT_EVENT",
+            "Для пространственных швов у вершин {} не найдено конечное пересечение "
+            "с третьей опорной плоскостью внутри исходного контура. "
+            "Произвольное удлинение или сглаживание не применяется.".format(missing),
+        )
+
+    return select_exact_spatial_arrangement(
+        normalized, polygon, planes, event_options, scale, tolerance, eps
+    )
+
 
 def validate_planar_face(
     vertices: Sequence[Point3],
