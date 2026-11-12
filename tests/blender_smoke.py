@@ -823,6 +823,10 @@ def main() -> None:
         mixed_surface.approximation_error > 0.0 and mixed_surface.refinement_depth > 0,
         "mixed-height concave continuity fallback was not selected",
     )
+    ensure(
+        len(mixed_surface.faces) < 256,
+        "mixed-height concave fallback globally over-refined planar roof regions",
+    )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
     )

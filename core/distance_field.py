@@ -122,37 +122,173 @@ def _check_boundary_heights(points, evaluator, tolerance, samples_per_edge=16):
                 )
 
 
-def _refine_uniform(triangles, evaluator, height_tolerance, max_depth):
-    current = triangles
-    measured_error = 0.0
-    final_depth = 0
-    for depth in range(max_depth + 1):
-        measured_error = 0.0
-        needs_refine = False
-        for triangle in current:
-            samples = [evaluator(*point) for point in triangle]
-            z_values = [sample.height for sample in samples]
-            owners = {sample.slope_index for sample in samples}
-            for first, second in ((0, 1), (1, 2), (2, 0)):
-                midpoint = _midpoint(triangle[first], triangle[second])
+def _edge_key(a, b):
+    """Return a stable undirected key for a shared triangle edge."""
+    return (a, b) if a <= b else (b, a)
+
+
+def _split_triangle_on_marked_edges(triangle, marked_midpoints):
+    """Split one triangle along every globally marked edge midpoint.
+
+    A neighbour that did not request refinement still receives the same
+    midpoint on its shared edge. This keeps the adaptive mesh conforming
+    without forcing a uniform 1-to-4 split across the whole roof.
+    """
+    a, b, c = triangle
+    mab = marked_midpoints.get(_edge_key(a, b))
+    mbc = marked_midpoints.get(_edge_key(b, c))
+    mca = marked_midpoints.get(_edge_key(c, a))
+    split_count = sum(point is not None for point in (mab, mbc, mca))
+
+    if split_count == 0:
+        return [triangle]
+    if split_count == 3:
+        return [
+            (a, mab, mca),
+            (mab, b, mbc),
+            (mca, mbc, c),
+            (mab, mbc, mca),
+        ]
+    if split_count == 1:
+        if mab is not None:
+            return [(a, mab, c), (mab, b, c)]
+        if mbc is not None:
+            return [(b, mbc, a), (mbc, c, a)]
+        return [(c, mca, b), (mca, a, b)]
+
+    # Two marked edges always meet at one triangle vertex. Rotate the
+    # triangle so those edges are U-V and V-W, then split into three cells.
+    if mab is not None and mbc is not None:
+        u, v, w, first_mid, second_mid = a, b, c, mab, mbc
+    elif mbc is not None and mca is not None:
+        u, v, w, first_mid, second_mid = b, c, a, mbc, mca
+    else:
+        u, v, w, first_mid, second_mid = c, a, b, mca, mab
+    return [
+        (u, first_mid, w),
+        (first_mid, v, second_mid),
+        (first_mid, second_mid, w),
+    ]
+
+
+def _refine_adaptive(triangles, evaluator, height_tolerance, max_depth):
+    """Refine only triangles near curvature or feature-ownership changes.
+
+    Refinement is edge-based rather than a global 1-to-4 subdivision. Every
+    marked edge midpoint is shared by both incident triangles; a neighbour
+    is split along that edge even when it did not independently request
+    refinement. Thus planar roof regions remain coarse while transition
+    regions gain the needed resolution, with no T-junctions.
+    """
+    current = [(tuple(triangle), 0) for triangle in triangles]
+    max_triangles = 50000
+
+    for _iteration in range(max_depth + 1):
+        marked_edges = set()
+        for triangle, depth in current:
+            vertex_samples = [evaluator(*point) for point in triangle]
+            owners = {sample.slope_index for sample in vertex_samples}
+            edge_scores = []
+            needs_refine = False
+
+            for edge_index in range(3):
+                next_index = (edge_index + 1) % 3
+                start = triangle[edge_index]
+                end = triangle[next_index]
+                midpoint = _midpoint(start, end)
                 exact = evaluator(*midpoint)
-                linear = 0.5 * (z_values[first] + z_values[second])
-                error = abs(exact.height - linear)
-                measured_error = max(measured_error, error)
+                linear_height = (
+                    vertex_samples[edge_index].height
+                    + vertex_samples[next_index].height
+                ) * 0.5
+                error = abs(exact.height - linear_height)
+                endpoint_owners = {
+                    vertex_samples[edge_index].slope_index,
+                    vertex_samples[next_index].slope_index,
+                }
+                owner_mismatch = exact.slope_index not in endpoint_owners
                 if error > height_tolerance or exact.slope_index not in owners:
                     needs_refine = True
+                edge_length_sq = (
+                    (end[0] - start[0]) ** 2
+                    + (end[1] - start[1]) ** 2
+                )
+                edge_scores.append((
+                    int(owner_mismatch),
+                    error,
+                    edge_length_sq,
+                    _edge_key(start, end),
+                ))
+
             center = _centroid(triangle)
             exact_center = evaluator(*center)
-            center_error = abs(exact_center.height - sum(z_values) / 3.0)
-            measured_error = max(measured_error, center_error)
-            if center_error > height_tolerance or exact_center.slope_index not in owners:
+            center_error = abs(
+                exact_center.height
+                - sum(sample.height for sample in vertex_samples) / 3.0
+            )
+            if (
+                center_error > height_tolerance
+                or exact_center.slope_index not in owners
+            ):
                 needs_refine = True
-        final_depth = depth
-        if not needs_refine or depth >= max_depth:
-            break
-        current = [child for triangle in current for child in _split_triangle(triangle)]
-    return current, measured_error, final_depth
 
+            if needs_refine and depth < max_depth:
+                # Prioritise an edge whose midpoint crosses a feature boundary,
+                # then the largest height error, then the longest edge.
+                chosen = max(edge_scores, key=lambda item: item[:3])
+                marked_edges.add(chosen[3])
+
+        if not marked_edges:
+            break
+
+        marked_midpoints = {
+            edge: _midpoint(*edge)
+            for edge in marked_edges
+        }
+        refined = []
+        for triangle, depth in current:
+            children = _split_triangle_on_marked_edges(
+                triangle, marked_midpoints
+            )
+            child_depth = depth + 1 if len(children) > 1 else depth
+            refined.extend((child, child_depth) for child in children)
+
+        if len(refined) > max_triangles:
+            raise GeometryInputError(
+                "REFINEMENT_BUDGET",
+                "Слишком много полигонов после локального уточнения поверхности.",
+            )
+        current = refined
+
+    # Report the measured error of the actual returned mesh, not the error
+    # observed before the final conforming edge splits.
+    measured_error = 0.0
+    final_depth = 0
+    output = []
+    for triangle, depth in current:
+        output.append(triangle)
+        final_depth = max(final_depth, depth)
+        vertex_samples = [evaluator(*point) for point in triangle]
+        for edge_index in range(3):
+            midpoint = _midpoint(
+                triangle[edge_index],
+                triangle[(edge_index + 1) % 3],
+            )
+            exact = evaluator(*midpoint)
+            linear = (
+                vertex_samples[edge_index].height
+                + vertex_samples[(edge_index + 1) % 3].height
+            ) * 0.5
+            measured_error = max(measured_error, abs(exact.height - linear))
+        exact_center = evaluator(*_centroid(triangle))
+        linear_center = sum(
+            sample.height for sample in vertex_samples
+        ) / 3.0
+        measured_error = max(
+            measured_error,
+            abs(exact_center.height - linear_center),
+        )
+    return output, measured_error, final_depth
 
 def build_distance_field_roof_surface(
     points: Sequence[tuple[float, float, float]],
@@ -211,7 +347,7 @@ def build_distance_field_roof_surface(
 
     _check_boundary_heights(points, evaluate, eps * scale * 100.0)
     base_triangles = triangulate_simple_polygon(boundary_xy, eps)
-    triangles, approximation_error, refinement_depth = _refine_uniform(
+    triangles, approximation_error, refinement_depth = _refine_adaptive(
         base_triangles, evaluate, target_error, max_depth
     )
     if len(triangles) > 50000:

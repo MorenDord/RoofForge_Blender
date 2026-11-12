@@ -156,6 +156,10 @@ class PolygonTests(unittest.TestCase):
         surface = build_roof_surface(points, pitches)
         self.assertGreater(surface.approximation_error, 0.0)
         self.assertGreater(surface.refinement_depth, 0)
+        self.assertLess(
+            len(surface.faces), 256,
+            "mixed-height fallback must refine locally, not subdivide the entire roof",
+        )
         self.assertAlmostEqual(
             surface.surface_area_xy,
             abs(signed_area([(point[0], point[1]) for point in points])),
