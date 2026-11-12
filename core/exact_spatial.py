@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
-from math import hypot, isfinite, radians, sqrt, tan
+from math import atan2, hypot, isfinite, radians, sqrt, tan
 from typing import Sequence
 
 from .geometry import (
