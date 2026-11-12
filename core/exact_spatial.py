@@ -2160,6 +2160,21 @@ def _build_maximal_exact_ring_candidate(
             return None
         inner.append(point)
 
+    # A pair of adjacent seam endpoints may approach the same XY point
+    # with slightly different elevations. That is a vertical zero-footprint
+    # edge, not a valid boundary of a graph-like roof surface. Stop the
+    # maximal-strip search before this topological collapse.
+    minimum_projected_edge = tolerance * 10.0
+    for index, point in enumerate(inner):
+        following = inner[(index + 1) % len(inner)]
+        if hypot(
+            following[0] - point[0],
+            following[1] - point[1],
+        ) <= minimum_projected_edge:
+            if reject_reasons is not None:
+                reject_reasons.append("zero-projected-ring-edge")
+            return None
+
     candidate = _build_event_ring_candidate(
         points, polygon, planes, tuple(inner), scale, tolerance,
         reject_reasons,
