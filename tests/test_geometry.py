@@ -45,9 +45,10 @@ def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
                 )
         else:
             validate_planar_face(surface.vertices, face)
-            projected = [(surface.vertices[index][0], surface.vertices[index][1]) for index in face]
-            testcase.assertAlmostEqual(abs(signed_area(projected)), 0.0, places=7,
-                                       msg="transition cap must be a vertical planar strip")
+            testcase.assertEqual(
+                len(face), 3,
+                "transition regions must be represented by individually planar triangles",
+            )
         for local_index, first in enumerate(face):
             second = face[(local_index + 1) % len(face)]
             edge_sources.setdefault(

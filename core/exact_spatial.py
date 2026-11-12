@@ -1822,6 +1822,10 @@ def _assemble_exact_event_ring_surface(
 
     scale = max(_bbox_scale(polygon), 1.0)
     tolerance = max(1e-12, eps * scale * 100.0)
+    # Welding must be tighter than the planarity validator. A generous
+    # topology tolerance can merge two distinct nearby seam endpoints and
+    # move one source-plane vertex off its exact support plane.
+    weld_tolerance = max(1e-12, eps * scale * 2.0)
     count = len(points)
     inner = tuple(candidate["inner"])
     compact_indices = tuple(candidate["compact_indices"])
@@ -1830,7 +1834,7 @@ def _assemble_exact_event_ring_surface(
     buckets: dict[tuple[int, int, int], list[int]] = {}
 
     def add_vertex(point: Point3) -> int:
-        key = tuple(int(round(value / tolerance)) for value in point)
+        key = tuple(int(round(value / weld_tolerance)) for value in point)
         for dx, dy, dz in product((-1, 0, 1), repeat=3):
             for vertex_index in buckets.get(
                 (key[0] + dx, key[1] + dy, key[2] + dz), ()
@@ -1839,7 +1843,7 @@ def _assemble_exact_event_ring_surface(
                 if sqrt(sum(
                     (existing[axis] - point[axis]) ** 2
                     for axis in range(3)
-                )) <= tolerance:
+                )) <= weld_tolerance:
                     return vertex_index
         vertex_index = len(vertices)
         vertices.append(tuple(float(value) for value in point))
