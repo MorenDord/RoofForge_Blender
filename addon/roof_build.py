@@ -185,17 +185,20 @@ def _dissolve_coplanar_edges(mesh) -> None:
                 if first.normal.dot(second.normal) < minimum_normal_dot:
                     continue
 
-                first_origin = first.verts[0].co
-                second_origin = second.verts[0].co
-                second_to_first = max(
-                    abs(first.normal.dot(vertex.co - first_origin))
-                    for vertex in second.verts
+                # Compare the smaller facet against the larger facet's
+                # plane. Measuring the large face against the small sliver's
+                # plane would amplify the same tiny angular error over the
+                # large face's full width and incorrectly keep the seam.
+                if first.calc_area() >= second.calc_area():
+                    reference, candidate = first, second
+                else:
+                    reference, candidate = second, first
+                reference_origin = reference.verts[0].co
+                candidate_deviation = max(
+                    abs(reference.normal.dot(vertex.co - reference_origin))
+                    for vertex in candidate.verts
                 )
-                first_to_second = max(
-                    abs(second.normal.dot(vertex.co - second_origin))
-                    for vertex in first.verts
-                )
-                if max(second_to_first, first_to_second) <= distance_tolerance:
+                if candidate_deviation <= distance_tolerance:
                     dissolve.append(edge)
 
             if not dissolve:
