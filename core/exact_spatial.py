@@ -594,11 +594,16 @@ def _build_event_ring_candidate(
     inner: Sequence[Point3],
     scale: float,
     tolerance: float,
+    reject_reasons: list[str] | None = None,
 ):
     """Validate and assemble a ring whose vertices are exact plane events."""
     count = len(points)
+    def reject(reason: str):
+        if reject_reasons is not None:
+            reject_reasons.append(reason)
+        return reject("inner-count")
     if len(inner) != count:
-        return None
+        return reject("inner-count")
 
     winding = 1.0 if signed_area(polygon) > 0.0 else -1.0
     quad_areas: list[float] = []
@@ -610,9 +615,9 @@ def _build_event_ring_candidate(
             abs(previous.residual(point)),
             abs(current.residual(point)),
         ) > tolerance * max(1.0, abs(point[2])):
-            return None
+            return reject("check-2")
         if not _point_in_polygon((point[0], point[1]), polygon, tolerance):
-            return None
+            return reject("check-3")
         origin = polygon[index]
         for fraction in (0.2, 0.4, 0.6, 0.8):
             sample = (
@@ -620,7 +625,7 @@ def _build_event_ring_candidate(
                 origin[1] + (point[1] - origin[1]) * fraction,
             )
             if not _point_in_polygon(sample, polygon, tolerance):
-                return None
+                return reject("check-4")
 
     source_polygons: list[list[Point2]] = []
     for index in range(count):
@@ -644,14 +649,14 @@ def _build_event_ring_candidate(
         ) <= tolerance:
             compact_xy.pop()
         if len(compact_xy) < 3:
-            return None
+            return reject("check-5")
         if validate_simple_polygon(
             compact_xy, max(1e-12, tolerance / scale)
         ):
-            return None
+            return reject("check-6")
         area = signed_area(compact_xy)
         if area * winding <= tolerance * tolerance:
-            return None
+            return reject("check-7")
         for edge_start, edge_end in zip(
             compact_xy, compact_xy[1:] + compact_xy[:1]
         ):
@@ -661,10 +666,10 @@ def _build_event_ring_candidate(
                     edge_start[1] + (edge_end[1] - edge_start[1]) * fraction,
                 )
                 if not _point_in_polygon(sample, polygon, tolerance):
-                    return None
+                    return reject("check-8")
         centroid = _polygon_area_centroid(compact_xy)
         if not _point_in_polygon(centroid, polygon, tolerance):
-            return None
+            return reject("check-9")
         source_polygons.append(compact_xy)
         quad_areas.append(area)
 
@@ -679,7 +684,7 @@ def _build_event_ring_candidate(
                 polygon[second], (inner[second][0], inner[second][1]),
                 tolerance * tolerance,
             ):
-                return None
+                return reject("check-10")
 
     compact_indices: list[int] = []
     for index, point in enumerate(inner):
@@ -701,7 +706,7 @@ def _build_event_ring_candidate(
     compact_xy = [(point[0], point[1]) for point in compact_inner]
     ring_area = signed_area(compact_xy) if len(compact_inner) >= 3 else 0.0
     if ring_area * winding < -tolerance * tolerance:
-        return None
+        return reject("check-11")
 
     ring_kind = "empty"
     transition_faces: tuple[Face, ...] = ()
@@ -716,7 +721,7 @@ def _build_event_ring_candidate(
         direction = tuple(last[axis] - first[axis] for axis in range(3))
         direction_sq = sum(value * value for value in direction)
         if direction_sq <= tolerance * tolerance:
-            return None
+            return reject("check-12")
         for point in compact_inner[1:-1]:
             relative = tuple(point[axis] - first[axis] for axis in range(3))
             projection = sum(
@@ -728,15 +733,15 @@ def _build_event_ring_candidate(
             if sqrt(sum(
                 (point[axis] - closest[axis]) ** 2 for axis in range(3)
             )) > tolerance:
-                return None
+                return reject("check-13")
         ring_kind = "line"
     else:
         if validate_simple_polygon(
             compact_xy, max(1e-12, tolerance / scale)
         ):
-            return None
+            return reject("check-14")
         if ring_area * winding <= tolerance * tolerance:
-            return None
+            return reject("check-15")
         # Every central boundary edge T_i -> T_(i+1) must lie on the
         # corresponding source plane i. The cap may be non-planar as a whole,
         # but each generated transition triangle is planar by construction.
@@ -751,20 +756,20 @@ def _build_event_ring_candidate(
                 abs(source.residual(first_point)),
                 abs(source.residual(second_point)),
             ) > tolerance * max(1.0, abs(first_point[2]), abs(second_point[2])):
-                return None
+                return reject("check-16")
             for fraction in (0.25, 0.5, 0.75):
                 sample = (
                     first_point[0] + (second_point[0] - first_point[0]) * fraction,
                     first_point[1] + (second_point[1] - first_point[1]) * fraction,
                 )
                 if not _point_in_polygon(sample, polygon, tolerance):
-                    return None
+                    return reject("check-17")
         try:
             triangles = triangulate_simple_polygon(
                 compact_xy, max(1e-12, tolerance / scale)
             )
         except GeometryInputError:
-            return None
+            return reject("check-18")
         index_by_xy = {point: index for index, point in enumerate(compact_xy)}
         transition_faces = tuple(
             tuple(index_by_xy[point] for point in triangle)
@@ -782,7 +787,7 @@ def _build_event_ring_candidate(
         tolerance * scale * 10.0,
         domain_area * 1e-7,
     ):
-        return None
+        return reject("check-19")
 
     return {
         "inner": tuple(inner),
@@ -828,10 +833,11 @@ def _select_exact_ring_candidate(
             )
 
     valid_candidates = []
+    rejected: list[str] = []
     for combination in product(*event_options):
         inner = tuple(option[0] for option in combination)
         candidate = _build_event_ring_candidate(
-            points, polygon, planes, inner, scale, tolerance
+            points, polygon, planes, inner, scale, tolerance, rejected
         )
         if candidate is not None:
             valid_candidates.append(candidate)
@@ -840,7 +846,11 @@ def _select_exact_ring_candidate(
         raise GeometryInputError(
             "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
             "Первые пересечения пространственных швов не образуют простой замкнутый набор плоских скатов. "
-            "Поверхность не создана; сглаженная или приблизительная подмена не применяется.",
+            "Поверхность не создана; сглаженная или приблизительная подмена не применяется. "
+            + "Причины отказа: " + ", ".join(
+                f"{reason}={rejected.count(reason)}"
+                for reason in sorted(set(rejected))
+            ),
         )
 
     valid_candidates.sort(
