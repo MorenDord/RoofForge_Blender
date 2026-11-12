@@ -175,7 +175,7 @@ def check_generated_shell(source, source_coordinates) -> None:
             max(v.z for v in coords) - min(v.z for v in coords),
             1.0,
         )
-        tolerance = span * 2.0e-6
+        tolerance = span * 1.0e-5
         loose_vertices = [vertex.index for vertex in bm.verts if not vertex.link_edges]
         two_edge_vertices = [
             vertex.index for vertex in bm.verts if len(vertex.link_edges) == 2
@@ -194,7 +194,7 @@ def check_generated_shell(source, source_coordinates) -> None:
             if len(edge.link_faces) != 2:
                 continue
             first, second = edge.link_faces
-            if first.normal.dot(second.normal) < 1.0 - 1.0e-8:
+            if first.normal.dot(second.normal) < math.cos(math.radians(0.05)):
                 continue
             origin = first.verts[0].co
             if all(
@@ -307,6 +307,43 @@ def main() -> None:
         "coplanar cleanup did not reduce a subdivided prism to 8 vertices / 12 edges / 6 quads",
     )
     bpy.data.meshes.remove(prism_mesh)
+
+    # A narrow 0.05-degree facet is within the practical planar tolerance and
+    # should not leave a long internal seam. A real 5-degree ridge must remain.
+    def two_panel_mesh(name, angle_degrees):
+        width = 0.01
+        length = 10.0
+        z_offset = width * math.tan(math.radians(angle_degrees))
+        panel_mesh = bpy.data.meshes.new(name)
+        panel_mesh.from_pydata(
+            [
+                (0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+                (1.0, length, 0.0), (0.0, length, 0.0),
+                (1.0 + width, 0.0, z_offset),
+                (1.0 + width, length, z_offset),
+            ],
+            [],
+            [(0, 1, 2, 3), (1, 4, 5, 2)],
+        )
+        panel_mesh.update(calc_edges=True)
+        return panel_mesh
+
+    near_flat_mesh = two_panel_mesh("RoofForge_NearFlat_Seam", 0.05)
+    roof_build_module._dissolve_coplanar_edges(near_flat_mesh)
+    ensure(
+        len(near_flat_mesh.polygons) == 1,
+        "near-coplanar narrow facet left a redundant internal seam",
+    )
+    bpy.data.meshes.remove(near_flat_mesh)
+
+    ridge_mesh = two_panel_mesh("RoofForge_Real_Ridge", 5.0)
+    roof_build_module._dissolve_coplanar_edges(ridge_mesh)
+    ensure(
+        len(ridge_mesh.polygons) == 2
+        and any(len(edge.vertices) == 2 for edge in ridge_mesh.edges),
+        "real 5-degree roof ridge was incorrectly dissolved",
+    )
+    bpy.data.meshes.remove(ridge_mesh)
 
 
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")

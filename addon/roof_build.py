@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from math import isfinite
+from math import cos, isfinite, radians
 
 import bpy
 import bmesh
@@ -147,49 +147,68 @@ def clear_surface_cache() -> None:
 
 
 def _dissolve_coplanar_edges(mesh) -> None:
-    """Merge planar patches and remove redundant loop-cut remnants.
+    """Merge planar and practically coplanar patches without flattening ridges.
 
-    Only shared edges between two faces on the same geometric plane are
-    dissolved. Real ridges, valleys, silhouette corners and thickness walls
-    stay in place. The BMesh operation also removes degree-two vertices left
-    between two surviving edges after a planar patch has been merged.
+    Adjacent faces are merged only when their dihedral angle is at most 0.05
+    degrees and their mutual distance from the opposite face plane is within
+    10 ppm of the mesh span. This small tolerance absorbs solver round-off and
+    narrow near-flat sliver facets, while ordinary roof-plane breaks remain.
+    The operation is repeated because a dissolve can expose new coplanar
+    neighbours. Degree-two remnants and loose internal geometry are removed.
     """
     bm = bmesh.new()
     try:
         bm.from_mesh(mesh)
-        bm.normal_update()
         coordinates = [vertex.co for vertex in bm.verts]
         if coordinates:
             span = max(
                 max(v.x for v in coordinates) - min(v.x for v in coordinates),
                 max(v.y for v in coordinates) - min(v.y for v in coordinates),
-                max(v.z for v in coordinates) - min(v.z for v in coordinates),
+                max(v.z for v.z for v in coordinates),
                 1.0,
             )
         else:
             span = 1.0
-        distance_tolerance = span * 1.0e-7
-        angular_tolerance = 1.0e-8
-        dissolve = []
-        for edge in bm.edges:
-            if len(edge.link_faces) != 2:
-                continue
-            first, second = edge.link_faces
-            if first.normal.dot(second.normal) < 1.0 - angular_tolerance:
-                continue
-            origin = first.verts[0].co
-            if all(
-                abs(first.normal.dot(vertex.co - origin)) <= distance_tolerance
-                for vertex in second.verts
-            ):
-                dissolve.append(edge)
-        if dissolve:
+        distance_tolerance = span * 1.0e-5
+        minimum_normal_dot = cos(radians(0.05))
+
+        # Each successful pass removes at least one face; the bound is a
+        # defensive guard against unexpected BMesh behaviour on malformed data.
+        max_passes = max(1, len(bm.faces))
+        for _pass_index in range(max_passes):
+            bm.normal_update()
+            dissolve = []
+            for edge in bm.edges:
+                if len(edge.link_faces) != 2:
+                    continue
+                first, second = edge.link_faces
+                if first.normal.dot(second.normal) < minimum_normal_dot:
+                    continue
+
+                first_origin = first.verts[0].co
+                second_origin = second.verts[0].co
+                second_to_first = max(
+                    abs(first.normal.dot(vertex.co - first_origin))
+                    for vertex in second.verts
+                )
+                first_to_second = max(
+                    abs(second.normal.dot(vertex.co - second_origin))
+                    for vertex in first.verts
+                )
+                if max(second_to_first, first_to_second) <= distance_tolerance:
+                    dissolve.append(edge)
+
+            if not dissolve:
+                break
+            face_count_before = len(bm.faces)
             bmesh.ops.dissolve_edges(
                 bm, edges=dissolve, use_verts=True, use_face_split=False
             )
+            if len(bm.faces) >= face_count_before:
+                break
 
         # Internal vertices can become completely isolated after their
-        # coplanar edge network is removed. They are not part of the resulting
+        # planar edge network is removed. They are not part of the resulting
         # N-gon boundary and must not survive as loose points.
         loose_edges = [edge for edge in bm.edges if not edge.link_faces]
         if loose_edges:
