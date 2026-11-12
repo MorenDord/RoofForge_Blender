@@ -176,6 +176,19 @@ def check_generated_shell(source, source_coordinates) -> None:
             1.0,
         )
         tolerance = span * 2.0e-6
+        loose_vertices = [vertex.index for vertex in bm.verts if not vertex.link_edges]
+        two_edge_vertices = [
+            vertex.index for vertex in bm.verts if len(vertex.link_edges) == 2
+        ]
+        ensure(not loose_vertices, f"generated roof has loose vertices: {loose_vertices[:8]}")
+        ensure(
+            not two_edge_vertices,
+            f"generated roof retains unnecessary degree-two loop-cut vertices: {two_edge_vertices[:8]}",
+        )
+        ensure(
+            all(len(face.verts) >= 3 for face in bm.faces),
+            "generated roof contains a face with fewer than three vertices",
+        )
         remaining_coplanar = []
         for edge in bm.edges:
             if len(edge.link_faces) != 2:
@@ -233,6 +246,69 @@ def main() -> None:
     ensure(bpy.app.version >= (5, 0, 0), f"requires Blender 5.0+, got {bpy.app.version_string}")
     extension.register()
     extension.register()  # Registration must be safe to call twice.
+
+    # A subdivided cuboid is a deterministic cleanup fixture: every side is
+    # one planar patch. The final mesh must be exactly 8 vertices, 12 edges
+    # and 6 quad faces.
+    roof_build_module = importlib.import_module(f"{extension.__name__}.addon.roof_build")
+    prism_mesh = bpy.data.meshes.new("RoofForge_CoplanarDissolve_Fixture")
+    nx = ny = 2
+    coord_to_index = {}
+    prism_vertices = []
+
+    def prism_vertex(i, j, z):
+        key = (float(i), float(j), float(z))
+        if key not in coord_to_index:
+            coord_to_index[key] = len(prism_vertices)
+            prism_vertices.append(key)
+        return coord_to_index[key]
+
+    prism_faces = []
+    for i in range(nx):
+        for j in range(ny):
+            prism_faces.append((
+                prism_vertex(i, j, 1), prism_vertex(i + 1, j, 1),
+                prism_vertex(i + 1, j + 1, 1), prism_vertex(i, j + 1, 1),
+            ))
+            prism_faces.append((
+                prism_vertex(i, j, 0), prism_vertex(i, j + 1, 0),
+                prism_vertex(i + 1, j + 1, 0), prism_vertex(i + 1, j, 0),
+            ))
+    for i in range(nx):
+        prism_faces.append((
+            prism_vertex(i, 0, 0), prism_vertex(i + 1, 0, 0),
+            prism_vertex(i + 1, 0, 1), prism_vertex(i, 0, 1),
+        ))
+        prism_faces.append((
+            prism_vertex(i, ny, 0), prism_vertex(i, ny, 1),
+            prism_vertex(i + 1, ny, 1), prism_vertex(i + 1, ny, 0),
+        ))
+    for j in range(ny):
+        prism_faces.append((
+            prism_vertex(0, j, 0), prism_vertex(0, j, 1),
+            prism_vertex(0, j + 1, 1), prism_vertex(0, j + 1, 0),
+        ))
+        prism_faces.append((
+            prism_vertex(nx, j, 0), prism_vertex(nx, j + 1, 0),
+            prism_vertex(nx, j + 1, 1), prism_vertex(nx, j, 1),
+        ))
+    prism_mesh.from_pydata(prism_vertices, [], prism_faces)
+    prism_mesh.update(calc_edges=True)
+    ensure(
+        len(prism_mesh.vertices) > 8 and len(prism_mesh.polygons) > 6,
+        "coplanar cleanup fixture was not subdivided before processing",
+    )
+    roof_build_module._dissolve_coplanar_edges(prism_mesh)
+    ensure(
+        len(prism_mesh.vertices) == 8
+        and len(prism_mesh.edges) == 12
+        and len(prism_mesh.polygons) == 6
+        and all(len(face.vertices) == 4 for face in prism_mesh.polygons),
+        "coplanar cleanup did not reduce a subdivided prism to 8 vertices / 12 edges / 6 quads",
+    )
+    bpy.data.meshes.remove(prism_mesh)
+
+
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
     ensure(
         not hasattr(bpy.types, "ROOFFORGE_OT_select_slope_edge"),

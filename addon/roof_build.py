@@ -147,7 +147,13 @@ def clear_surface_cache() -> None:
 
 
 def _dissolve_coplanar_edges(mesh) -> None:
-    """Remove internal BMesh edges whose two linked faces share one plane."""
+    """Merge planar patches and remove redundant loop-cut remnants.
+
+    Only shared edges between two faces on the same geometric plane are
+    dissolved. Real ridges, valleys, silhouette corners and thickness walls
+    stay in place. The BMesh operation also removes degree-two vertices left
+    between two surviving edges after a planar patch has been merged.
+    """
     bm = bmesh.new()
     try:
         bm.from_mesh(mesh)
@@ -179,8 +185,19 @@ def _dissolve_coplanar_edges(mesh) -> None:
                 dissolve.append(edge)
         if dissolve:
             bmesh.ops.dissolve_edges(
-                bm, edges=dissolve, use_verts=False, use_face_split=False
+                bm, edges=dissolve, use_verts=True, use_face_split=False
             )
+
+        # Internal vertices can become completely isolated after their
+        # coplanar edge network is removed. They are not part of the resulting
+        # N-gon boundary and must not survive as loose points.
+        loose_edges = [edge for edge in bm.edges if not edge.link_faces]
+        if loose_edges:
+            bmesh.ops.delete(bm, geom=loose_edges, context="EDGES")
+        loose_vertices = [vertex for vertex in bm.verts if not vertex.link_edges]
+        if loose_vertices:
+            bmesh.ops.delete(bm, geom=loose_vertices, context="VERTS")
+
         bm.normal_update()
         bm.to_mesh(mesh)
     finally:
