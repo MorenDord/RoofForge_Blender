@@ -268,7 +268,7 @@ def main() -> int:
         mixed_height_l,
         build_roof_surface,
         args.repeats,
-        l_pitch_profile(len(mixed_height_l)),
+        variable_pitch_profile(len(mixed_height_l)),
     ))
 
     mixed_height_u = wavy_outline(
