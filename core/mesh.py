@@ -1,6 +1,7 @@
 """Roof surface mesh assembly from plane-envelope cells."""
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from math import floor
 from typing import Sequence
@@ -59,6 +60,104 @@ class _VertexRegistry:
         self.vertices.append(point)
         self.buckets.setdefault(key, []).append(index)
         return index
+
+
+def _split_face_edges_at_shared_vertices(
+    vertices: Sequence[Point3],
+    faces: Sequence[Face],
+    tolerance: float,
+) -> list[Face]:
+    """Conform face boundaries by inserting shared vertices on long edges.
+
+    Clipped cells created from different triangulation/arrangement regions can
+    produce a T-junction: one face uses a long edge while its neighbour uses
+    two shorter edges meeting at a vertex. This pass inserts that existing
+    vertex into the long edge without moving geometry or changing the face
+    region, so edge-incidence validation sees matching topology.
+    """
+    tolerance_sq = tolerance * tolerance
+    output: list[Face] = []
+    axis_orders: list[list[int]] = []
+    axis_values: list[list[float]] = []
+    for axis in range(3):
+        order = sorted(
+            range(len(vertices)),
+            key=lambda vertex_id: (vertices[vertex_id][axis], vertex_id),
+        )
+        axis_orders.append(order)
+        axis_values.append([vertices[vertex_id][axis] for vertex_id in order])
+
+    for face in faces:
+        expanded: list[int] = []
+        for edge_index, start_id in enumerate(face):
+            end_id = face[(edge_index + 1) % len(face)]
+            start = vertices[start_id]
+            end = vertices[end_id]
+            direction = tuple(end[axis] - start[axis] for axis in range(3))
+            length_sq = sum(value * value for value in direction)
+            if length_sq <= tolerance_sq:
+                raise GeometryInputError(
+                    "ZERO_LENGTH_FACE_EDGE",
+                    "После сборки фасет найдено ребро нулевой длины.",
+                )
+
+            points_on_edge: list[tuple[float, int]] = []
+            search_axis = min(range(3), key=lambda axis: abs(direction[axis]))
+            lower_value = min(start[search_axis], end[search_axis]) - tolerance
+            upper_value = max(start[search_axis], end[search_axis]) + tolerance
+            values = axis_values[search_axis]
+            order = axis_orders[search_axis]
+            candidate_start = bisect_left(values, lower_value)
+            candidate_end = bisect_right(values, upper_value)
+
+            for candidate_position in range(candidate_start, candidate_end):
+                candidate_id = order[candidate_position]
+                if candidate_id == start_id or candidate_id == end_id:
+                    continue
+                candidate = vertices[candidate_id]
+                if any(
+                    candidate[axis] < min(start[axis], end[axis]) - tolerance
+                    or candidate[axis] > max(start[axis], end[axis]) + tolerance
+                    for axis in range(3)
+                    if axis != search_axis
+                ):
+                    continue
+                relative = tuple(candidate[axis] - start[axis] for axis in range(3))
+                parameter = sum(
+                    relative[axis] * direction[axis] for axis in range(3)
+                ) / length_sq
+                endpoint_margin = tolerance / (length_sq ** 0.5)
+                if parameter <= endpoint_margin or parameter >= 1.0 - endpoint_margin:
+                    continue
+                projected = tuple(
+                    start[axis] + parameter * direction[axis] for axis in range(3)
+                )
+                distance_sq = sum(
+                    (candidate[axis] - projected[axis]) ** 2 for axis in range(3)
+                )
+                if distance_sq <= tolerance_sq:
+                    points_on_edge.append((parameter, candidate_id))
+
+            points_on_edge.sort(key=lambda item: (item[0], item[1]))
+            if not expanded:
+                expanded.append(start_id)
+            expanded.extend(candidate_id for _, candidate_id in points_on_edge)
+            if expanded[-1] != end_id:
+                expanded.append(end_id)
+
+        compact: list[int] = []
+        for vertex_id in expanded:
+            if not compact or compact[-1] != vertex_id:
+                compact.append(vertex_id)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_CONFORMED_FACE",
+                "Разбиение T-junction создало вырожденную грань.",
+            )
+        output.append(tuple(compact))
+    return output
 
 
 def _mesh_edge_usage(faces: Sequence[Face]) -> dict[tuple[int, int], int]:
@@ -225,6 +324,10 @@ def build_roof_surface_from_planes(
             "Нижняя огибающая не создала ни одной области расширенной крыши.",
         )
 
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 5.0
+    )
+
     surface_area_xy = sum(
         abs(signed_area([
             (registry.vertices[index][0], registry.vertices[index][1])
@@ -364,6 +467,9 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     if not faces:
         raise GeometryInputError("EMPTY_ROOF", "Нижняя огибающая не создала ни одной области крыши.")
 
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 5.0
+    )
     surface_area_xy = sum(
         abs(signed_area([(registry.vertices[i][0], registry.vertices[i][1]) for i in face]))
         for face in faces
