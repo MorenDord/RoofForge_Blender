@@ -824,12 +824,12 @@ def main() -> None:
         "mixed-height concave roof must not use a sampled or smoothed height field",
     )
     ensure(
-        len(mixed_surface.faces) <= 2 * len(mixed_concave_points) - 2,
-        "mixed-height concave roof contains more than one source face per edge plus a minimal transition patch",
+        len(mixed_surface.faces) <= 2 * len(mixed_concave_points),
+        "mixed-height concave roof contains more than one exact source-plane split plus a minimal transition patch",
     )
     ensure(
-        sum(index >= 0 for index in mixed_surface.face_slope_indices) == len(mixed_concave_points),
-        "each original eave edge must own exactly one planar roof face",
+        len({index for index in mixed_surface.face_slope_indices if index >= 0}) == len(mixed_concave_points),
+        "each original eave edge must own an exact planar roof region",
     )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell

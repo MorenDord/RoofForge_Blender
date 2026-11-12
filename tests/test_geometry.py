@@ -164,9 +164,9 @@ class PolygonTests(unittest.TestCase):
         )
         self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
         self.assertEqual(
-            sum(source >= 0 for source in surface.face_slope_indices),
+            len({source for source in surface.face_slope_indices if source >= 0}),
             len(points),
-            "every authored edge must own one exact planar roof face",
+            "every authored edge must own an exact planar roof region",
         )
         self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
 

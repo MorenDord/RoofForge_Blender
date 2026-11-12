@@ -794,8 +794,39 @@ def build_exact_planar_ring_surface(
         validate_planar_face(
             vertices, compact, support_plane=planes[index], eps=max(eps * 10.0, 1e-10)
         )
-        faces.append(tuple(compact))
-        face_sources.append(index)
+
+        # The shell validator and Blender's triangulators must never interpret
+        # a concave source n-gon as a fan outside its true boundary. Split only
+        # concave planar source faces into exact in-plane triangles. Blender's
+        # coplanar dissolve stage can merge them back into one editable slope.
+        turn_values = []
+        for local_index in range(len(face_xy)):
+            first = face_xy[local_index]
+            second = face_xy[(local_index + 1) % len(face_xy)]
+            third = face_xy[(local_index + 2) % len(face_xy)]
+            turn_values.append(
+                (second[0] - first[0]) * (third[1] - second[1])
+                - (second[1] - first[1]) * (third[0] - second[0])
+            )
+        positive = any(value > tolerance * tolerance for value in turn_values)
+        negative = any(value < -tolerance * tolerance for value in turn_values)
+        if positive and negative:
+            triangulated = triangulate_simple_polygon(
+                face_xy, max(1e-12, tolerance / scale)
+            )
+            index_by_xy = {point: vertex_id for point, vertex_id in zip(face_xy, compact)}
+            for triangle in triangulated:
+                triangle_face = tuple(index_by_xy[point] for point in triangle)
+                validate_planar_face(
+                    vertices, triangle_face,
+                    support_plane=planes[index],
+                    eps=max(eps * 10.0, 1e-10),
+                )
+                faces.append(triangle_face)
+                face_sources.append(index)
+        else:
+            faces.append(tuple(compact))
+            face_sources.append(index)
 
     if candidate["ring_kind"] == "polygon":
         compact_inner_ids = [
