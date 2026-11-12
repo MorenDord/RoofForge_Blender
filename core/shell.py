@@ -288,7 +288,7 @@ def _normal_offset_shell(
     if diagnostics:
         first = diagnostics[0]
         face_indices = [
-            int(value) for value in re.findall(r"\\d+", first.message)
+            int(value) for value in re.findall(r"[0-9]+", first.message)
             if int(value) < len(output_faces)
         ][:2]
         details = []
@@ -372,7 +372,7 @@ def build_roof_shell(
     if diagnostics:
         first = diagnostics[0]
         face_indices = [
-            int(value) for value in re.findall(r"\\d+", first.message)
+            int(value) for value in re.findall(r"[0-9]+", first.message)
             if int(value) < len(faces)
         ][:2]
         details = []
