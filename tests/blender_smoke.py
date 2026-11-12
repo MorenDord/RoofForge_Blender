@@ -828,9 +828,9 @@ def main() -> None:
         "mixed-height concave exact plane arrangement exceeded the cell budget",
     )
     ensure(
-        len(set(mixed_surface.face_slope_indices)) == len(mixed_concave_points)
-        and all(0 <= index < len(mixed_concave_points) for index in mixed_surface.face_slope_indices),
-        "every mixed-height roof cell must belong to one authored exact support plane",
+        len({index for index in mixed_surface.face_slope_indices if index >= 0}) == len(mixed_concave_points)
+        and all(-1 <= index < len(mixed_concave_points) for index in mixed_surface.face_slope_indices),
+        "every mixed-height roof cell must be an authored support plane or an explicit planar transition face",
     )
     mixed_mesh = roof_build_for_units.create_roof_mesh_data(
         "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
@@ -903,7 +903,8 @@ def main() -> None:
     ensure(
         abs(mixed_u_surface.surface_area_xy - 10.0) < 1e-7
         and len(mixed_u_surface.faces) <= 512
-        and all(0 <= index < len(mixed_u_points) for index in mixed_u_surface.face_slope_indices),
+        and len({index for index in mixed_u_surface.face_slope_indices if index >= 0}) == len(mixed_u_points)
+        and all(-1 <= index < len(mixed_u_points) for index in mixed_u_surface.face_slope_indices),
         "mixed-height U contour did not create a bounded exact planar support-plane arrangement",
     )
     mixed_u_mesh = roof_build_for_units.create_roof_mesh_data(

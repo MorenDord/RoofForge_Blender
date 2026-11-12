@@ -30,18 +30,24 @@ def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
     testcase.assertEqual(len(surface.face_slope_indices), len(surface.faces))
     testcase.assertTrue(surface.faces)
     testcase.assertTrue(
-        all(0 <= source < len(surface.planes) for source in surface.face_slope_indices),
-        "every roof cell must belong to an authored exact support plane",
+        all(-1 <= source < len(surface.planes) for source in surface.face_slope_indices),
+        "roof faces must be exact support planes or explicit planar transition faces",
     )
 
     edge_sources = {}
     for face, source in zip(surface.faces, surface.face_slope_indices):
-        plane = surface.planes[source]
-        for vertex_index in face:
-            point = surface.vertices[vertex_index]
-            testcase.assertAlmostEqual(
-                point[2], plane.height(point[0], point[1]), places=7
-            )
+        if source >= 0:
+            plane = surface.planes[source]
+            for vertex_index in face:
+                point = surface.vertices[vertex_index]
+                testcase.assertAlmostEqual(
+                    point[2], plane.height(point[0], point[1]), places=7
+                )
+        else:
+            validate_planar_face(surface.vertices, face)
+            projected = [(surface.vertices[index][0], surface.vertices[index][1]) for index in face]
+            testcase.assertAlmostEqual(abs(signed_area(projected)), 0.0, places=7,
+                                       msg="transition cap must be a vertical planar strip")
         for local_index, first in enumerate(face):
             second = face[(local_index + 1) % len(face)]
             edge_sources.setdefault(
