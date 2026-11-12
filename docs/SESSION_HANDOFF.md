@@ -310,7 +310,9 @@ The initial 0.3.4 draft split the UI into three sibling panels. This was superse
 ## RoofForge 0.3.12 — mixed-height concave support-plane continuity
 
 - Root cause: the non-flat concave 3D path split the contour by infinite inward supporting lines, then removed a candidate slope on the opposite side of each line. Where such a line crossed the polygon interior, the active plane set could change discontinuously and leave a single-use internal edge.
-- Fix: for non-flat concave XY contours, pass the original contour as the finite active support. Each slope competes only where the perpendicular projection lies on its finite authored source edge; local vertex wedges are handled by the two incident edge planes.
+- Investigation: finite projection-only activation still leaves a discontinuity where a remote segment enters/leaves its candidate interval; a T-junction conformity pass alone does not close it.
+- Production fallback: try the exact plane arrangement first. If it fails with an internal open edge or boundary coverage mismatch, retry with `build_distance_field_roof_surface()`, whose min of finite segment plane/radial endpoint features is continuous. Only corner-transition zones are adaptively triangulated; edge-interior zones remain on authored planes.
 - Convex mixed-height roofs and flat-eave weighted-wavefront roofs keep their existing paths.
-- Added an L-shaped mixed-Z regression with per-edge pitches; it must assemble a complete upper surface and a closed manifold shell.
+- Added an L-shaped mixed-Z regression with per-edge pitches; it must enter the continuous fallback, assemble complete projected coverage and pass closed-shell validation.
+- The fallback's bounded approximation is recorded in `RoofSurface.approximation_error` / `refinement_depth`; Blender mesh metadata retains upward-facing transition patches as roof component faces even when they do not belong to one source plane.
 - Positive overhang on mixed-height concave contours remains unsupported.

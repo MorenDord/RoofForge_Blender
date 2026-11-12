@@ -1,14 +1,15 @@
-"""Continuous finite-segment roof field (experimental concave-contour path).
+"""Continuous finite-segment roof field for mixed-height concave fallback.
 
-This is a comparison/fallback prototype, not the final planar-facet solution.
-For every boundary edge it evaluates a plane while the perpendicular foot lies
-on that finite segment; beyond either endpoint it evaluates a radial corner
-transition. The lower envelope of these continuous segment features is
-continuous, unlike the current per-supporting-line active-set arrangement.
+For every boundary edge the field evaluates its authored plane while the
+perpendicular foot lies on that finite segment; beyond either endpoint it
+evaluates a radial corner transition. The lower envelope of these continuous
+segment features avoids the jumps caused by infinite supporting-line
+active-set arrangements.
 
-The adaptive triangulation approximates the corner transition regions while
+Adaptive triangulation approximates the corner-transition regions while
 preserving exact planar edge strips wherever the closest point lies inside an
-edge segment.
+edge segment. The production mesh builder invokes this path only when its exact
+planar arrangement fails continuity validation.
 """
 from __future__ import annotations
 
@@ -166,7 +167,8 @@ def build_distance_field_roof_surface(
     Edge-interior regions lie on the authored per-edge planes. Near contour
     vertices, radial transition patches are adaptively triangulated, so the
     result is continuous but is not a purely planar-per-boundary-face solution.
-    This is an experimental comparison path; the main builder remains strict.
+    The main builder uses this as a guarded fallback for mixed-height concave
+    contours when the exact planar arrangement fails continuity validation.
     """
     if len(points) < 3:
         raise GeometryInputError("POLY_TOO_SMALL", "Контур должен содержать минимум три вершины.")

@@ -805,6 +805,53 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
+    # A mixed-height concave contour must fall back to the continuous
+    # finite-segment field instead of returning a cracked upper surface.
+    mixed_concave_points = [
+        (0.0, 0.0, 0.00),
+        (3.0, 0.0, 0.05),
+        (3.0, 1.0, 0.08),
+        (1.0, 1.0, 0.12),
+        (1.0, 3.0, 0.16),
+        (0.0, 3.0, 0.10),
+    ]
+    mixed_concave_pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
+    mixed_surface, mixed_shell, _mixed_solver = roof_build_for_units.build_roof_payload(
+        mixed_concave_points, mixed_concave_pitches, 0.01, 0.0
+    )
+    ensure(
+        mixed_surface.approximation_error > 0.0 and mixed_surface.refinement_depth > 0,
+        "mixed-height concave continuity fallback was not selected",
+    )
+    mixed_mesh = roof_build_for_units.create_roof_mesh_data(
+        "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
+    )
+    component_attribute = mixed_mesh.attributes.get("roof_forge_component")
+    slope_attribute = mixed_mesh.attributes.get("roof_forge_slope_index")
+    ensure(
+        component_attribute is not None and slope_attribute is not None
+        and len(component_attribute.data) == len(mixed_mesh.polygons)
+        and len(slope_attribute.data) == len(mixed_mesh.polygons),
+        "mixed-height concave mesh face metadata is missing or mismatched",
+    )
+    component_values = [item.value for item in component_attribute.data]
+    slope_values = [item.value for item in slope_attribute.data]
+    ensure(
+        any(component == 0 and slope == -1 for component, slope in zip(component_values, slope_values)),
+        "approximated upward transition patches were not retained as roof faces",
+    )
+    mixed_bm = bmesh.new()
+    try:
+        mixed_bm.from_mesh(mixed_mesh)
+        ensure(
+            all(len(edge.link_faces) == 2 for edge in mixed_bm.edges),
+            "mixed-height concave fallback shell is not edge-manifold",
+        )
+    finally:
+        mixed_bm.free()
+    bpy.data.meshes.remove(mixed_mesh)
+
+
     # The same offset-contour rebuild must work on non-flat XYZ eaves.
     clear_scene()
     xyz_source = create_xyz_rectangle("RoofForge_Smoke_XYZ_Overhang")
