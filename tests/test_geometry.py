@@ -188,6 +188,86 @@ class PolygonTests(unittest.TestCase):
         direct = build_exact_planar_ring_surface(points, pitches)
         self.assertEqual(direct.faces, surface.faces)
         self.assertEqual(direct.face_slope_indices, surface.face_slope_indices)
+    def test_single_nonplanar_vertex_l_contour_uses_exact_spatial_events(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (3.0, 0.0, 0.0),
+            (3.0, 1.0, 0.05),
+            (1.0, 1.0, 0.0),
+            (1.0, 3.0, 0.0),
+            (0.0, 3.0, 0.0),
+        ]
+        pitches = [40.0] * len(points)
+        surface = build_roof_surface(points, pitches)
+        self.assertEqual(surface.approximation_error, 0.0)
+        self.assertEqual(surface.refinement_depth, 0)
+        self.assertAlmostEqual(surface.surface_area_xy, 5.0, places=7)
+        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
+
+        for face, source in zip(surface.faces, surface.face_slope_indices):
+            if source >= 0:
+                plane = surface.planes[source]
+                for vertex_index in face:
+                    point = surface.vertices[vertex_index]
+                    self.assertAlmostEqual(
+                        point[2], plane.height(point[0], point[1]), places=7
+                    )
+            else:
+                self.assertEqual(len(face), 3)
+                validate_planar_face(surface.vertices, face)
+
+        boundary_vertices = {(round(point[0], 8), round(point[1], 8), round(point[2], 8))
+                             for point in points}
+        for point in surface.vertices:
+            key = tuple(round(value, 8) for value in point)
+            if key in boundary_vertices:
+                continue
+            incident_planes = sum(
+                abs(plane.height(point[0], point[1]) - point[2]) <= 1e-6
+                for plane in surface.planes
+            )
+            self.assertGreaterEqual(
+                incident_planes, 3,
+                "every interior seam endpoint must be an exact three-plane event",
+            )
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_single_nonplanar_vertex_u_contour_uses_exact_spatial_events(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (4.0, 0.0, 0.0),
+            (4.0, 4.0, 0.0),
+            (3.0, 4.0, 0.0),
+            (3.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (1.0, 4.0, 0.08),
+            (0.0, 4.0, 0.0),
+        ]
+        pitches = [40.0] * len(points)
+        surface = build_roof_surface(points, pitches)
+        self.assertEqual(surface.approximation_error, 0.0)
+        self.assertEqual(surface.refinement_depth, 0)
+        self.assertAlmostEqual(surface.surface_area_xy, 10.0, places=7)
+        self.assertTrue(any(source == -1 for source in surface.face_slope_indices))
+        self.assertLessEqual(len(surface.faces), 2 * len(points))
+
+        for face, source in zip(surface.faces, surface.face_slope_indices):
+            if source >= 0:
+                plane = surface.planes[source]
+                for vertex_index in face:
+                    point = surface.vertices[vertex_index]
+                    self.assertAlmostEqual(
+                        point[2], plane.height(point[0], point[1]), places=7
+                    )
+            else:
+                self.assertEqual(len(face), 3)
+                validate_planar_face(surface.vertices, face)
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
     def test_discontinuous_concave_surface_is_rejected(self):
         fixtures = [
             [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),

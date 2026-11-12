@@ -8,6 +8,7 @@ compose these primitives, but may not move a point off its defining plane.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from math import hypot, isfinite, radians, sqrt, tan
 from typing import Sequence
 
@@ -453,104 +454,175 @@ def _polygon_area_centroid(polygon: Sequence[Point2]) -> Point2:
     return cx * factor, cy * factor
 
 
-def _corner_seam_ray(
+def _corner_seam_event_options(
     vertex_index: int,
     polygon: Sequence[Point2],
     planes: Sequence[SupportPlane],
     scale: float,
     tolerance: float,
-) -> tuple[Point2, float] | None:
-    """Find the inward ray of the exact adjacent-plane intersection."""
+) -> tuple[tuple[Point3, float, tuple[int, ...]], ...]:
+    """Find the first exact third-plane event on each inward corner seam ray.
+
+    A seam begins at an authored boundary vertex and lies on the exact
+    intersection of its two incident support planes. It ends at the first
+    point where that line meets another support plane. That event is a true
+    3-plane intersection, not a sampled or percentage-based point.
+    """
     count = len(polygon)
-    previous = planes[(vertex_index - 1) % count]
+    previous_index = (vertex_index - 1) % count
+    previous = planes[previous_index]
     current = planes[vertex_index]
-    intersection = intersect_support_planes(previous, current, max(1e-12, tolerance / scale))
+    intersection = intersect_support_planes(
+        previous, current, max(1e-12, tolerance / scale)
+    )
     if intersection is None:
-        return None
+        return ()
 
     dx, dy = intersection.direction[0], intersection.direction[1]
     direction_length = hypot(dx, dy)
     if direction_length <= tolerance:
-        return None
-    direction = (dx / direction_length, dy / direction_length)
+        return ()
+    base_direction = (dx / direction_length, dy / direction_length)
     origin = polygon[vertex_index]
     probe_distance = max(scale * 1e-7, tolerance * 20.0)
-    centroid = _polygon_area_centroid(polygon)
-    candidate_directions = (direction, (-direction[0], -direction[1]))
-    valid: list[tuple[float, float, Point2]] = []
+    options: list[tuple[Point3, float, tuple[int, ...]]] = []
 
-    for candidate in candidate_directions:
+    for sign in (1.0, -1.0):
+        direction = (
+            base_direction[0] * sign,
+            base_direction[1] * sign,
+        )
         probe = (
-            origin[0] + candidate[0] * probe_distance,
-            origin[1] + candidate[1] * probe_distance,
+            origin[0] + direction[0] * probe_distance,
+            origin[1] + direction[1] * probe_distance,
         )
         if not _point_in_polygon(probe, polygon, tolerance):
             continue
 
-        distances = []
-        for edge_index, (start, end) in enumerate(
+        # The first footprint-boundary hit bounds the valid part of this ray.
+        exit_parameters = []
+        for edge_index, (edge_start, edge_end) in enumerate(
             zip(polygon, polygon[1:] + polygon[:1])
         ):
-            if edge_index in {
-                (vertex_index - 1) % count,
-                vertex_index,
-            }:
+            if edge_index in {previous_index, vertex_index}:
                 continue
             parameter = _ray_segment_parameter(
-                origin, candidate, start, end, tolerance
+                origin, direction, edge_start, edge_end, tolerance
             )
             if parameter is not None:
-                distances.append(parameter)
-        max_distance = min(distances) if distances else scale
-        if max_distance <= tolerance:
+                exit_parameters.append(parameter)
+        exit_parameter = min(exit_parameters) if exit_parameters else float("inf")
+
+        events: list[tuple[float, int, Point3]] = []
+        for third_index, third in enumerate(planes):
+            if third_index in {previous_index, vertex_index}:
+                continue
+            a = current.a - third.a
+            b = current.b - third.b
+            c = current.c - third.c
+            denominator = a * direction[0] + b * direction[1]
+            coefficient_scale = max(
+                1.0, abs(a), abs(b), abs(c),
+                abs(current.a), abs(current.b), abs(third.a), abs(third.b),
+            )
+            if abs(denominator) <= 1e-12 * coefficient_scale:
+                continue
+            parameter = -(
+                a * origin[0] + b * origin[1] + c
+            ) / denominator
+            if parameter <= tolerance or parameter > exit_parameter + tolerance:
+                continue
+
+            x = origin[0] + direction[0] * parameter
+            y = origin[1] + direction[1] * parameter
+            if not _point_in_polygon((x, y), polygon, tolerance):
+                continue
+
+            # Ensure the seam segment does not leave and later re-enter a
+            # concave footprint before reaching the plane-intersection event.
+            if not all(
+                _point_in_polygon(
+                    (
+                        origin[0] + direction[0] * parameter * fraction,
+                        origin[1] + direction[1] * parameter * fraction,
+                    ),
+                    polygon,
+                    tolerance,
+                )
+                for fraction in (0.1, 0.25, 0.5, 0.75, 0.9)
+            ):
+                continue
+
+            z = current.height(x, y)
+            point = (x, y, z)
+            residual = max(
+                abs(previous.residual(point)),
+                abs(current.residual(point)),
+                abs(third.residual(point)),
+            )
+            if residual > tolerance * max(1.0, abs(z)):
+                continue
+            events.append((parameter, third_index, point))
+
+        if not events:
             continue
-        centre_alignment = (
-            (centroid[0] - origin[0]) * candidate[0]
-            + (centroid[1] - origin[1]) * candidate[1]
+        events.sort(key=lambda item: (item[0], item[1]))
+        first_parameter = events[0][0]
+        simultaneous = tuple(
+            sorted(
+                third_index
+                for parameter, third_index, _point in events
+                if abs(parameter - first_parameter) <= tolerance * 10.0
+            )
         )
-        valid.append((max_distance, centre_alignment, candidate))
+        point = events[0][2]
+        if not any(
+            sqrt(sum((point[axis] - other[0][axis]) ** 2 for axis in range(3)))
+            <= tolerance
+            for other in options
+        ):
+            options.append((point, first_parameter, simultaneous))
 
-    if not valid:
-        return None
-    max_distance, _alignment, chosen = max(
-        valid, key=lambda item: (item[0], item[1])
-    )
-    return chosen, max_distance
+    options.sort(key=lambda item: (item[1], item[0][0], item[0][1]))
+    return tuple(options)
 
 
-def _build_ring_candidate(
+def _build_event_ring_candidate(
     points: Sequence[Point3],
     polygon: Sequence[Point2],
     planes: Sequence[SupportPlane],
-    corner_rays: Sequence[tuple[Point2, float] | None],
-    alpha: float,
+    inner: Sequence[Point3],
     scale: float,
     tolerance: float,
 ):
-    """Return a valid exact planar ring partition for one inward event time."""
+    """Validate and assemble a ring whose vertices are exact plane events."""
     count = len(points)
-    inner: list[Point3] = []
-    for index, point in enumerate(points):
-        ray = corner_rays[index]
-        if ray is None:
-            inner.append(tuple(float(value) for value in point))
-            continue
-        direction, max_distance = ray
-        x = point[0] + alpha * max_distance * direction[0]
-        y = point[1] + alpha * max_distance * direction[1]
-        previous = planes[(index - 1) % count]
-        current = planes[index]
-        z = previous.height(x, y)
-        candidate = (x, y, z)
-        if abs(current.residual(candidate)) > tolerance * max(1.0, abs(z)):
-            return None
-        if not _point_in_polygon((x, y), polygon, tolerance):
-            return None
-        inner.append(candidate)
+    if len(inner) != count:
+        return None
 
     winding = 1.0 if signed_area(polygon) > 0.0 else -1.0
-    quad_loops: list[tuple[int, ...]] = []
     quad_areas: list[float] = []
+
+    for index, point in enumerate(inner):
+        previous = planes[(index - 1) % count]
+        current = planes[index]
+        if max(
+            abs(previous.residual(point)),
+            abs(current.residual(point)),
+        ) > tolerance * max(1.0, abs(point[2])):
+            return None
+        if not _point_in_polygon((point[0], point[1]), polygon, tolerance):
+            return None
+        origin = polygon[index]
+        for fraction in (0.2, 0.4, 0.6, 0.8):
+            sample = (
+                origin[0] + (point[0] - origin[0]) * fraction,
+                origin[1] + (point[1] - origin[1]) * fraction,
+            )
+            if not _point_in_polygon(sample, polygon, tolerance):
+                return None
+
+    source_polygons: list[list[Point2]] = []
     for index in range(count):
         next_index = (index + 1) % count
         raw_xy = [
@@ -573,16 +645,31 @@ def _build_ring_candidate(
             compact_xy.pop()
         if len(compact_xy) < 3:
             return None
-        if validate_simple_polygon(compact_xy, max(1e-12, tolerance / scale)):
+        if validate_simple_polygon(
+            compact_xy, max(1e-12, tolerance / scale)
+        ):
             return None
         area = signed_area(compact_xy)
         if area * winding <= tolerance * tolerance:
             return None
-        quad_loops.append(tuple(range(len(compact_xy))))
+        for edge_start, edge_end in zip(
+            compact_xy, compact_xy[1:] + compact_xy[:1]
+        ):
+            for fraction in (0.25, 0.5, 0.75):
+                sample = (
+                    edge_start[0] + (edge_end[0] - edge_start[0]) * fraction,
+                    edge_start[1] + (edge_end[1] - edge_start[1]) * fraction,
+                )
+                if not _point_in_polygon(sample, polygon, tolerance):
+                    return None
+        centroid = _polygon_area_centroid(compact_xy)
+        if not _point_in_polygon(centroid, polygon, tolerance):
+            return None
+        source_polygons.append(compact_xy)
         quad_areas.append(area)
 
-    # The inward spokes and the central ring may touch only at their intended
-    # endpoints. A crossing would invert the projected polygon partition.
+    # Corner seams may meet at their intended shared endpoints, but they may
+    # not cross each other in the footprint.
     for first in range(count):
         for second in range(first + 1, count):
             if second == first + 1 or (first == 0 and second == count - 1):
@@ -594,7 +681,6 @@ def _build_ring_candidate(
             ):
                 return None
 
-    inner_xy = [(point[0], point[1]) for point in inner]
     compact_indices: list[int] = []
     for index, point in enumerate(inner):
         if not compact_indices or sqrt(sum(
@@ -613,7 +699,7 @@ def _build_ring_candidate(
 
     compact_inner = [inner[index] for index in compact_indices]
     compact_xy = [(point[0], point[1]) for point in compact_inner]
-    ring_area = signed_area(compact_xy) if len(compact_xy) >= 3 else 0.0
+    ring_area = signed_area(compact_xy) if len(compact_inner) >= 3 else 0.0
     if ring_area * winding < -tolerance * tolerance:
         return None
 
@@ -625,8 +711,6 @@ def _build_ring_candidate(
     elif len(compact_inner) == 2:
         ring_kind = "line"
     elif abs(ring_area) <= tolerance * tolerance:
-        # A collinear multi-point ridge is accepted only if every point lies
-        # on one 3D line. The final edge-incidence check validates its fan.
         first = compact_inner[0]
         last = compact_inner[-1]
         direction = tuple(last[axis] - first[axis] for axis in range(3))
@@ -647,10 +731,34 @@ def _build_ring_candidate(
                 return None
         ring_kind = "line"
     else:
-        if len(validate_simple_polygon(compact_xy, max(1e-12, tolerance / scale))) > 0:
+        if validate_simple_polygon(
+            compact_xy, max(1e-12, tolerance / scale)
+        ):
             return None
         if ring_area * winding <= tolerance * tolerance:
             return None
+        # Every central boundary edge T_i -> T_(i+1) must lie on the
+        # corresponding source plane i. The cap may be non-planar as a whole,
+        # but each generated transition triangle is planar by construction.
+        for compact_index, original_index in enumerate(compact_indices):
+            next_original = compact_indices[
+                (compact_index + 1) % len(compact_indices)
+            ]
+            source = planes[(next_original - 1) % count]
+            first_point = compact_inner[compact_index]
+            second_point = compact_inner[(compact_index + 1) % len(compact_inner)]
+            if max(
+                abs(source.residual(first_point)),
+                abs(source.residual(second_point)),
+            ) > tolerance * max(1.0, abs(first_point[2]), abs(second_point[2])):
+                return None
+            for fraction in (0.25, 0.5, 0.75):
+                sample = (
+                    first_point[0] + (second_point[0] - first_point[0]) * fraction,
+                    first_point[1] + (second_point[1] - first_point[1]) * fraction,
+                )
+                if not _point_in_polygon(sample, polygon, tolerance):
+                    return None
         try:
             triangles = triangulate_simple_polygon(
                 compact_xy, max(1e-12, tolerance / scale)
@@ -663,19 +771,16 @@ def _build_ring_candidate(
             for triangle in triangles
         )
         ring_kind = "polygon"
+        ring_edge_sources = tuple(
+            (compact_indices[(index + 1) % len(compact_indices)] - 1) % count
+            for index in range(len(compact_indices))
+        )
 
-        sources = []
-        for start_compact_index, original_index in enumerate(compact_indices):
-            next_original = compact_indices[(start_compact_index + 1) % len(compact_indices)]
-            source_index = (next_original - 1) % count
-            sources.append(source_index)
-        ring_edge_sources = tuple(sources)
-
-    total_area = sum(quad_areas) + ring_area
-    domain_area = signed_area(polygon)
+    total_area = sum(quad_areas) + abs(ring_area)
+    domain_area = abs(signed_area(polygon))
     if abs(total_area - domain_area) > max(
         tolerance * scale * 10.0,
-        abs(domain_area) * 1e-7,
+        domain_area * 1e-7,
     ):
         return None
 
@@ -687,10 +792,64 @@ def _build_ring_candidate(
         "ring_kind": ring_kind,
         "transition_faces": transition_faces,
         "ring_edge_sources": ring_edge_sources,
-        "alpha": alpha,
         "ring_area": abs(ring_area),
+        "event_distance_sum": sum(
+            sqrt(
+                (inner[index][0] - points[index][0]) ** 2
+                + (inner[index][1] - points[index][1]) ** 2
+            )
+            for index in range(count)
+        ),
     }
 
+
+def _select_exact_ring_candidate(
+    points: Sequence[Point3],
+    polygon: Sequence[Point2],
+    planes: Sequence[SupportPlane],
+    event_options: Sequence[Sequence[tuple[Point3, float, tuple[int, ...]]]],
+    scale: float,
+    tolerance: float,
+):
+    """Select a conforming ring from first exact 3-plane seam events.
+
+    A reflex vertex may have more than one inward direction. Each direction
+    contributes its first exact plane-intersection event. The selector tests
+    the small set of resulting topologies and accepts only a complete simple
+    partition. For large ambiguous sets it fails closed rather than guessing.
+    """
+    combination_count = 1
+    for options in event_options:
+        combination_count *= len(options)
+        if combination_count > 50000:
+            raise GeometryInputError(
+                "SPATIAL_EVENT_AMBIGUITY",
+                "Слишком много альтернативных пространственных событий для однозначного выбора топологии.",
+            )
+
+    valid_candidates = []
+    for combination in product(*event_options):
+        inner = tuple(option[0] for option in combination)
+        candidate = _build_event_ring_candidate(
+            points, polygon, planes, inner, scale, tolerance
+        )
+        if candidate is not None:
+            valid_candidates.append(candidate)
+
+    if not valid_candidates:
+        raise GeometryInputError(
+            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
+            "Первые пересечения пространственных швов не образуют простой замкнутый набор плоских скатов. "
+            "Поверхность не создана; сглаженная или приблизительная подмена не применяется.",
+        )
+
+    valid_candidates.sort(
+        key=lambda candidate: (
+            candidate["ring_area"],
+            candidate["event_distance_sum"],
+        )
+    )
+    return valid_candidates[0]
 
 def build_exact_planar_ring_surface(
     points: Sequence[Point3],
@@ -716,29 +875,25 @@ def build_exact_planar_ring_surface(
     polygon = tuple((point[0], point[1]) for point in normalized)
     scale = max(_bbox_scale(polygon), 1.0)
     tolerance = max(1e-12, eps * scale * 100.0)
-    corner_rays = tuple(
-        _corner_seam_ray(index, polygon, planes, scale, tolerance)
+    event_options = tuple(
+        _corner_seam_event_options(
+            index, polygon, planes, scale, tolerance
+        )
         for index in range(len(normalized))
     )
-
-    candidate = None
-    # The largest valid alpha advances each exact seam as far as the footprint
-    # topology allows, minimizing the residual transition region.
-    for step in range(98, 1, -1):
-        alpha = step / 100.0
-        candidate = _build_ring_candidate(
-            normalized, polygon, planes, corner_rays,
-            alpha, scale, tolerance,
-        )
-        if candidate is not None:
-            break
-    if candidate is None:
+    if any(not options for options in event_options):
+        missing = [
+            index + 1 for index, options in enumerate(event_options) if not options
+        ]
         raise GeometryInputError(
-            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
-            "Опорные плоскости построены точно, но их внутренние линии пересечения "
-            "не образуют простой замкнутый набор скатов. Поверхность не создана; "
-            "уменьшенная или сглаженная аппроксимация не применяется.",
+            "SPATIAL_SEAM_WITHOUT_EVENT",
+            "Для швов у вершин {} не найдено конечное пересечение с третьей опорной плоскостью внутри контура. "
+            "Нельзя достраивать такие швы произвольной длиной.".format(missing),
         )
+
+    candidate = _select_exact_ring_candidate(
+        normalized, polygon, planes, event_options, scale, tolerance
+    )
 
     # Weld only geometrically identical 3D points. The selected alpha and
     # support-plane intersections remain untouched.

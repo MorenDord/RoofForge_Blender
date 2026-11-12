@@ -882,6 +882,64 @@ def main() -> None:
         mixed_bm.free()
     bpy.data.meshes.remove(mixed_mesh)
 
+    # U-shaped contour with a single elevated eave vertex exercises two
+    # reflex corners and several independent exact three-plane seam events.
+    mixed_u_points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (3.0, 4.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 4.0, 0.08),
+        (0.0, 4.0, 0.0),
+    ]
+    mixed_u_pitches = [40.0] * len(mixed_u_points)
+    mixed_u_surface, mixed_u_shell, _mixed_u_solver = roof_build_for_units.build_roof_payload(
+        mixed_u_points, mixed_u_pitches, 0.01, 0.0
+    )
+    ensure(
+        mixed_u_surface.approximation_error == 0.0
+        and mixed_u_surface.refinement_depth == 0,
+        "mixed-height U contour used a sampled or smoothed height field",
+    )
+    ensure(
+        abs(mixed_u_surface.surface_area_xy - 10.0) < 1e-7
+        and any(index == -1 for index in mixed_u_surface.face_slope_indices),
+        "mixed-height U contour did not create an exact planar transition patch",
+    )
+    mixed_u_mesh = roof_build_for_units.create_roof_mesh_data(
+        "RoofForge_Smoke_Mixed_Height_U", mixed_u_surface, mixed_u_shell
+    )
+    mixed_u_bm = bmesh.new()
+    try:
+        mixed_u_bm.from_mesh(mixed_u_mesh)
+        ensure(
+            all(len(edge.link_faces) == 2 for edge in mixed_u_bm.edges),
+            "mixed-height U contour shell is not edge-manifold",
+        )
+        mixed_u_bm.normal_update()
+        u_span = max(
+            max((vertex.co[axis] for vertex in mixed_u_bm.verts), default=0.0)
+            - min((vertex.co[axis] for vertex in mixed_u_bm.verts), default=0.0)
+            for axis in range(3)
+        )
+        u_planarity_tolerance = max(1e-7, u_span * 1e-6)
+        for face in mixed_u_bm.faces:
+            origin = face.verts[0].co
+            normal = face.normal
+            residual = max(
+                abs(normal.dot(vertex.co - origin))
+                for vertex in face.verts
+            )
+            ensure(
+                residual <= u_planarity_tolerance,
+                "mixed-height U contour contains a non-planar output face",
+            )
+    finally:
+        mixed_u_bm.free()
+    bpy.data.meshes.remove(mixed_u_mesh)
+
 
     # The same offset-contour rebuild must work on non-flat XYZ eaves.
     clear_scene()
