@@ -1547,28 +1547,6 @@ def _build_exact_support_plane_envelope(
     tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = tolerance * scale * 1e-4
 
-    # The eave boundary is immutable. A support plane belonging to another
-    # edge may not undercut it anywhere along that authored boundary segment.
-    for edge_index, start in enumerate(points):
-        end = points[(edge_index + 1) % len(points)]
-        own = planes[edge_index]
-        for other in planes:
-            if other.source_index == edge_index:
-                continue
-            differences = (
-                other.height(start[0], start[1]) - start[2],
-                other.height(end[0], end[1]) - end[2],
-            )
-            if min(differences) < -tolerance * max(
-                1.0, abs(start[2]), abs(end[2])
-            ):
-                raise GeometryInputError(
-                    "SUPPORT_PLANE_UNDERCUTS_EAVE",
-                    f"Опорная плоскость ската {other.source_index + 1} опускается ниже "
-                    f"заданной кромки карниза {edge_index + 1}. "
-                    "Точный нижний конверт не может одновременно сохранить этот карниз.",
-                )
-
     # Build unique equality lines. Coincident planes are handled by a stable
     # source-index tie break; distinct parallel planes never exchange order.
     equality_lines: list[tuple[float, float, float]] = []
@@ -1600,6 +1578,30 @@ def _build_exact_support_plane_envelope(
                 for old_a, old_b, old_c in equality_lines
             ):
                 continue
+            equality_lines.append((a, b, c))
+
+    # Source-plane activation changes only across the supporting line of its
+    # authored boundary edge. Add those lines to the same exact arrangement.
+    winding = 1.0 if signed_area(polygon) > 0.0 else -1.0
+    for index, start_point in enumerate(points):
+        end_point = points[(index + 1) % len(points)]
+        dx = end_point[0] - start_point[0]
+        dy = end_point[1] - start_point[1]
+        norm = hypot(dx, dy)
+        if norm <= tolerance:
+            raise GeometryInputError(
+                "DEGENERATE_SUPPORT_EDGE",
+                f"Ребро карниза {index + 1} имеет нулевую XY-проекцию.",
+            )
+        a = winding * (-dy) / norm
+        b = winding * dx / norm
+        c = winding * (dy * start_point[0] - dx * start_point[1]) / norm
+        if not any(
+            abs(a - old_a) <= coefficient_tolerance
+            and abs(b - old_b) <= coefficient_tolerance
+            and abs(c - old_c) <= coefficient_tolerance * scale
+            for old_a, old_b, old_c in equality_lines
+        ):
             equality_lines.append((a, b, c))
 
     triangles = triangulate_simple_polygon(polygon, eps)
@@ -1682,8 +1684,26 @@ def _build_exact_support_plane_envelope(
     face_sources: list[int] = []
     for cell in cells:
         centroid = _polygon_area_centroid(cell)
+        active_planes = []
+        for plane in planes:
+            edge_start = points[plane.source_index]
+            edge_end = points[(plane.source_index + 1) % len(points)]
+            dx = edge_end[0] - edge_start[0]
+            dy = edge_end[1] - edge_start[1]
+            inward_side = winding * (
+                -dy * centroid[0] + dx * centroid[1]
+                + dy * edge_start[0] - dx * edge_start[1]
+            ) / max(hypot(dx, dy), tolerance)
+            if inward_side >= -tolerance:
+                active_planes.append(plane)
+        if not active_planes:
+            raise GeometryInputError(
+                "NO_ACTIVE_SUPPORT_PLANE",
+                "В одной из областей контура нет активной опорной плоскости. "
+                "Плоскую крышу без произвольного перехода построить нельзя.",
+            )
         winner = min(
-            planes,
+            active_planes,
             key=lambda plane: (
                 plane.height(centroid[0], centroid[1]),
                 plane.source_index,
@@ -1716,7 +1736,7 @@ def _build_exact_support_plane_envelope(
             if any(
                 other.height(point[0], point[1])
                 < own_height - tolerance * max(1.0, abs(own_height))
-                for other in planes
+                for other in active_planes
                 if other.source_index != winner.source_index
             ):
                 raise GeometryInputError(
