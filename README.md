@@ -60,6 +60,12 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave footprints are not supported and are rejected with a warning, regardless of overhang. Offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
+## RoofForge 0.3.17
+
+- The vector-preview placeholder no longer uses `template_icon` or nested-layout horizontal alignment. A full-width spacer reserves its vertical space only.
+- The GPU preview is centered directly at `region.width / 2`, the midpoint of the complete N-panel UI region. Debug UI bounds draws a green center axis and reports the region and canvas centers independently.
+- Blender smoke checks assert that no `template_icon` remains in the panel draw code and that the GPU canvas center equals the N-panel midpoint at multiple widths.
+
 ## RoofForge 0.3.16
 
 - Mixed-height concave XY contours are disabled in the production build and report a warning before the roof builder runs. Flat-eave concave contours and convex mixed-height contours remain available.
@@ -69,7 +75,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.16-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.16.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.17-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.17.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
