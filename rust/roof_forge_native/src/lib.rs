@@ -710,7 +710,6 @@ mod python {
             .collect()
     }
 
-
     #[pyfunction(name = "split_face_edges_at_shared_vertices")]
     fn py_split_face_edges_at_shared_vertices(
         vertices: Vec<(f64, f64, f64)>,
