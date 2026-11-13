@@ -169,6 +169,97 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
+
+fn weld_vertices_batch_core(
+    points: &[[f64; 3]],
+    tolerance: f64,
+) -> Result<(Vec<[f64; 3]>, Vec<usize>), Diagnostic> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Diagnostic::error(
+            "INVALID_WELD_TOLERANCE",
+            "Допуск объединения вершин должен быть конечным и положительным.",
+        ));
+    }
+
+    let tolerance_sq = tolerance * tolerance;
+    let mut vertices: Vec<[f64; 3]> = Vec::with_capacity(points.len());
+    let mut point_indices = Vec::with_capacity(points.len());
+    let mut buckets: std::collections::HashMap<[i64; 3], Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for point in points {
+        if point.iter().any(|value| !value.is_finite()) {
+            return Err(Diagnostic::error(
+                "NON_FINITE_WELD_POINT",
+                "Список объединяемых вершин содержит NaN или бесконечные координаты.",
+            ));
+        }
+
+        let mut key = [0_i64; 3];
+        for axis in 0..3 {
+            let cell = (point[axis] / tolerance).floor();
+            if cell < i64::MIN as f64 || cell >= 9_223_372_036_854_775_808.0 {
+                return Err(Diagnostic::error(
+                    "WELD_COORDINATE_OUT_OF_RANGE",
+                    "Координата слишком велика для пространственного индекса Rust.",
+                ));
+            }
+            key[axis] = cell as i64;
+        }
+
+        let mut matched = None;
+        for dx in -1_i64..=1 {
+            for dy in -1_i64..=1 {
+                for dz in -1_i64..=1 {
+                    let Some(x) = key[0].checked_add(dx) else {
+                        continue;
+                    };
+                    let Some(y) = key[1].checked_add(dy) else {
+                        continue;
+                    };
+                    let Some(z) = key[2].checked_add(dz) else {
+                        continue;
+                    };
+                    if let Some(nearby) = buckets.get(&[x, y, z]) {
+                        for &index in nearby {
+                            let existing = vertices[index];
+                            let dx = existing[0] - point[0];
+                            let dy = existing[1] - point[1];
+                            let dz = existing[2] - point[2];
+                            let distance_sq = dx * dx + dy * dy + dz * dz;
+                            if distance_sq <= tolerance_sq {
+                                matched = Some(index);
+                                break;
+                            }
+                        }
+                    }
+                    if matched.is_some() {
+                        break;
+                    }
+                }
+                if matched.is_some() {
+                    break;
+                }
+            }
+            if matched.is_some() {
+                break;
+            }
+        }
+
+        let index = if let Some(index) = matched {
+            index
+        } else {
+            let index = vertices.len();
+            vertices.push(*point);
+            buckets.entry(key).or_default().push(index);
+            index
+        };
+        point_indices.push(index);
+    }
+
+    Ok((vertices, point_indices))
+}
+
 fn split_face_edges_at_shared_vertices_core(
     vertices: &[[f64; 3]],
     faces: &[Vec<usize>],
@@ -679,7 +770,8 @@ type WavefrontEventTuple = (
 mod python {
     use super::{
         collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
-        validate_simple_polygon, WavefrontEventTuple, WavefrontLineData, WavefrontLineTuple,
+        validate_simple_polygon, weld_vertices_batch_core, WavefrontEventTuple,
+        WavefrontLineData, WavefrontLineTuple,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
@@ -707,6 +799,28 @@ mod python {
                 )
             })
             .collect()
+    }
+
+    #[pyfunction(name = "weld_vertices_batch")]
+    fn py_weld_vertices_batch(
+        points: Vec<(f64, f64, f64)>,
+        tolerance: f64,
+    ) -> PyResult<(Vec<(f64, f64, f64)>, Vec<usize>)> {
+        let points = points
+            .into_iter()
+            .map(|(x, y, z)| [x, y, z])
+            .collect::<Vec<_>>();
+        weld_vertices_batch_core(&points, tolerance)
+            .map(|(vertices, indices)| {
+                let vertices = vertices
+                    .into_iter()
+                    .map(|point| (point[0], point[1], point[2]))
+                    .collect();
+                (vertices, indices)
+            })
+            .map_err(|diagnostic| {
+                PyValueError::new_err(format!("{}|{}", diagnostic.code, diagnostic.message))
+            })
     }
 
     #[pyfunction(name = "split_face_edges_at_shared_vertices")]
@@ -781,6 +895,7 @@ mod python {
             py_split_face_edges_at_shared_vertices,
             module
         )?)?;
+        module.add_function(wrap_pyfunction!(py_weld_vertices_batch, module)?)?;
         Ok(())
     }
 }
@@ -789,7 +904,7 @@ mod python {
 mod tests {
     use super::{
         collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
-        validate_simple_polygon, WavefrontLineData,
+        validate_simple_polygon, weld_vertices_batch_core, WavefrontLineData,
     };
 
     #[test]
@@ -869,6 +984,30 @@ mod tests {
             .iter()
             .all(|event| (event.position[1] - 2.0).abs() < 1.0e-9));
         assert!(events.iter().all(|event| event.loop_id == 5));
+    }
+
+    #[test]
+    fn welds_points_in_first_seen_order_and_preserves_bucket_search_order() {
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [-0.000_000_5, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        let (vertices, indices) = weld_vertices_batch_core(&points, 1.0e-6).unwrap();
+        assert_eq!(vertices, vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
+        assert_eq!(indices, vec![0, 1, 0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn rejects_non_finite_points_and_invalid_tolerance() {
+        let points = [[f64::NAN, 0.0, 0.0]];
+        let error = weld_vertices_batch_core(&points, 1.0e-6).unwrap_err();
+        assert_eq!(error.code, "NON_FINITE_WELD_POINT");
+        let error = weld_vertices_batch_core(&[], 0.0).unwrap_err();
+        assert_eq!(error.code, "INVALID_WELD_TOLERANCE");
     }
 
     #[test]

@@ -13,9 +13,11 @@ from core.geometry import (
 from core.native_bridge import (
     NATIVE_BACKEND_AVAILABLE,
     NATIVE_FACE_CONFORMANCE_AVAILABLE,
+    NATIVE_VERTEX_WELD_AVAILABLE,
     NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
     split_face_edges_at_shared_vertices_native,
     validate_simple_polygon_native,
+    weld_vertices_batch_native,
 )
 from core.wavefront import (
     WavefrontLoop,
@@ -91,6 +93,62 @@ class TestRustGeometryParity(unittest.TestCase):
         self.assertEqual(_diagnostic_tuples(actual), _diagnostic_tuples(expected))
 
 
+
+
+@unittest.skipUnless(
+    NATIVE_VERTEX_WELD_AVAILABLE,
+    "Rust vertex-welding kernel is not installed",
+)
+class TestRustVertexWelding(unittest.TestCase):
+    @staticmethod
+    def _python_weld(points, tolerance):
+        from core.mesh import _VertexRegistry
+
+        registry = _VertexRegistry(tolerance)
+        indices = [registry.add(point) for point in points]
+        return tuple(registry.vertices), tuple(indices)
+
+    def _assert_parity(self, points, tolerance):
+        expected_vertices, expected_indices = self._python_weld(points, tolerance)
+        actual_vertices, actual_indices = weld_vertices_batch_native(points, tolerance)
+        self.assertEqual(actual_indices, expected_indices)
+        self.assertEqual(len(actual_vertices), len(expected_vertices))
+        for actual, expected in zip(actual_vertices, expected_vertices):
+            for a, b in zip(actual, expected):
+                self.assertEqual(a, b)
+
+    def test_nearby_and_negative_points_preserve_first_seen_order(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.5, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+            (-0.0000005, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+        ]
+        self._assert_parity(points, 1.0e-6)
+
+    def test_generated_point_batches_match_python_spatial_hash(self):
+        rng = random.Random(61_901)
+        for case in range(20):
+            tolerance = (case + 1) * 1.0e-7
+            points = []
+            for index in range(500):
+                anchor = (
+                    float(rng.randrange(-20, 21)),
+                    float(rng.randrange(-20, 21)),
+                    float(rng.randrange(-20, 21)),
+                )
+                jitter = tolerance * rng.uniform(-0.95, 0.95)
+                points.append((
+                    anchor[0] + jitter,
+                    anchor[1] - jitter * 0.5,
+                    anchor[2] + jitter * 0.25,
+                ))
+                if index % 4 == 0:
+                    points.append(points[-1])
+            with self.subTest(case=case, tolerance=tolerance):
+                self._assert_parity(points, tolerance)
 
 
 @unittest.skipUnless(

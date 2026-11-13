@@ -2035,13 +2035,42 @@ def build_wavefront_roof_surface(
     slope_ids: list[int] = []
     face_keys: set[tuple[int, ...]] = set()
 
-    for fragment in trace.facets:
+    fragments = tuple(trace.facets)
+    fragment_ranges: list[tuple[int, int]] = []
+    flattened_points: list[Point3] = []
+    for fragment in fragments:
         if not (0 <= fragment.source_edge_id < len(planes)):
             raise GeometryInputError(
                 "INVALID_SOURCE_SLOPE_ID",
                 f"Фрагмент ссылается на неизвестный исходный скат {fragment.source_edge_id}."
             )
-        indices = [registry.add(point) for point in fragment.vertices]
+        start = len(flattened_points)
+        flattened_points.extend(fragment.vertices)
+        fragment_ranges.append((start, len(flattened_points)))
+
+    native_weld_indices = None
+    if len(flattened_points) >= 128:
+        from .native_bridge import (
+            NATIVE_VERTEX_WELD_AVAILABLE,
+            NativeGeometryError,
+            weld_vertices_batch_native,
+        )
+
+        if NATIVE_VERTEX_WELD_AVAILABLE:
+            try:
+                welded_vertices, native_weld_indices = weld_vertices_batch_native(
+                    flattened_points, weld_tolerance
+                )
+            except NativeGeometryError as exc:
+                raise GeometryInputError(exc.code, exc.message) from exc
+            registry.vertices = list(welded_vertices)
+
+    for fragment_index, fragment in enumerate(fragments):
+        if native_weld_indices is None:
+            indices = [registry.add(point) for point in fragment.vertices]
+        else:
+            start, end = fragment_ranges[fragment_index]
+            indices = list(native_weld_indices[start:end])
         compact: list[int] = []
         for index in indices:
             if not compact or compact[-1] != index:

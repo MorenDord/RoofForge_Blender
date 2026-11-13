@@ -100,3 +100,31 @@ def split_face_edges_at_shared_vertices_native(vertices, faces, tolerance: float
         if separator:
             raise NativeGeometryError(code, message) from exc
         raise
+
+
+NATIVE_VERTEX_WELD_AVAILABLE = (
+    NATIVE_BACKEND_AVAILABLE
+    and callable(getattr(_native, "weld_vertices_batch", None))
+)
+
+
+def weld_vertices_batch_native(points, tolerance: float):
+    """Weld an ordered point batch in Rust, returning vertices and input indices."""
+    if not NATIVE_VERTEX_WELD_AVAILABLE:
+        return None
+    records = [
+        (float(point[0]), float(point[1]), float(point[2]))
+        for point in points
+    ]
+    try:
+        vertices, indices = _native.weld_vertices_batch(records, float(tolerance))
+    except ValueError as exc:
+        raw = str(exc)
+        code, separator, message = raw.partition("|")
+        if separator:
+            raise NativeGeometryError(code, message) from exc
+        raise
+    return (
+        tuple(tuple(point) for point in vertices),
+        tuple(int(index) for index in indices),
+    )
