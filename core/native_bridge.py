@@ -128,3 +128,57 @@ def weld_vertices_batch_native(points, tolerance: float):
         tuple(tuple(point) for point in vertices),
         tuple(int(index) for index in indices),
     )
+
+
+NATIVE_WAVEFRONT_INTERVAL_AVAILABLE = (
+    NATIVE_BACKEND_AVAILABLE
+    and callable(getattr(_native, "record_wavefront_interval", None))
+)
+
+
+def record_wavefront_interval_native(
+    loops,
+    edges,
+    start_time: float,
+    end_time: float,
+    time_tolerance: float,
+    epsilon: float,
+):
+    """Build skeleton arcs and swept facets for every active loop in one Rust call."""
+    if not NATIVE_WAVEFRONT_INTERVAL_AVAILABLE:
+        return None
+
+    ordered_loops = tuple(loops)
+    loop_counts = []
+    line_records = []
+    for loop in ordered_loops:
+        loop_counts.append(len(loop.edge_ids))
+        for edge_id in loop.edge_ids:
+            line = edges[edge_id]
+            line_records.append((
+                int(line.edge_id),
+                int(line.source_edge_id),
+                float(line.normal[0]),
+                float(line.normal[1]),
+                float(line.offset),
+                float(line.speed),
+                float(line.tangent[0]),
+                float(line.tangent[1]),
+                float(line.base_height),
+            ))
+
+    try:
+        return _native.record_wavefront_interval(
+            loop_counts,
+            line_records,
+            float(start_time),
+            float(end_time),
+            float(time_tolerance),
+            float(epsilon),
+        )
+    except ValueError as exc:
+        raw = str(exc)
+        code, separator, message = raw.partition("|")
+        if separator:
+            raise NativeGeometryError(code, message) from exc
+        raise

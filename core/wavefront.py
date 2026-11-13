@@ -961,7 +961,7 @@ def _resolve_edge_collapse_group(
     return None
 
 
-def _record_wavefront_interval(
+def _record_wavefront_interval_python(
     state: WavefrontSimulationState,
     start_time: float,
     end_time: float,
@@ -1031,6 +1031,62 @@ def _record_wavefront_interval(
                 end_time=end_time,
                 vertices=fragment,
             ))
+
+
+def _record_wavefront_interval(
+    state: WavefrontSimulationState,
+    start_time: float,
+    end_time: float,
+) -> None:
+    """Record one interval using the batched native kernel when available."""
+    dt = end_time - start_time
+    if dt < -state.time_tolerance:
+        raise GeometryInputError(
+            "TIME_ORDER",
+            "Нельзя записать интервал волнового фронта с отрицательной длительностью.",
+        )
+    if dt <= state.time_tolerance:
+        return
+
+    if state.loops:
+        from .native_bridge import (
+            NATIVE_WAVEFRONT_INTERVAL_AVAILABLE,
+            NativeGeometryError,
+            record_wavefront_interval_native,
+        )
+
+        if NATIVE_WAVEFRONT_INTERVAL_AVAILABLE:
+            loops = tuple(state.loops[loop_id] for loop_id in sorted(state.loops))
+            try:
+                result = record_wavefront_interval_native(
+                    loops,
+                    state.edges,
+                    start_time,
+                    end_time,
+                    state.time_tolerance,
+                    state.epsilon,
+                )
+            except NativeGeometryError as exc:
+                raise GeometryInputError(exc.code, exc.message) from exc
+
+            if result is not None:
+                raw_arcs, raw_facets = result
+                state.skeleton_arcs.extend(
+                    SkeletonArc(tuple(start), tuple(end), event_time)
+                    for start, end, event_time in raw_arcs
+                )
+                state.facets.extend(
+                    FacetFragment(
+                        source_edge_id=source_edge_id,
+                        start_time=facet_start,
+                        end_time=facet_end,
+                        vertices=tuple(tuple(point) for point in vertices),
+                    )
+                    for source_edge_id, facet_start, facet_end, vertices in raw_facets
+                )
+                return
+
+    _record_wavefront_interval_python(state, start_time, end_time)
 
 
 

@@ -169,6 +169,268 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
+
+#[derive(Debug, Clone, Copy)]
+struct IntervalLineData {
+    edge_id: usize,
+    source_edge_id: usize,
+    normal: [f64; 2],
+    offset: f64,
+    speed: f64,
+    tangent: [f64; 2],
+    base_height: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IntervalVertex {
+    point: [f64; 2],
+    velocity: [f64; 2],
+}
+
+fn interval_line_intersection(
+    first: &IntervalLineData,
+    second: &IntervalLineData,
+    time: f64,
+    eps: f64,
+) -> Result<IntervalVertex, Diagnostic> {
+    let [a, b] = first.normal;
+    let [c, d] = second.normal;
+    let determinant = a * d - b * c;
+    if determinant.abs() <= eps {
+        return Err(Diagnostic::error(
+            "PARALLEL_WAVEFRONT_EDGES",
+            format!(
+                "Соседние фронты рёбер {} и {} параллельны или почти параллельны.",
+                first.edge_id, second.edge_id
+            ),
+        ));
+    }
+
+    let rhs_first = first.offset + first.speed * (time - first.base_height);
+    let rhs_second = second.offset + second.speed * (time - second.base_height);
+    let point = [
+        (rhs_first * d - b * rhs_second) / determinant,
+        (a * rhs_second - rhs_first * c) / determinant,
+    ];
+    let velocity = [
+        (first.speed * d - b * second.speed) / determinant,
+        (a * second.speed - first.speed * c) / determinant,
+    ];
+    if point.iter().chain(velocity.iter()).any(|value| !value.is_finite()) {
+        return Err(Diagnostic::error(
+            "NON_FINITE_WAVEFRONT_VERTEX",
+            "Пересечение подвижных рёбер породило нечисловую вершину.",
+        ));
+    }
+    Ok(IntervalVertex { point, velocity })
+}
+
+fn interval_dedupe_polygon(points: &[[f64; 3]], tolerance: f64) -> Vec<[f64; 3]> {
+    let mut result: Vec<[f64; 3]> = Vec::with_capacity(points.len());
+    for point in points {
+        let keep = if let Some(previous) = result.last() {
+            let distance = (point[0] - previous[0])
+                .hypot(point[1] - previous[1])
+                .hypot(point[2] - previous[2]);
+            distance > tolerance
+        } else {
+            true
+        };
+        if keep {
+            result.push(*point);
+        }
+    }
+
+    if result.len() > 1 {
+        let first = result[0];
+        let last = result[result.len() - 1];
+        let distance = (first[0] - last[0])
+            .hypot(first[1] - last[1])
+            .hypot(first[2] - last[2]);
+        if distance <= tolerance {
+            result.pop();
+        }
+    }
+    result
+}
+
+fn record_wavefront_interval_core(
+    loop_counts: &[usize],
+    lines: &[IntervalLineData],
+    start_time: f64,
+    end_time: f64,
+    time_tolerance: f64,
+    epsilon: f64,
+) -> Result<(Vec<SkeletonArcTuple>, Vec<FacetFragmentTuple>), Diagnostic> {
+    if !start_time.is_finite()
+        || !end_time.is_finite()
+        || !time_tolerance.is_finite()
+        || !epsilon.is_finite()
+        || time_tolerance < 0.0
+        || epsilon < 0.0
+    {
+        return Err(Diagnostic::error(
+            "INVALID_INTERVAL_INPUT",
+            "Времена интервала и геометрические допуски должны быть конечными и неотрицательными.",
+        ));
+    }
+
+    let dt = end_time - start_time;
+    if dt < -time_tolerance {
+        return Err(Diagnostic::error(
+            "TIME_ORDER",
+            "Нельзя записать интервал волнового фронта с отрицательной длительностью.",
+        ));
+    }
+    if dt <= time_tolerance {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let expected_count = loop_counts.iter().try_fold(0_usize, |sum, count| {
+        sum.checked_add(*count)
+    });
+    if expected_count != Some(lines.len()) || loop_counts.iter().any(|count| *count < 3) {
+        return Err(Diagnostic::error(
+            "INVALID_WAVEFRONT_INTERVAL_LOOPS",
+            "Список активных wavefront-loop не соответствует переданным рёбрам.",
+        ));
+    }
+    for line in lines {
+        if line.normal.iter().chain(line.tangent.iter()).any(|value| !value.is_finite())
+            || !line.offset.is_finite()
+            || !line.speed.is_finite()
+            || !line.base_height.is_finite()
+            || line.speed.abs() <= f64::EPSILON
+        {
+            return Err(Diagnostic::error(
+                "INVALID_WAVEFRONT_INTERVAL_LINE",
+                format!(
+                    "Параметры активного ребра {} не являются конечными или имеют нулевую скорость.",
+                    line.edge_id
+                ),
+            ));
+        }
+    }
+
+    let mut skeleton_arcs = Vec::new();
+    let mut facets = Vec::new();
+    let mut line_offset = 0_usize;
+
+    for &loop_count in loop_counts {
+        let loop_lines = &lines[line_offset..line_offset + loop_count];
+        line_offset += loop_count;
+
+        let mut vertices_start = Vec::with_capacity(loop_count);
+        let mut vertices_end = Vec::with_capacity(loop_count);
+        for index in 0..loop_count {
+            let previous = &loop_lines[(index + loop_count - 1) % loop_count];
+            let current = &loop_lines[index];
+            vertices_start.push(interval_line_intersection(
+                previous,
+                current,
+                start_time,
+                epsilon,
+            )?);
+            vertices_end.push(interval_line_intersection(
+                previous,
+                current,
+                end_time,
+                epsilon,
+            )?);
+        }
+
+        for (first, second) in vertices_start.iter().zip(vertices_end.iter()) {
+            let distance = (second.point[0] - first.point[0])
+                .hypot(second.point[1] - first.point[1]);
+            if distance > epsilon {
+                skeleton_arcs.push((
+                    (first.point[0], first.point[1], start_time),
+                    (second.point[0], second.point[1], end_time),
+                    end_time,
+                ));
+            }
+        }
+
+        for index in 0..loop_count {
+            let edge = &loop_lines[index];
+            let start_vertex = vertices_start[index];
+            let end_vertex = vertices_start[(index + 1) % loop_count];
+            let start = start_vertex.point;
+            let end = end_vertex.point;
+
+            let start1 = vertices_end[index].point;
+            let end1 = vertices_end[(index + 1) % loop_count].point;
+            let end_dx = end1[0] - start1[0];
+            let end_dy = end1[1] - start1[1];
+            let end_length = end_dx * edge.tangent[0] + end_dy * edge.tangent[1];
+            if end_length < -time_tolerance {
+                return Err(Diagnostic::error(
+                    "NEGATIVE_EDGE_AT_EVENT",
+                    format!(
+                        "Ребро wavefront {} получило отрицательную длину перед событием.",
+                        edge.edge_id
+                    ),
+                ));
+            }
+
+            let raw_fragment = [
+                [start[0], start[1], start_time],
+                [end[0], end[1], start_time],
+                [end1[0], end1[1], end_time],
+                [start1[0], start1[1], end_time],
+            ];
+            let fragment = interval_dedupe_polygon(&raw_fragment, time_tolerance);
+            if fragment.len() < 3 {
+                continue;
+            }
+
+            let projected: Vec<[f64; 2]> = fragment
+                .iter()
+                .map(|point| [point[0], point[1]])
+                .collect();
+            if signed_area(&projected).abs() <= time_tolerance * time_tolerance {
+                continue;
+            }
+
+            for point in &fragment {
+                let expected_z = edge.base_height
+                    + ((edge.normal[0] * point[0] + edge.normal[1] * point[1])
+                        - edge.offset)
+                        / edge.speed;
+                let z_tolerance = (time_tolerance * 10.0)
+                    .max(epsilon * 1.0_f64.max(point[2].abs()) * 1000.0);
+                if (expected_z - point[2]).abs() > z_tolerance {
+                    return Err(Diagnostic::error(
+                        "FACET_NOT_PLANAR",
+                        format!(
+                            "Фрагмент исходного ската {} не лежит на его точной плоскости.",
+                            edge.source_edge_id + 1
+                        ),
+                    ));
+                }
+            }
+
+            facets.push((
+                edge.source_edge_id,
+                start_time,
+                end_time,
+                fragment
+                    .into_iter()
+                    .map(|point| (point[0], point[1], point[2]))
+                    .collect(),
+            ));
+        }
+    }
+
+    Ok((skeleton_arcs, facets))
+}
+
+type IntervalLineTuple = (usize, usize, f64, f64, f64, f64, f64, f64, f64);
+type Point3Tuple = (f64, f64, f64);
+type SkeletonArcTuple = (Point3Tuple, Point3Tuple, f64);
+type FacetFragmentTuple = (usize, f64, f64, Vec<Point3Tuple>);
+type WavefrontIntervalTuple = (Vec<SkeletonArcTuple>, Vec<FacetFragmentTuple>);
+
 fn weld_vertices_batch_core(
     points: &[[f64; 3]],
     tolerance: f64,
@@ -770,8 +1032,9 @@ type WeldedVerticesTuple = (Vec<(f64, f64, f64)>, Vec<usize>);
 mod python {
     use super::{
         collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
-        validate_simple_polygon, weld_vertices_batch_core, WavefrontEventTuple, WavefrontLineData,
-        WavefrontLineTuple, WeldedVerticesTuple,
+        record_wavefront_interval_core, validate_simple_polygon,
+        weld_vertices_batch_core, IntervalLineData, IntervalLineTuple, WavefrontEventTuple,
+        WavefrontIntervalTuple, WavefrontLineData, WavefrontLineTuple, WeldedVerticesTuple,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
@@ -799,6 +1062,44 @@ mod python {
                 )
             })
             .collect()
+    }
+
+    #[pyfunction(name = "record_wavefront_interval")]
+    fn py_record_wavefront_interval(
+        loop_counts: Vec<usize>,
+        lines: Vec<IntervalLineTuple>,
+        start_time: f64,
+        end_time: f64,
+        time_tolerance: f64,
+        epsilon: f64,
+    ) -> PyResult<WavefrontIntervalTuple> {
+        let lines = lines
+            .into_iter()
+            .map(
+                |(edge_id, source_edge_id, nx, ny, offset, speed, tx, ty, base_height)| {
+                    IntervalLineData {
+                        edge_id,
+                        source_edge_id,
+                        normal: [nx, ny],
+                        offset,
+                        speed,
+                        tangent: [tx, ty],
+                        base_height,
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+        record_wavefront_interval_core(
+            &loop_counts,
+            &lines,
+            start_time,
+            end_time,
+            time_tolerance,
+            epsilon,
+        )
+        .map_err(|diagnostic| {
+            PyValueError::new_err(format!("{}|{}", diagnostic.code, diagnostic.message))
+        })
     }
 
     #[pyfunction(name = "weld_vertices_batch")]
@@ -896,6 +1197,7 @@ mod python {
             module
         )?)?;
         module.add_function(wrap_pyfunction!(py_weld_vertices_batch, module)?)?;
+        module.add_function(wrap_pyfunction!(py_record_wavefront_interval, module)?)?;
         Ok(())
     }
 }

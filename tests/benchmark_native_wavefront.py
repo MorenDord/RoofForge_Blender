@@ -31,13 +31,17 @@ def fixture(count: int = 64):
     return points, pitches
 
 
-def run_with_collector(collector, operation):
+def run_with_collector(collector, operation, interval_recorder=None):
     original = wavefront.collect_loop_events
+    original_interval = wavefront._record_wavefront_interval
     wavefront.collect_loop_events = collector
+    if interval_recorder is not None:
+        wavefront._record_wavefront_interval = interval_recorder
     try:
         return operation()
     finally:
         wavefront.collect_loop_events = original
+        wavefront._record_wavefront_interval = original_interval
 
 
 def assert_close(first: float, second: float, tolerance: float = 1.0e-12):
@@ -146,31 +150,41 @@ def main() -> int:
     points, pitches = fixture(64)
     python_collector = wavefront._collect_loop_events_python
     rust_dispatch = wavefront.collect_loop_events
+    python_interval = wavefront._record_wavefront_interval_python
+    rust_interval = wavefront._record_wavefront_interval
 
     python_trace = run_with_collector(
         python_collector,
         lambda: wavefront.run_weighted_wavefront(points, pitches),
+        python_interval,
     )
     rust_trace = run_with_collector(
         rust_dispatch,
         lambda: wavefront.run_weighted_wavefront(points, pitches),
+        rust_interval,
     )
     assert_trace_parity(python_trace, rust_trace)
 
     python_surface = run_with_collector(
         python_collector,
         lambda: wavefront.build_wavefront_roof_surface(points, pitches),
+        python_interval,
     )
     rust_surface = run_with_collector(
         rust_dispatch,
         lambda: wavefront.build_wavefront_roof_surface(points, pitches),
+        rust_interval,
     )
     assert_surface_parity(python_surface, rust_surface)
 
     surface_operation = lambda: wavefront.build_wavefront_roof_surface(points, pitches)
     profiles = {
-        "python_surface_top_20": profile_top(python_collector, surface_operation),
-        "rust_surface_top_20": profile_top(rust_dispatch, surface_operation),
+        "python_surface_top_20": profile_top(
+            python_collector, surface_operation
+        ),
+        "rust_surface_top_20": profile_top(
+            rust_dispatch, surface_operation
+        ),
     }
 
     measurements = []

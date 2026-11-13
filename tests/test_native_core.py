@@ -15,6 +15,8 @@ from core.native_bridge import (
     NATIVE_FACE_CONFORMANCE_AVAILABLE,
     NATIVE_VERTEX_WELD_AVAILABLE,
     NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
+    NATIVE_WAVEFRONT_INTERVAL_AVAILABLE,
+    record_wavefront_interval_native,
     split_face_edges_at_shared_vertices_native,
     validate_simple_polygon_native,
     weld_vertices_batch_native,
@@ -22,8 +24,11 @@ from core.native_bridge import (
 from core.wavefront import (
     WavefrontLoop,
     _collect_loop_events_python,
+    _record_wavefront_interval,
+    _record_wavefront_interval_python,
     build_moving_lines,
     collect_loop_events,
+    create_wavefront_state,
 )
 
 
@@ -209,6 +214,80 @@ class TestRustMeshConformance(unittest.TestCase):
 
 
 @unittest.skipUnless(
+    NATIVE_WAVEFRONT_INTERVAL_AVAILABLE,
+    "Rust interval recorder is not installed",
+)
+class TestRustWavefrontInterval(unittest.TestCase):
+    def test_native_interval_record_matches_python_for_initial_loop(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (8.0, 0.0, 0.0),
+            (8.0, 6.0, 0.0),
+            (0.0, 6.0, 0.0),
+        ]
+        pitches = [30.0, 35.0, 40.0, 32.0]
+        python_state = create_wavefront_state(points, pitches)
+        native_state = create_wavefront_state(points, pitches)
+        start = python_state.current_time
+        end = start + 0.05
+
+        _record_wavefront_interval_python(python_state, start, end)
+        _record_wavefront_interval(native_state, start, end)
+
+        self.assertEqual(python_state.skeleton_arcs, native_state.skeleton_arcs)
+        self.assertEqual(len(python_state.facets), len(native_state.facets))
+        for expected, actual in zip(python_state.facets, native_state.facets):
+            self.assertEqual(expected.source_edge_id, actual.source_edge_id)
+            self.assertEqual(expected.start_time, actual.start_time)
+            self.assertEqual(expected.end_time, actual.end_time)
+            self.assertEqual(len(expected.vertices), len(actual.vertices))
+            for point_a, point_b in zip(expected.vertices, actual.vertices):
+                for value_a, value_b in zip(point_a, point_b):
+                    self.assertAlmostEqual(value_a, value_b, delta=1.0e-12)
+
+    def test_native_interval_handles_multiple_loops_in_sorted_order(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (8.0, 0.0, 0.0),
+            (8.0, 6.0, 0.0),
+            (0.0, 6.0, 0.0),
+        ]
+        pitches = [30.0, 35.0, 40.0, 32.0]
+        python_state = create_wavefront_state(points, pitches)
+        native_state = create_wavefront_state(points, pitches)
+
+        original_loop = python_state.loops[0]
+        original_edges = dict(python_state.edges)
+        added_edges = {}
+        offset = max(original_edges) + 1
+        for line in original_edges.values():
+            added_edges[offset + line.edge_id] = type(line)(
+                edge_id=offset + line.edge_id,
+                source_edge_id=line.source_edge_id,
+                normal=line.normal,
+                offset=line.offset,
+                speed=line.speed,
+                tangent=line.tangent,
+                generation=line.generation,
+                base_height=line.base_height,
+            )
+        second_loop = WavefrontLoop(4, tuple(added_edges), generation=0)
+        for state in (python_state, native_state):
+            state.loops[8] = WavefrontLoop(8, original_loop.edge_ids, generation=2)
+            state.loops[4] = second_loop
+            state.edges.update(added_edges)
+
+        for state, recorder in (
+            (python_state, _record_wavefront_interval_python),
+            (native_state, _record_wavefront_interval),
+        ):
+            recorder(state, 0.0, 0.05)
+
+        self.assertEqual(python_state.skeleton_arcs, native_state.skeleton_arcs)
+        self.assertEqual(python_state.facets, native_state.facets)
+
+
+@unittest.skipUnless(
     NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
     "Rust wavefront event collector is not installed",
 )
@@ -279,13 +358,17 @@ class TestRustWavefrontParity(unittest.TestCase):
 
 
     @staticmethod
-    def _run_with_collector(collector, operation):
+    def _run_with_collector(collector, operation, interval_recorder=None):
         original = wavefront_module.collect_loop_events
+        original_interval = wavefront_module._record_wavefront_interval
         wavefront_module.collect_loop_events = collector
+        if interval_recorder is not None:
+            wavefront_module._record_wavefront_interval = interval_recorder
         try:
             return operation()
         finally:
             wavefront_module.collect_loop_events = original
+            wavefront_module._record_wavefront_interval = original_interval
 
     def _assert_trace_parity(self, expected, actual):
         self.assertEqual(expected.terminal_kind, actual.terminal_kind)
@@ -339,20 +422,24 @@ class TestRustWavefrontParity(unittest.TestCase):
         python_trace = self._run_with_collector(
             python_collector,
             lambda: wavefront_module.run_weighted_wavefront(points, pitches),
+            _record_wavefront_interval_python,
         )
         native_trace = self._run_with_collector(
             native_collector,
             lambda: wavefront_module.run_weighted_wavefront(points, pitches),
+            _record_wavefront_interval,
         )
         self._assert_trace_parity(python_trace, native_trace)
 
         python_surface = self._run_with_collector(
             python_collector,
             lambda: wavefront_module.build_wavefront_roof_surface(points, pitches),
+            _record_wavefront_interval_python,
         )
         native_surface = self._run_with_collector(
             native_collector,
             lambda: wavefront_module.build_wavefront_roof_surface(points, pitches),
+            _record_wavefront_interval,
         )
         self.assertEqual(python_surface.faces, native_surface.faces)
         self.assertEqual(python_surface.face_slope_indices, native_surface.face_slope_indices)
