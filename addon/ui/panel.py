@@ -3,6 +3,7 @@ import bpy
 
 from .vector_plan_preview import (
     estimate_widget_unit,
+    preview_category_rail_width,
     preview_icon_scale,
     set_preview_slot_visible,
 )
@@ -83,17 +84,17 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     except (AttributeError, TypeError, ValueError):
                         pass
                     widget_unit = estimate_widget_unit(ui_scale)
+                    category_rail_width = preview_category_rail_width(widget_unit)
                     icon_scale = preview_icon_scale(
-                        region_width,
+                        max(0.0, region_width - category_rail_width),
                         widget_unit=widget_unit,
                     )
                     if icon_scale is None:
                         body.label(text="Widen the N-panel to view the plan", icon="INFO")
                     else:
-                        # Reserve vertical space only. This row expands across
-                        # the full panel body; GPU drawing is centered separately
-                        # against context.region.width, not this nested layout's
-                        # potentially indented content rectangle.
+                        # Reserve vertical space only. GPU drawing is centered
+                        # against the active tab's content rectangle, excluding
+                        # Blender's category-tab rail at the left of the UI region.
                         preview_row = body.row()
                         preview_row.scale_y = icon_scale
                         preview_row.label(text=" ")
@@ -123,8 +124,26 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             pitch_column = layout.column(align=True)
             for index, item in enumerate(settings.slope_settings, start=1):
                 row = pitch_column.row(align=True)
+                row.alignment = "EXPAND"
                 row.label(text=f"{index:02d}")
-                row.prop(item, "pitch", text="°")
+
+                previous_button = row.operator(
+                    "roof_forge.pitch_intersection_step",
+                    text="",
+                    icon="TRIA_LEFT",
+                )
+                previous_button.edge_index = index - 1
+                previous_button.direction = "PREVIOUS"
+
+                row.prop(item, "pitch", text="°", slider=True)
+
+                next_button = row.operator(
+                    "roof_forge.pitch_intersection_step",
+                    text="",
+                    icon="TRIA_RIGHT",
+                )
+                next_button.edge_index = index - 1
+                next_button.direction = "NEXT"
 
         layout.separator(factor=0.5)
         _draw_common_settings(layout, settings)
