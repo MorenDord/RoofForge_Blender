@@ -273,6 +273,7 @@ class TestRustWavefrontInterval(unittest.TestCase):
             )
         second_loop = WavefrontLoop(4, tuple(added_edges), generation=0)
         for state in (python_state, native_state):
+            state.loops.clear()
             state.loops[8] = WavefrontLoop(8, original_loop.edge_ids, generation=2)
             state.loops[4] = second_loop
             state.edges.update(added_edges)

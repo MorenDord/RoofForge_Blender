@@ -34,9 +34,14 @@ def fixture(count: int = 64):
 def run_with_collector(collector, operation, interval_recorder=None):
     original = wavefront.collect_loop_events
     original_interval = wavefront._record_wavefront_interval
+    if interval_recorder is None:
+        interval_recorder = (
+            wavefront._record_wavefront_interval_python
+            if collector is wavefront._collect_loop_events_python
+            else wavefront._record_wavefront_interval
+        )
     wavefront.collect_loop_events = collector
-    if interval_recorder is not None:
-        wavefront._record_wavefront_interval = interval_recorder
+    wavefront._record_wavefront_interval = interval_recorder
     try:
         return operation()
     finally:
