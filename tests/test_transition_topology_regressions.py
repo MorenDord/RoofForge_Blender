@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from core.geometry import signed_area
+from core.geometry import GeometryInputError, signed_area
 from core.intersection_envelope import build_intersection_envelope_surface
 from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
@@ -192,7 +192,7 @@ class TransitionTopologyRegressionTests(unittest.TestCase):
 
     def test_sub_tolerance_neck_is_rejected_before_surface_assembly(self):
         points, pitches = _narrow_neck_contour(1.0e-8)
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(GeometryInputError) as context:
             build_intersection_envelope_surface(points, pitches)
         self.assertEqual(
             getattr(context.exception, "code", None),
