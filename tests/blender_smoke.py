@@ -228,7 +228,7 @@ def check_generated_shell(source, source_coordinates) -> None:
         )
     finally:
         bm.free()
-    ensure(len(source.data.vertices) == 4, "source vertex count changed")
+    ensure(len(source.data.vertices) == len(source_coordinates), "source vertex count changed")
     after = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     ensure(after == source_coordinates, "source coordinates changed")
     ensure(matrices_close(roof.matrix_world, source.matrix_world), "generated transform differs from source")
