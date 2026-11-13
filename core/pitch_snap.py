@@ -40,13 +40,26 @@ def count_slope_upper_vertices(surface, points, slope_index, *, tolerance=None):
     if slope_index < 0 or slope_index >= len(points):
         return None
 
-    vertex_ids = set()
+    # Count only the boundary of this slope's face region. A roof patch may
+    # be split into several coplanar pieces; vertices on their shared internal
+    # edges are not ridge/valley intersections and must not inflate the count.
+    edge_usage = {}
     for face, source_index in zip(faces, face_sources):
-        if int(source_index) == int(slope_index):
-            vertex_ids.update(int(index) for index in face)
+        if int(source_index) != int(slope_index):
+            continue
+        if len(face) < 3:
+            return None
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            edge = (min(int(first), int(second)), max(int(first), int(second)))
+            edge_usage[edge] = edge_usage.get(edge, 0) + 1
 
-    if not vertex_ids:
+    boundary_edges = [
+        edge for edge, usage in edge_usage.items() if usage == 1
+    ]
+    if not boundary_edges:
         return None
+    vertex_ids = {index for edge in boundary_edges for index in edge}
     if any(index < 0 or index >= len(vertices) for index in vertex_ids):
         return None
 
