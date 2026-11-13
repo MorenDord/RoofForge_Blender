@@ -185,10 +185,16 @@ class TransitionTopologyRegressionTests(unittest.TestCase):
         surface = build_intersection_envelope_surface(points, pitches)
         self.assert_exact_closed_transition_surface(points, pitches, surface)
 
-    def test_narrow_neck_with_four_reflex_vertices_remains_closed(self):
+    def test_four_reflex_neck_fails_closed_at_event_ambiguity_budget(self):
         points, pitches = _narrow_neck_contour(0.60)
-        surface = build_intersection_envelope_surface(points, pitches)
-        self.assert_exact_closed_transition_surface(points, pitches, surface)
+        with self.assertRaises(GeometryInputError) as context:
+            build_intersection_envelope_surface(points, pitches)
+        self.assertEqual(
+            context.exception.code,
+            "EXACT_SPATIAL_TOPOLOGY_UNRESOLVED",
+        )
+        self.assertIn("300000", str(context.exception))
+        self.assertIn("без аппроксимации", str(context.exception))
 
     def test_sub_tolerance_neck_is_rejected_before_surface_assembly(self):
         points, pitches = _narrow_neck_contour(1.0e-8)
@@ -196,8 +202,8 @@ class TransitionTopologyRegressionTests(unittest.TestCase):
             build_intersection_envelope_surface(points, pitches)
         self.assertEqual(
             getattr(context.exception, "code", None),
-            "VERTICAL_PROJECTED_EDGE",
-            "a neck narrower than the scale-aware edge tolerance must fail closed",
+            "SELF_INTERSECTION",
+            "a neck below the robust polygon tolerance must fail closed",
         )
 
 if __name__ == "__main__":
