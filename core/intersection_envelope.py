@@ -18,6 +18,7 @@ from .geometry import (
     PlaneZ,
     _bbox_scale,
     clip_half_plane,
+    lower_envelope_cells,
     lower_envelope_regions,
     signed_area,
     triangulate_simple_polygon,
@@ -421,4 +422,197 @@ def build_intersection_envelope_surface(
     )
 
 
-__all__ = ["build_intersection_envelope_surface"]
+
+
+
+def build_global_plane_intersection_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float = 1e-9,
+) -> RoofSurface:
+    """Build the global lower envelope of all authored edge support planes.
+
+    This is the direct "intersect the planes" model: every support plane
+    competes over the full footprint, and their pairwise equal-height lines
+    define the exact ridge/valley arrangement. The authored 3D eave is
+    accepted only when no other global plane lies below it.
+    """
+    if len(points) < 3:
+        raise GeometryInputError(
+            "POLY_TOO_SMALL",
+            "Контур должен содержать минимум три вершины.",
+        )
+    normalized: tuple[Point3, ...] = tuple(
+        tuple(float(value) for value in point)
+        for point in points
+    )  # type: ignore[assignment]
+    domain: tuple[Point2, ...] = tuple(
+        (point[0], point[1]) for point in normalized
+    )
+    planes = build_boundary_planes(normalized, pitches_degrees, eps)
+    scale = max(_bbox_scale(domain), 1.0)
+    z_tolerance = eps * scale
+
+    # A global minimum envelope must preserve every boundary segment. Since
+    # each plane difference is affine along an edge, checking both endpoints
+    # is sufficient for the complete segment.
+    for edge_index, start in enumerate(normalized):
+        end = normalized[(edge_index + 1) % len(normalized)]
+        own = planes[edge_index]
+        for other_index, other in enumerate(planes):
+            if other_index == edge_index:
+                continue
+            for endpoint in (start, end):
+                if (
+                    other.height(endpoint[0], endpoint[1])
+                    - own.height(endpoint[0], endpoint[1])
+                    < -z_tolerance
+                ):
+                    raise GeometryInputError(
+                        "GLOBAL_ENVELOPE_EAVE_UNDERCUT",
+                        f"Глобальная плоскость ската {other_index + 1} "
+                        f"опускается ниже карниза ската {edge_index + 1}. "
+                        "Эти плоскости не сохраняют исходную 3D-границу.",
+                    )
+
+    cells_by_slope = lower_envelope_cells(domain, planes, eps)
+    weld_tolerance = max(1e-12, eps * scale * 2.0)
+    area_tolerance = eps * scale * scale
+    registry = _VertexRegistry(weld_tolerance)
+    faces: list[Face] = []
+    face_sources: list[int] = []
+    face_keys: set[tuple[int, ...]] = set()
+
+    for slope_index, cells in enumerate(cells_by_slope):
+        plane = planes[slope_index]
+        for cell in cells:
+            if len(cell) < 3 or abs(signed_area(cell)) <= area_tolerance:
+                continue
+            indices = [
+                registry.add((x, y, plane.height(x, y)))
+                for x, y in cell
+            ]
+            compact: list[int] = []
+            for vertex_index in indices:
+                if not compact or compact[-1] != vertex_index:
+                    compact.append(vertex_index)
+            if len(compact) > 1 and compact[0] == compact[-1]:
+                compact.pop()
+            if len(set(compact)) < 3:
+                continue
+            if signed_area(cell) < 0.0:
+                compact.reverse()
+            key = tuple(sorted(compact))
+            if key in face_keys:
+                continue
+            face_keys.add(key)
+            faces.append(tuple(compact))
+            face_sources.append(slope_index)
+
+    if not faces:
+        raise GeometryInputError(
+            "EMPTY_GLOBAL_PLANE_ENVELOPE",
+            "Глобальная огибающая не создала граней крыши.",
+        )
+
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 2.0
+    )
+    if any(count > 2 for count in _mesh_edge_usage(faces).values()):
+        raise GeometryInputError(
+            "GLOBAL_ENVELOPE_NON_MANIFOLD",
+            "Глобальная огибающая создала неманифолдное ребро.",
+        )
+
+    boundary_edges = validate_surface_boundary_edges(
+        registry.vertices, faces, domain, weld_tolerance * 2.0
+    )
+    for first, second in boundary_edges:
+        p, q = registry.vertices[first], registry.vertices[second]
+        matches = []
+        for edge_index, start in enumerate(normalized):
+            end = normalized[(edge_index + 1) % len(normalized)]
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length_sq = dx * dx + dy * dy
+            if length_sq <= weld_tolerance * weld_tolerance:
+                continue
+
+            def parameter_and_distance(point: Point3):
+                rx, ry = point[0] - start[0], point[1] - start[1]
+                parameter = (rx * dx + ry * dy) / length_sq
+                distance = abs(dx * ry - dy * rx) / (length_sq ** 0.5)
+                return parameter, distance
+
+            tp, dp = parameter_and_distance(p)
+            tq, dq = parameter_and_distance(q)
+            if (
+                dp <= weld_tolerance * 5.0
+                and dq <= weld_tolerance * 5.0
+                and -weld_tolerance <= tp <= 1.0 + weld_tolerance
+                and -weld_tolerance <= tq <= 1.0 + weld_tolerance
+            ):
+                zp = start[2] + tp * (end[2] - start[2])
+                zq = start[2] + tq * (end[2] - start[2])
+                if (
+                    abs(p[2] - zp) <= weld_tolerance * max(1.0, abs(zp))
+                    and abs(q[2] - zq) <= weld_tolerance * max(1.0, abs(zq))
+                ):
+                    matches.append(edge_index)
+        if len(matches) != 1:
+            raise GeometryInputError(
+                "GLOBAL_ENVELOPE_EAVE_MISMATCH",
+                "Глобальная огибающая изменила исходную 3D-линию карниза.",
+            )
+
+    used_sources = set(face_sources)
+    missing = sorted(set(range(len(planes))) - used_sources)
+    if missing:
+        raise GeometryInputError(
+            "GLOBAL_ENVELOPE_UNUSED_PLANE",
+            "Следующие плоскости не имеют области ненулевой площади: "
+            + ", ".join(str(index + 1) for index in missing),
+        )
+
+    for face_index, (face, source_index) in enumerate(zip(faces, face_sources)):
+        plane = planes[source_index]
+        for vertex_index in face:
+            x, y, z = registry.vertices[vertex_index]
+            if abs(z - plane.height(x, y)) > weld_tolerance * max(1.0, abs(z)):
+                raise GeometryInputError(
+                    "GLOBAL_ENVELOPE_OFF_SUPPORT",
+                    f"Вершина грани {face_index + 1} не лежит на плоскости ската {source_index + 1}.",
+                )
+
+    surface_area = sum(
+        abs(signed_area([
+            (registry.vertices[index][0], registry.vertices[index][1])
+            for index in face
+        ]))
+        for face in faces
+    )
+    source_area = abs(signed_area(domain))
+    if abs(surface_area - source_area) > max(
+        area_tolerance * 100.0, source_area * 1e-7
+    ):
+        raise GeometryInputError(
+            "GLOBAL_ENVELOPE_COVERAGE",
+            "Глобальные ячейки не покрывают исходный контур без дыр и перекрытий.",
+        )
+
+    return RoofSurface(
+        vertices=tuple(registry.vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_sources),
+        planes=tuple(planes),
+        source_area_xy=source_area,
+        surface_area_xy=surface_area,
+        boundary_xy=domain,
+        approximation_error=0.0,
+        refinement_depth=0,
+    )
+
+
+__all__ = [
+    "build_intersection_envelope_surface",
+    "build_global_plane_intersection_surface",
+]
