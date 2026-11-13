@@ -90,8 +90,7 @@ fn segments_intersect(
 
     let proper_intersection = ((o1 > cross_eps && o2 < -cross_eps)
         || (o1 < -cross_eps && o2 > cross_eps))
-        && ((o3 > cross_eps && o4 < -cross_eps)
-            || (o3 < -cross_eps && o4 > cross_eps));
+        && ((o3 > cross_eps && o4 < -cross_eps) || (o3 < -cross_eps && o4 > cross_eps));
 
     proper_intersection
         || on_segment(c, a, b, cross_eps, linear_eps)
@@ -186,10 +185,7 @@ mod python {
         points: Vec<(f64, f64)>,
         eps: f64,
     ) -> Vec<(String, String, String)> {
-        let points = points
-            .into_iter()
-            .map(|(x, y)| [x, y])
-            .collect::<Vec<_>>();
+        let points = points.into_iter().map(|(x, y)| [x, y]).collect::<Vec<_>>();
 
         validate_simple_polygon(&points, eps)
             .into_iter()
@@ -235,13 +231,7 @@ mod tests {
 
     #[test]
     fn reports_zero_length_edges() {
-        let repeated = [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 1.0],
-        ];
+        let repeated = [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let issues = validate_simple_polygon(&repeated, 1.0e-9);
 
         assert!(issues.iter().any(|issue| issue.code == "ZERO_EDGE"));
