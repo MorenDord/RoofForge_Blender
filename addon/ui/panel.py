@@ -88,12 +88,13 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     if icon_scale is None:
                         body.label(text="Widen the N-panel to view the plan", icon="INFO")
                     else:
-                        # Reserve the same square that the GPU overlay paints.
-                        # Center the UI widget so the draw handler shares its
-                        # horizontal midpoint without guessing the panel inset.
+                        # Reserve vertical space only. This row expands across
+                        # the full panel body; GPU drawing is centered separately
+                        # against context.region.width, not this nested layout's
+                        # potentially indented content rectangle.
                         preview_row = body.row()
-                        preview_row.alignment = "CENTER"
-                        preview_row.template_icon(0, scale=icon_scale)
+                        preview_row.scale_y = icon_scale
+                        preview_row.label(text=" ")
 
                     debug_row = body.row()
                     debug_row.enabled = icon_scale is not None

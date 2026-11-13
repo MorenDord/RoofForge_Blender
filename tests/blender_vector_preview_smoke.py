@@ -46,7 +46,8 @@ assert "_build_debug_message" in module._draw_vector_preview.__code__.co_names
 assert "_draw_debug_overlay" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
 assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
-assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "template_icon" not in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "scale_y" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "plan_debug_bounds" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
 assert "roof_forge.copy_preview_debug" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
@@ -88,8 +89,8 @@ assert abs(center_a[0] - 5.0) < 1.0e-7
 assert abs(center_b[0] - 5.0) < 1.0e-7
 assert abs(center_a[1] - center_b[1]) < 1.0e-7
 
-# template_icon reserves U.widget_unit * scale and lives in a CENTER-aligned
-# row. Its GPU overlay must share the exact row midpoint at every panel width.
+# The UI row is only a vertical spacer. GPU coordinates are anchored directly
+# to the full N-panel region midpoint, independent of nested panel-body margins.
 assert module.estimate_widget_unit(1.333) == 27
 assert module.preview_icon_scale(72, widget_unit=20.0) is None
 layout = module._compute_canvas_layout(
@@ -110,6 +111,8 @@ center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
 assert abs(layout["target_center"][0] - 160.0) < 1.0e-7
+assert abs(layout["region_center_x"] - 160.0) < 1.0e-7
+assert abs(layout["slot_left"] + layout["slot_side"] * 0.5 - layout["region_center_x"]) < 1.0e-7
 assert abs(layout["target_center"][1] - 727.5) < 1.0e-7
 assert layout["scissor"] == (68, 635, 185, 185)
 assert module._translate_scissor(
@@ -119,6 +122,8 @@ assert abs(layout["draw_side"] - 169.0) < 1.0e-7
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
 assert abs(wider_layout["target_center"][0] - 210.0) < 1.0e-7
+assert abs(wider_layout["region_center_x"] - 210.0) < 1.0e-7
+assert abs(wider_layout["slot_left"] + wider_layout["slot_side"] * 0.5 - wider_layout["region_center_x"]) < 1.0e-7
 assert abs(wider_layout["target_center"][1] - 696.25) < 1.0e-7
 
 fake_view2d = type("View2D", (), {
@@ -150,6 +155,8 @@ message = module._build_debug_message(
 assert "ROOFFORGE PREVIEW DEBUG" in message
 assert "Region: 100x50 @ 1729,29" in message
 assert "View2D error:" not in message
+assert "N-panel region midpoint X: 160.0px" in message
+assert "GPU canvas midpoint X: 160.0px" in message
 assert "View2D roundtrip pixels TR: 99.000,49.000" in message
 module._PREVIEW_DEBUG_MESSAGES[4242] = message
 assert module.get_preview_debug_message(fake_region) == message

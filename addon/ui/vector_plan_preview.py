@@ -123,11 +123,11 @@ def _compute_canvas_layout(
     ui_scale=1.0,
     widget_unit=None,
 ):
-    """Fit the roof inside a center-aligned template_icon button.
+    """Fit the roof in a square centered on the complete UI region.
 
-    The panel draws the placeholder in a CENTER-aligned row, so its horizontal
-    center is the UI region midpoint. Blender sizes template_icon as
-    U.widget_unit * icon_scale in both axes.
+    The placeholder row is now only a vertical spacer. Its nested panel-body
+    alignment is deliberately irrelevant: pixel X is anchored to the midpoint
+    of Region.type == 'UI', i.e. region.width / 2.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
@@ -157,9 +157,10 @@ def _compute_canvas_layout(
     if scale <= 0.0:
         return None
 
-    # panel.py places template_icon in a CENTER-aligned row. Center the GPU
-    # canvas on that same row, independent of sidebar width and inner margins.
-    slot_left = (width - slot_side) * 0.5
+    # This is the actual N-panel UI region, not the nested UILayout body.
+    # Keep its pixel midpoint explicit so no row/panel indentation can alter it.
+    region_center_x = width * 0.5
+    slot_left = region_center_x - slot_side * 0.5
     slot_top = height - _PREVIEW_SLOT_TOP_UNITS * widget_unit
     slot_bottom = slot_top - slot_side
     if (
@@ -198,6 +199,7 @@ def _compute_canvas_layout(
         "canvas_bottom": draw_bottom,
         "canvas_top": draw_bottom + draw_side,
         "target_center": target_center,
+        "region_center_x": region_center_x,
         "bbox_center": bbox_center,
         "margin": margin,
         "icon_scale": icon_scale,
@@ -296,7 +298,8 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
         f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
         f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
         f"template_icon: scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
-        f"Centered slot midpoint: {slot_left + slot_side * 0.5:.1f}px",
+        f"N-panel region midpoint X: {float(layout['region_center_x']):.1f}px",
+        f"GPU canvas midpoint X: {slot_left + slot_side * 0.5:.1f}px",
         (
             "Estimated slot L,B,R,T: "
             f"{slot_left:.1f},{slot_bottom:.1f},"
@@ -379,6 +382,7 @@ def _draw_debug_overlay(region, layout, viewport, ui_scale, text_color, message)
         (region_rect, (1.0, 0.12, 0.12, 1.0)),
         (slot_rect, (1.0, 0.72, 0.08, 1.0)),
     ]
+    center_x = float(layout["region_center_x"])
     if viewport_rect[2] > viewport_rect[0] and viewport_rect[3] > viewport_rect[1]:
         rectangles.append((viewport_rect, (0.12, 0.72, 1.0, 1.0)))
 
@@ -397,6 +401,18 @@ def _draw_debug_overlay(region, layout, viewport, ui_scale, text_color, message)
         shader.uniform_float("lineWidth", max(1.0, 1.6 * ui_scale))
         shader.uniform_float("color", color)
         batch.draw(shader)
+
+    center_shader = gpu.shader.from_builtin(_LINE_SHADER_NAME)
+    center_batch = batch_for_shader(
+        center_shader,
+        "LINES",
+        {"pos": ((center_x, 0.0), (center_x, height))},
+    )
+    center_shader.bind()
+    center_shader.uniform_float("viewportSize", (float(viewport_width), float(viewport_height)))
+    center_shader.uniform_float("lineWidth", max(1.0, 1.2 * ui_scale))
+    center_shader.uniform_float("color", (0.2, 0.95, 0.3, 1.0))
+    center_batch.draw(center_shader)
 
     font_id = 0
     font_size = max(9, int(10 * ui_scale))
