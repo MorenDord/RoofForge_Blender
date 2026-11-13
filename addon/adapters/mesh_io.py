@@ -3,6 +3,7 @@
 import bmesh
 
 MAX_BOUNDARY_EDGES = 64
+MAX_CONVEX_FLAT_BOUNDARY_EDGES = 256
 
 
 def _boundary_edges_for_object_bmesh(bm):
@@ -17,14 +18,14 @@ def _boundary_edges_for_object_bmesh(bm):
     return edges
 
 
-def _ordered_cycle_topology(bm, edges):
+def _ordered_cycle_topology(bm, edges, *, max_edges=MAX_BOUNDARY_EDGES):
     """Return boundary vertices and edges in the same deterministic order."""
     edges = list(edges)
     if len(edges) < 3:
         raise ValueError("На объекте не найдена замкнутая граница минимум из трёх рёбер.")
-    if len(edges) > MAX_BOUNDARY_EDGES:
+    if len(edges) > max_edges:
         raise ValueError(
-            f"Эта alpha-версия RoofForge поддерживает максимум {MAX_BOUNDARY_EDGES} "
+            f"Эта alpha-версия RoofForge поддерживает максимум {max_edges} "
             "граничных рёбер. Упрости контур или уменьши число сегментов."
         )
 
@@ -84,8 +85,8 @@ def ordered_boundary_edge_vertex_indices(bm):
     ]
 
 
-def _ordered_cycle_points(bm, edges):
-    vertices, _ordered_edges = _ordered_cycle_topology(bm, edges)
+def _ordered_cycle_points(bm, edges, *, max_edges=MAX_BOUNDARY_EDGES):
+    vertices, _ordered_edges = _ordered_cycle_topology(bm, edges, max_edges=max_edges)
     return [tuple(float(value) for value in vertex.co) for vertex in vertices]
 
 
@@ -102,7 +103,29 @@ def read_object_boundary(obj):
 
     try:
         boundary_edges = _boundary_edges_for_object_bmesh(bm)
-        return _ordered_cycle_points(bm, boundary_edges)
+        points = _ordered_cycle_points(
+            bm,
+            boundary_edges,
+            max_edges=MAX_CONVEX_FLAT_BOUNDARY_EDGES,
+        )
+        if len(points) > MAX_BOUNDARY_EDGES:
+            # The higher limit is deliberately restricted to flat convex
+            # footprints. Concave and mixed-height contours retain the
+            # conservative 64-edge limit until their large-loop solvers are
+            # profiled and validated independently.
+            from ...core.overhang import is_convex_contour_xy
+            from ...core.wavefront import is_flat_eave_contour
+
+            if not (
+                is_flat_eave_contour(points)
+                and is_convex_contour_xy(points)
+            ):
+                raise ValueError(
+                    f"Эта alpha-версия RoofForge поддерживает максимум {MAX_BOUNDARY_EDGES} "
+                    "граничных рёбер для вогнутых и неплоских контуров. "
+                    f"Плоские выпуклые контуры поддерживают до {MAX_CONVEX_FLAT_BOUNDARY_EDGES} рёбер."
+                )
+        return points
     finally:
         if owns_bmesh:
             bm.free()

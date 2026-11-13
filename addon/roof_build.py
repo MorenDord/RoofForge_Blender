@@ -94,11 +94,16 @@ def _build_roof_surface(points, pitches, overhang, corner_convergence):
             authored_points, pitches, overhang,
             corner_convergence=corner_convergence,
         )
-        solver = (
-            "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
-            if is_convex_contour_xy(authored_points)
-            else "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING"
-        )
+        if not is_convex_contour_xy(authored_points):
+            solver = "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING"
+        elif (
+            len(authored_points) > 64
+            and is_flat_eave_contour(authored_points)
+            and corner_convergence
+        ):
+            solver = "WEIGHTED_WAVEFRONT_CONVEX_OVERHANG_RING"
+        else:
+            solver = "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
         return surface, solver
     if is_flat_eave_contour(authored_points):
         return build_wavefront_roof_surface(authored_points, pitches), "WEIGHTED_WAVEFRONT_FLAT_EAVE"

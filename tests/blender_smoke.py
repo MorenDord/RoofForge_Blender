@@ -147,6 +147,26 @@ def create_regular_wire_loop(name: str, edge_count: int):
 
 
 
+def create_elliptical_wire_loop(name: str, edge_count: int, radius_x: float, radius_y: float):
+    points = [
+        (
+            radius_x * math.cos(2.0 * math.pi * index / edge_count),
+            radius_y * math.sin(2.0 * math.pi * index / edge_count),
+            0.0,
+        )
+        for index in range(edge_count)
+    ]
+    edges = [(index, (index + 1) % edge_count) for index in range(edge_count)]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 def check_generated_shell(source, source_coordinates) -> None:
     generated = [
         obj for obj in bpy.data.objects
@@ -517,14 +537,60 @@ def main() -> None:
 
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
-    oversized = create_regular_wire_loop("RoofForge_Smoke_OverLimit", 65)
+    # Complex flat convex contours may use up to 256 boundary edges. The
+    # previous global 64-edge cap prevented the generator from reaching the
+    # convex overhang path at all.
+    clear_scene()
+    complex_convex = create_elliptical_wire_loop(
+        "RoofForge_Smoke_Convex_Overhang_72", 72, 4.0, 2.8
+    )
+    complex_source_coordinates = tuple(
+        tuple(float(c) for c in vertex.co)
+        for vertex in complex_convex.data.vertices
+    )
     mesh_io = importlib.import_module(f"{extension.__name__}.addon.adapters.mesh_io")
-    try:
-        mesh_io.read_object_boundary(oversized)
-    except ValueError as exc:
-        ensure("64" in str(exc), "over-limit diagnostic does not state the 64-edge limit")
-    else:
-        raise RuntimeError("RoofForge Blender smoke test failed: 65-edge boundary was accepted")
+    complex_boundary = mesh_io.read_object_boundary(complex_convex)
+    ensure(
+        len(complex_boundary) == 72,
+        "flat convex 72-edge contour was rejected by the input adapter",
+    )
+    complex_settings = bpy.context.scene.roof_forge
+    complex_settings.thickness_cm = 1.0
+    complex_settings.eave_overhang_cm = 15.0
+    complex_settings.overhang_corner_convergence = True
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare 72 convex contour pitches",
+    )
+    ensure(
+        len(complex_settings.slope_settings) == 72,
+        "expected 72 pitch settings for the complex convex contour",
+    )
+    for index, item in enumerate(complex_settings.slope_settings):
+        item.pitch = (
+            34.0
+            + 0.8 * math.sin(2.0 * math.pi * index / 72.0 * 3.0)
+            + 0.4 * math.cos(2.0 * math.pi * index / 72.0 * 5.0)
+        )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        f"complex 72-edge convex contour with overhang failed: {complex_settings.last_status}",
+    )
+    complex_roof = complex_settings.generated_object
+    ensure(complex_roof is not None, "complex convex overhang roof was not created")
+    ensure(
+        complex_roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONVEX_OVERHANG_RING",
+        "complex convex contour did not use the scalable wavefront overhang-ring solver",
+    )
+    complex_coords = [vertex.co for vertex in complex_roof.data.vertices]
+    ensure(
+        min(vertex.x for vertex in complex_coords) < -4.05
+        and max(vertex.x for vertex in complex_coords) > 4.05
+        and min(vertex.y for vertex in complex_coords) < -2.85
+        and max(vertex.y for vertex in complex_coords) > 2.85,
+        "complex convex overhang did not expand beyond all four source bounds",
+    )
+    check_generated_shell(complex_convex, complex_source_coordinates)
 
     # Concave flat-eave L contour with independent pitch per boundary edge.
     clear_scene()

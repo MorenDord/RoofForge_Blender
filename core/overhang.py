@@ -387,15 +387,15 @@ def _point_in_polygon(point: Point2, polygon: Sequence[Point2], tolerance: float
     return inside
 
 
-def _build_concave_wavefront_overhang_surface(points: Sequence[Point3], pitches_degrees: Sequence[float], distance: float, *, eps: float):
-    """Extend a concave wavefront roof with exact planar eave strips."""
+def _build_flat_wavefront_overhang_surface(points: Sequence[Point3], pitches_degrees: Sequence[float], distance: float, *, eps: float):
+    """Extend a flat-eave wavefront roof with exact planar eave strips."""
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
     if not is_flat_eave_contour(points, eps):
         raise GeometryInputError(
-            "OVERHANG_CONCAVE_NON_FLAT_EAVES",
-            "Для свеса невыпуклого контура пока нужна одна общая высота всех карнизов. Выровняй исходные вершины по Z.",
+            "OVERHANG_WAVEFRONT_NON_FLAT_EAVES",
+            "Для полосовой сборки свеса нужна одна общая высота всех карнизов. Выровняй исходные вершины по Z.",
         )
 
     source = tuple(tuple(float(value) for value in point) for point in points)
@@ -545,7 +545,19 @@ def build_source_anchored_overhang_surface(
                 "OVERHANG_CONCAVE_NEEDS_CORNER_CONVERGENCE",
                 "Для свеса невыпуклого контура включи «Сводить углы»: соседние полосы свеса должны сходиться в общей точке.",
             )
-        return _build_concave_wavefront_overhang_surface(source, pitches_degrees, distance, eps=1e-9)
+        return _build_flat_wavefront_overhang_surface(source, pitches_degrees, distance, eps=1e-9)
+
+    # Large flat convex contours are kept out of the quadratic plane-envelope
+    # arrangement. Their eaves are built as exact source-plane strips around
+    # the weighted-wavefront roof, using the same topology-checked ring path
+    # as flat concave contours.
+    if corner_convergence and len(source) > 64:
+        from .wavefront import is_flat_eave_contour
+
+        if is_flat_eave_contour(source, 1e-9):
+            return _build_flat_wavefront_overhang_surface(
+                source, pitches_degrees, distance, eps=1e-9
+            )
 
     planes = build_boundary_planes(source, pitches_degrees)
     expanded = (

@@ -218,6 +218,66 @@ class RoofOverhangTests(unittest.TestCase):
         shell = build_roof_shell(surface, 0.01, extrude_up=True)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
+
+    def test_complex_flat_convex_overhang_supports_more_than_64_edges(self):
+        edge_count = 72
+        points = [
+            (
+                8.0 * math.cos(2.0 * math.pi * index / edge_count),
+                5.0 * math.sin(2.0 * math.pi * index / edge_count),
+                0.0,
+            )
+            for index in range(edge_count)
+        ]
+        pitches = [
+            34.0
+            + 0.8 * math.sin(2.0 * math.pi * index / edge_count * 3.0)
+            + 0.4 * math.cos(2.0 * math.pi * index / edge_count * 5.0)
+            for index in range(edge_count)
+        ]
+
+        surface = build_source_anchored_overhang_surface(
+            points, pitches, 0.15, corner_convergence=True
+        )
+        self.assertEqual(len(surface.boundary_xy), edge_count)
+        self.assertEqual(len(surface.planes), edge_count)
+        self.assertGreater(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+        )
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area(surface.boundary_xy)),
+            delta=1.0e-5,
+        )
+        self._assert_support_planes(points, surface)
+
+        shell = build_roof_shell(surface, 0.01, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        self.assertTrue(
+            all(0 <= index < edge_count for index in surface.face_slope_indices)
+        )
+
+    def test_large_flat_convex_overhang_without_corner_convergence_keeps_offset_path(self):
+        edge_count = 72
+        points = [
+            (
+                8.0 * math.cos(2.0 * math.pi * index / edge_count),
+                5.0 * math.sin(2.0 * math.pi * index / edge_count),
+                0.0,
+            )
+            for index in range(edge_count)
+        ]
+        surface = build_source_anchored_overhang_surface(
+            points, [35.0] * edge_count, 0.15, corner_convergence=False
+        )
+        expected = offset_contour_outward(points, 0.15)
+        self.assertEqual(
+            surface.boundary_xy,
+            tuple((point[0], point[1]) for point in expected),
+        )
+
     def test_too_large_u_offset_is_rejected(self):
         with self.assertRaises(GeometryInputError):
             build_source_anchored_overhang_surface(CONCAVE_U, [35.0] * 8, 1.5)
