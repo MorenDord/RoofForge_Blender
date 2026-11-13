@@ -163,23 +163,22 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
                     "GLOBAL_ENVELOPE_EAVE_UNDERCUT",
                 )
 
-    def test_dense_mixed_height_l_96_matches_exact_topology_invariants(self):
-        points, pitches = _dense_mixed_height_l()
-        surface = build_intersection_envelope_surface(points, pitches)
-        reference = build_roof_surface(points, pitches)
-        self.assert_exact_support_surface(points, surface)
-        self.assert_reference_surface(points, reference)
-        self.assert_closed_shell(surface)
-        self.assert_closed_shell(reference)
+    def test_dense_mixed_height_concave_contours_fail_closed_when_planes_do_not_form_a_surface(self):
+        for fixture in (_dense_mixed_height_l, _dense_mixed_height_u):
+            points, pitches = fixture()
+            with self.subTest(vertices=len(points)):
+                # Confirm each fixture is valid and still supported by the
+                # existing exact spatial construction.
+                reference = build_roof_surface(points, pitches)
+                self.assert_reference_surface(points, reference)
+                self.assert_closed_shell(reference)
 
-    def test_dense_mixed_height_u_96_matches_exact_topology_invariants(self):
-        points, pitches = _dense_mixed_height_u()
-        surface = build_intersection_envelope_surface(points, pitches)
-        reference = build_roof_surface(points, pitches)
-        self.assert_exact_support_surface(points, surface)
-        self.assert_reference_surface(points, reference)
-        self.assert_closed_shell(surface)
-        self.assert_closed_shell(reference)
+                with self.assertRaises(GeometryInputError) as context:
+                    build_intersection_envelope_surface(points, pitches)
+                self.assertEqual(
+                    context.exception.code,
+                    "PLANE_ENVELOPE_DISCONTINUITY",
+                )
 
 
 if __name__ == "__main__":

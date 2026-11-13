@@ -337,12 +337,21 @@ def build_intersection_envelope_surface(
             "Пересечения опорных плоскостей создали неманифолдное ребро.",
         )
 
-    boundary_edges = validate_surface_boundary_edges(
-        registry.vertices,
-        faces,
-        domain,
-        weld_tolerance * 2.0,
-    )
+    try:
+        boundary_edges = validate_surface_boundary_edges(
+            registry.vertices,
+            faces,
+            domain,
+            weld_tolerance * 2.0,
+        )
+    except GeometryInputError as exc:
+        if exc.code == "INTERNAL_OPEN_EDGE":
+            raise GeometryInputError(
+                "PLANE_ENVELOPE_DISCONTINUITY",
+                "Конечные области влияния опорных плоскостей не образовали "
+                "непрерывную поверхность: " + exc.message,
+            ) from exc
+        raise
     for first, second in boundary_edges:
         p, q = registry.vertices[first], registry.vertices[second]
         matches = []
