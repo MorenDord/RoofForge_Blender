@@ -32,6 +32,9 @@ _PREVIEW_DRAW_INSET = 8.0
 _TEMPLATE_ICON_SCALE_BASE = 32.0
 _TEMPLATE_ICON_SIDE_MARGIN = 24.0
 _WIDGET_UNIT_BASE = 20.0
+# Blender reserves a vertical category-tab rail on the left of the UI region.
+# Preview placement and sizing use the remaining active-tab content rectangle.
+_PANEL_CATEGORY_RAIL_UNITS = 1.5
 
 
 def _prepare_geometry(plan_data):
@@ -98,6 +101,11 @@ def estimate_widget_unit(ui_scale=1.0):
     return max(1.0, round(_WIDGET_UNIT_BASE * scale))
 
 
+def preview_category_rail_width(widget_unit=20.0):
+    """Estimate the fixed category-tab rail width in Blender UI pixels."""
+    return max(0.0, float(widget_unit) * _PANEL_CATEGORY_RAIL_UNITS)
+
+
 def preview_icon_scale(region_width, *, widget_unit=20.0):
     """Return the historical template_icon scale, not its pixel dimension.
 
@@ -123,11 +131,12 @@ def _compute_canvas_layout(
     ui_scale=1.0,
     widget_unit=None,
 ):
-    """Fit the roof in a square centered on the complete UI region.
+    """Fit the roof inside the active sidebar tab's content rectangle.
 
-    The placeholder row is now only a vertical spacer. Its nested panel-body
-    alignment is deliberately irrelevant: pixel X is anchored to the midpoint
-    of Region.type == 'UI', i.e. region.width / 2.
+    The UI region also contains Blender's vertical category-tab rail. The
+    drawable tab body begins to its right, so centering on region.width / 2
+    incorrectly shifts the plan toward the tabs. The blank UI row remains only
+    a vertical spacer; GPU coordinates are anchored to the active tab body.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
@@ -135,7 +144,15 @@ def _compute_canvas_layout(
     if widget_unit is None:
         widget_unit = estimate_widget_unit(ui_scale)
     widget_unit = max(1.0, float(widget_unit))
-    icon_scale = preview_icon_scale(width, widget_unit=widget_unit)
+    category_rail_width = min(
+        preview_category_rail_width(widget_unit),
+        width * 0.4,
+    )
+    panel_content_width = max(0.0, width - category_rail_width)
+    icon_scale = preview_icon_scale(
+        panel_content_width,
+        widget_unit=widget_unit,
+    )
     if icon_scale is None:
         return None
 
@@ -157,15 +174,15 @@ def _compute_canvas_layout(
     if scale <= 0.0:
         return None
 
-    # This is the actual N-panel UI region, not the nested UILayout body.
-    # Keep its pixel midpoint explicit so no row/panel indentation can alter it.
-    region_center_x = width * 0.5
+    # Exclude Blender's left category-tab rail. The right boundary is the
+    # active UI region edge; the left boundary is where this tab's contents start.
+    region_center_x = category_rail_width + panel_content_width * 0.5
     slot_left = region_center_x - slot_side * 0.5
     slot_top = height - _PREVIEW_SLOT_TOP_UNITS * widget_unit
     slot_bottom = slot_top - slot_side
     if (
         slot_bottom < 8.0 * ui_scale
-        or slot_left < 0.0
+        or slot_left < category_rail_width
         or slot_left + slot_side > width
     ):
         return None
@@ -200,6 +217,10 @@ def _compute_canvas_layout(
         "canvas_top": draw_bottom + draw_side,
         "target_center": target_center,
         "region_center_x": region_center_x,
+        "panel_content_left": category_rail_width,
+        "panel_content_right": width,
+        "panel_content_width": panel_content_width,
+        "category_rail_width": category_rail_width,
         "bbox_center": bbox_center,
         "margin": margin,
         "icon_scale": icon_scale,
@@ -298,7 +319,11 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
         f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
         f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
         f"template_icon: scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
-        f"N-panel region midpoint X: {float(layout['region_center_x']):.1f}px",
+        (
+            "RoofForge tab content bounds X: "
+            f"{float(layout['panel_content_left']):.1f}..{float(layout['panel_content_right']):.1f}px"
+        ),
+        f"RoofForge tab content midpoint X: {float(layout['region_center_x']):.1f}px",
         f"GPU canvas midpoint X: {slot_left + slot_side * 0.5:.1f}px",
         (
             "Estimated slot L,B,R,T: "
@@ -652,4 +677,5 @@ __all__ = [
     "get_preview_debug_message",
     "estimate_widget_unit",
     "preview_icon_scale",
+    "preview_category_rail_width",
 ]
