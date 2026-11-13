@@ -10,6 +10,7 @@ roof-surface assembly paths, whose edge-activation semantics are different.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from math import hypot
 from typing import Sequence
 
@@ -619,10 +620,49 @@ def build_intersection_envelope_surface(
     def build_transition_completion() -> RoofSurface:
         from .exact_spatial import build_exact_planar_ring_surface
 
-        completed = build_exact_planar_ring_surface(
-            points, pitches_degrees, eps
+        source_count = len(points)
+        canonical_points = tuple(
+            tuple(float(value) for value in point)
+            for point in points
         )
-        _validate_transition_faceted_surface(completed, len(points), eps)
+        canonical_pitches = tuple(float(value) for value in pitches_degrees)
+        canonical_to_source = tuple(range(source_count))
+
+        # The event-ray enumerator is orientation-sensitive for some
+        # multi-reflex arrangements. Solve a clockwise contour in canonical
+        # CCW order, then restore the caller's source-edge numbering without
+        # changing any coordinates, support plane, or face geometry.
+        if signed_area(domain) < 0.0:
+            canonical_points = tuple(reversed(canonical_points))
+            canonical_to_source = tuple(
+                (source_count - 2 - index) % source_count
+                for index in range(source_count)
+            )
+            canonical_pitches = tuple(
+                canonical_pitches[source_index]
+                for source_index in canonical_to_source
+            )
+
+        completed = build_exact_planar_ring_surface(
+            canonical_points, canonical_pitches, eps
+        )
+        if canonical_to_source != tuple(range(source_count)):
+            planes_by_source = [None] * source_count
+            for canonical_index, source_index in enumerate(canonical_to_source):
+                planes_by_source[source_index] = completed.planes[canonical_index]
+
+            remapped_sources = tuple(
+                -1 if source_index < 0 else canonical_to_source[source_index]
+                for source_index in completed.face_slope_indices
+            )
+            completed = replace(
+                completed,
+                face_slope_indices=remapped_sources,
+                planes=tuple(planes_by_source),
+                boundary_xy=domain,
+            )
+
+        _validate_transition_faceted_surface(completed, source_count, eps)
         return completed
 
     if complete_transition_facets and needs_event_topology:
