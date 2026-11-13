@@ -28,11 +28,59 @@ jobs:
       - name: Run geometry tests
         run: python -m unittest discover -s tests -v
 
-  blender-5-smoke-package:
-    runs-on: ubuntu-latest
-    needs: pure-python-tests
+  native-platform-wheels:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: windows-x64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-26
+          - platform: macos-x64
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build platform-native stable-ABI wheel
+        shell: bash
+        run: |
+          python -m pip install "maturin>=1.9,<2.0"
+          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
+            python -m maturin build --release --compatibility manylinux_2_28 --out dist/wheels
+          else
+            python -m maturin build --release --out dist/wheels
+          fi
+          ls -lh dist/wheels/*.whl
+      - name: Upload native platform wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-native-wheel-${{ matrix.platform }}
+          path: dist/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 30
+
+  blender-5-smoke-package:
+    runs-on: ubuntu-latest
+    needs:
+      - pure-python-tests
+      - native-platform-wheels
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all native platform wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: roof-forge-native-wheel-*
+          path: ${{ runner.temp }}/roof-forge-native-wheels
+          merge-multiple: true
       - name: Install Blender runtime libraries
         run: |
           sudo apt-get update
@@ -51,17 +99,25 @@ jobs:
           grep -q "ROOFFORGE_SMOKE_OK" "$RUNNER_TEMP/roof-smoke.log"
           blender --background --factory-startup --python tests/blender_vector_preview_smoke.py 2>&1 | tee "$RUNNER_TEMP/vector-smoke.log"
           grep -q "ROOFFORGE_VECTOR_PREVIEW_SMOKE_OK" "$RUNNER_TEMP/vector-smoke.log"
-      - name: Build clean Blender Extension ZIP
-        run: python3 tools/build_extension.py --output-dir dist
+      - name: Build Blender Extension ZIP with native Rust wheels
+        run: |
+          python3 tools/build_extension.py --native-wheels-dir "$RUNNER_TEMP/roof-forge-native-wheels" --require-native-wheels --output-dir dist
       - name: Validate Extension ZIP with Blender 5.0.1
-        run: blender --command extension validate dist/roof_forge-0.3.17.zip
+        run: blender --command extension validate dist/roof_forge-0.3.18.zip
+      - name: Install native extension into Blender
+        run: blender --command extension install-file --repo user_default --enable dist/roof_forge-0.3.18.zip
+      - name: Smoke-test the installed native extension inside Blender
+        run: |
+          set -euo pipefail
+          blender --background --python tests/blender_native_extension_smoke.py 2>&1 | tee "$RUNNER_TEMP/native-blender-smoke.log"
+          grep -q "ROOFFORGE_NATIVE_BLENDER_SMOKE_OK" "$RUNNER_TEMP/native-blender-smoke.log"
       - name: Upload installable test build
         uses: actions/upload-artifact@v4
         with:
-          name: roof_forge-0.3.17-blender-5.0.1
+          name: roof_forge-0.3.18-blender-5.0.1
           path: |
-            dist/roof_forge-0.3.17.zip
-            dist/roof_forge-0.3.17.zip.sha256
+            dist/roof_forge-0.3.18.zip
+            dist/roof_forge-0.3.18.zip.sha256
           if-no-files-found: error
           retention-days: 30
   rust-native-core:
