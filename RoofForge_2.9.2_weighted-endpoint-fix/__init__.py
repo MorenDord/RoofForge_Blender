@@ -1,7 +1,7 @@
 bl_info = {
     "name": "RoofForge - Parametric Roof Generator",
     "author": "OpenAI",
-    "version": (2, 9, 3),
+    "version": (2, 9, 2),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > RoofForge",
     "description": "Low-poly roofs and automatic lightweight standing-seam layout",
@@ -26,7 +26,6 @@ from bpy.props import (
     BoolProperty,
     StringProperty,
     PointerProperty,
-    IntProperty,
 )
 
 from .straight_skeleton_2_6_0 import (
@@ -1760,159 +1759,6 @@ def _spatial_pitch_settings_update(self, context):
     _schedule_interactive_roof_update(owner)
 
 
-def _spatial_slope_upper_vertex_count(points, pitch_angles, edge_index, eave_lift=0.0):
-    """Count non-eave vertices belonging to one source slope.
-
-    The two original points on the selected eave edge are excluded. Remaining
-    unique mesh vertices are the intersection/event points that describe the
-    upper boundary of this slope.
-    """
-    if not points or len(points) < 3 or len(pitch_angles) != len(points):
-        return None
-    if edge_index < 0 or edge_index >= len(points):
-        return None
-
-    try:
-        vertices, faces, face_sources = build_spatial_roof_mesh(
-            points, pitch_angles, eave_lift=float(eave_lift)
-        )
-        slope_vertex_ids = set()
-        for face, raw_source in zip(faces, face_sources):
-            if isinstance(raw_source, (tuple, list, set)):
-                source_values = raw_source
-            else:
-                source_values = (raw_source,)
-            if any(int(value) == edge_index for value in source_values):
-                slope_vertex_ids.update(int(vertex_id) for vertex_id in face)
-
-        if not slope_vertex_ids:
-            return None
-
-        p0 = points[edge_index]
-        p1 = points[(edge_index + 1) % len(points)]
-        dx = float(p1[0]) - float(p0[0])
-        dy = float(p1[1]) - float(p0[1])
-        dz = float(p1[2]) - float(p0[2])
-        edge_length_sq = dx * dx + dy * dy + dz * dz
-        if edge_length_sq <= 1.0e-18:
-            return None
-
-        span = max(
-            max(float(p[0]) for p in points) - min(float(p[0]) for p in points),
-            max(float(p[1]) for p in points) - min(float(p[1]) for p in points),
-            max(float(p[2]) for p in points) - min(float(p[2]) for p in points),
-            1.0e-6,
-        )
-        tolerance = max(span * 1.0e-7, 1.0e-9)
-        eave_start = (float(p0[0]), float(p0[1]), float(p0[2]) + float(eave_lift))
-        eave_delta = (dx, dy, dz)
-
-        upper_vertex_count = 0
-        for vertex_id in slope_vertex_ids:
-            point = vertices[vertex_id]
-            relative = (
-                float(point[0]) - eave_start[0],
-                float(point[1]) - eave_start[1],
-                float(point[2]) - eave_start[2],
-            )
-            t = (
-                relative[0] * eave_delta[0]
-                + relative[1] * eave_delta[1]
-                + relative[2] * eave_delta[2]
-            ) / edge_length_sq
-            if -tolerance <= t <= 1.0 + tolerance:
-                clamped_t = max(0.0, min(1.0, t))
-                nearest = (
-                    eave_start[0] + clamped_t * eave_delta[0],
-                    eave_start[1] + clamped_t * eave_delta[1],
-                    eave_start[2] + clamped_t * eave_delta[2],
-                )
-                distance = math.sqrt(sum(
-                    (float(point[axis]) - nearest[axis]) ** 2
-                    for axis in range(3)
-                ))
-                if distance <= tolerance:
-                    continue
-            upper_vertex_count += 1
-
-        return upper_vertex_count
-    except Exception:
-        # Some trial angles can be geometrically unsupported. The step control
-        # is intentionally silent and leaves the current value untouched.
-        return None
-
-
-def _find_spatial_pitch_intersection_angle(
-    points, pitch_angles, edge_index, direction, eave_lift=0.0
-):
-    """Find the first angle in one direction where this slope loses one node."""
-    if edge_index < 0 or edge_index >= len(pitch_angles):
-        return None
-
-    current_angle = float(pitch_angles[edge_index])
-    current_count = _spatial_slope_upper_vertex_count(
-        points, pitch_angles, edge_index, eave_lift
-    )
-    if current_count is None or current_count < 1:
-        return None
-
-    direction = 1 if direction >= 0 else -1
-    limit = math.radians(85.0 if direction > 0 else 1.0)
-    if abs(limit - current_angle) <= 1.0e-8:
-        return None
-
-    limit_values = list(pitch_angles)
-    limit_values[edge_index] = limit
-    limit_count = _spatial_slope_upper_vertex_count(
-        points, limit_values, edge_index, eave_lift
-    )
-    if limit_count is None or limit_count == current_count:
-        return None
-
-    # Keep the current topology on one side and the first changed topology on
-    # the other. The first transition is the adjacent intersection event.
-    if direction > 0:
-        unchanged_side, changed_side = current_angle, limit
-    else:
-        changed_side, unchanged_side = limit, current_angle
-
-    for _iteration in range(20):
-        middle = 0.5 * (unchanged_side + changed_side)
-        trial_values = list(pitch_angles)
-        trial_values[edge_index] = middle
-        trial_count = _spatial_slope_upper_vertex_count(
-            points, trial_values, edge_index, eave_lift
-        )
-        if trial_count == current_count:
-            if direction > 0:
-                unchanged_side = middle
-            else:
-                unchanged_side = middle
-        else:
-            changed_side = middle
-
-    candidate = changed_side
-    candidate_values = list(pitch_angles)
-    candidate_values[edge_index] = candidate
-    candidate_count = _spatial_slope_upper_vertex_count(
-        points, candidate_values, edge_index, eave_lift
-    )
-    if candidate_count != current_count - 1:
-        return None
-    return candidate
-
-
-def _draw_centered_spatial_preview(layout, preview_icon, context):
-    """Center the preview in the active N-panel tab, not the 3D viewport."""
-    if not preview_icon:
-        return
-    region_width = max(180.0, float(getattr(context.region, "width", 320) or 320))
-    preview_scale = max(4.0, min(14.0, (region_width - 24.0) / 42.0))
-    preview_row = layout.row()
-    preview_row.alignment = 'CENTER'
-    preview_row.template_icon(preview_icon, scale=preview_scale)
-
-
 def _standing_seam_settings_update(self, context):
     """Rebuild only the seam detail; do not recalculate the roof skeleton."""
     owner = getattr(self, "id_data", None)
@@ -2359,67 +2205,6 @@ class ROOFFORGE_OT_Rebuild(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class ROOFFORGE_OT_PitchIntersectionStep(bpy.types.Operator):
-    bl_idname = "roofforge.pitch_intersection_step"
-    bl_label = "Перейти к точке пересечения"
-    bl_description = "Подобрать угол до соседнего изменения числа точек ската"
-    bl_options = {'INTERNAL', 'UNDO'}
-
-    edge_index: IntProperty(
-        name="Номер ската", default=0, min=0, max=31, options={'HIDDEN'}
-    )
-    direction: EnumProperty(
-        name="Направление",
-        items=[
-            ('PREVIOUS', "Предыдущее", "Искать при уменьшении угла"),
-            ('NEXT', "Следующее", "Искать при увеличении угла"),
-        ],
-        default='NEXT',
-        options={'HIDDEN'},
-    )
-
-    def execute(self, context):
-        active = context.object
-        roof_obj = _helper_owner(active)
-        is_generated = bool(
-            roof_obj
-            and roof_obj.type == 'MESH'
-            and roof_obj.get("roofforge_generated", False)
-        )
-        settings = (
-            roof_obj.roofforge_settings
-            if is_generated
-            else context.scene.roofforge_settings
-        )
-        outline = _spatial_outline_for_panel(active, roof_obj, is_generated)
-        if not outline or len(outline) < 3:
-            return {'FINISHED'}
-
-        edge_count = min(len(outline), 32)
-        if self.edge_index >= edge_count:
-            return {'FINISHED'}
-
-        pitch_values = [
-            float(getattr(settings, f"spatial_pitch_{index:02d}"))
-            for index in range(1, edge_count + 1)
-        ]
-        direction = -1 if self.direction == 'PREVIOUS' else 1
-        candidate = _find_spatial_pitch_intersection_angle(
-            outline,
-            pitch_values,
-            self.edge_index,
-            direction,
-            float(getattr(settings, "eave_lift", 0.0)),
-        )
-        if candidate is not None:
-            setattr(
-                settings,
-                f"spatial_pitch_{self.edge_index + 1:02d}",
-                candidate,
-            )
-        return {'FINISHED'}
-
-
 class ROOFFORGE_PT_Panel(bpy.types.Panel):
     bl_label = "RoofForge"
     bl_idname = "ROOFFORGE_PT_panel"
@@ -2478,33 +2263,13 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
                     update_rate=settings.interactive_update_rate,
                 )
                 if preview_icon:
-                    _draw_centered_spatial_preview(edge_box, preview_icon, context)
+                    region_width = max(240, getattr(context.region, "width", 320))
+                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    edge_box.template_icon(preview_icon, scale=preview_scale)
                 edge_box.label(text="Нумерация скатов соответствует рёбрам исходного контура.")
                 edge_box.label(text=f"Рёбер карниза: {len(spatial_outline)}")
                 for edge_index in range(1, min(len(spatial_outline), 32)+1):
-                    edge_row = edge_box.row(align=True)
-                    edge_row.alignment = 'EXPAND'
-                    edge_row.label(text=f"{edge_index:02d}")
-                    previous_button = edge_row.operator(
-                        "roofforge.pitch_intersection_step",
-                        text="",
-                        icon='TRIA_LEFT',
-                    )
-                    previous_button.edge_index = edge_index - 1
-                    previous_button.direction = 'PREVIOUS'
-                    edge_row.prop(
-                        settings,
-                        f"spatial_pitch_{edge_index:02d}",
-                        text="",
-                        slider=True,
-                    )
-                    next_button = edge_row.operator(
-                        "roofforge.pitch_intersection_step",
-                        text="",
-                        icon='TRIA_RIGHT',
-                    )
-                    next_button.edge_index = edge_index - 1
-                    next_button.direction = 'NEXT'
+                    edge_box.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
                 edge_box.prop(settings, "interactive_update_rate", text="Частота обновления")
 
         # Roof shape controls are available only for a source loop or a
@@ -2533,32 +2298,12 @@ class ROOFFORGE_PT_Panel(bpy.types.Panel):
                     update_rate=settings.interactive_update_rate,
                 ) if spatial_outline else 0
                 if preview_icon:
-                    _draw_centered_spatial_preview(layout, preview_icon, context)
+                    region_width = max(240, getattr(context.region, "width", 320))
+                    preview_scale = max(4.0, min(14.0, region_width / 42.0))
+                    layout.template_icon(preview_icon, scale=preview_scale)
                 layout.label(text="Номер внутри контура = номер угла ската.")
                 for edge_index in range(1, min(edge_count, 32)+1):
-                    edge_row = layout.row(align=True)
-                    edge_row.alignment = 'EXPAND'
-                    edge_row.label(text=f"{edge_index:02d}")
-                    previous_button = edge_row.operator(
-                        "roofforge.pitch_intersection_step",
-                        text="",
-                        icon='TRIA_LEFT',
-                    )
-                    previous_button.edge_index = edge_index - 1
-                    previous_button.direction = 'PREVIOUS'
-                    edge_row.prop(
-                        settings,
-                        f"spatial_pitch_{edge_index:02d}",
-                        text="",
-                        slider=True,
-                    )
-                    next_button = edge_row.operator(
-                        "roofforge.pitch_intersection_step",
-                        text="",
-                        icon='TRIA_RIGHT',
-                    )
-                    next_button.edge_index = edge_index - 1
-                    next_button.direction = 'NEXT'
+                    layout.prop(settings, f"spatial_pitch_{edge_index:02d}", text=f"Скат {edge_index}")
                 layout.prop(settings, "interactive_update_rate", text="Частота обновления")
                 layout.prop(settings, "overhang", text="Свес карниза")
                 layout.prop(settings, "eave_lift")
@@ -2668,7 +2413,6 @@ CLASSES = (
     ROOFFORGE_OT_CreateValleys,
     ROOFFORGE_OT_UpdateValleys,
     ROOFFORGE_OT_Rebuild,
-    ROOFFORGE_OT_PitchIntersectionStep,
     ROOFFORGE_PT_Panel,
 )
 
