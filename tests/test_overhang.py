@@ -273,10 +273,10 @@ class RoofOverhangTests(unittest.TestCase):
             points, [35.0] * edge_count, 0.15, corner_convergence=False
         )
         expected = offset_contour_outward(points, 0.15)
-        self.assertEqual(
-            surface.boundary_xy,
-            tuple((point[0], point[1]) for point in expected),
-        )
+        self.assertEqual(len(surface.boundary_xy), len(expected))
+        for actual, wanted in zip(surface.boundary_xy, expected):
+            self.assertAlmostEqual(actual[0], wanted[0], places=8)
+            self.assertAlmostEqual(actual[1], wanted[1], places=8)
 
     def test_too_large_u_offset_is_rejected(self):
         with self.assertRaises(GeometryInputError):
