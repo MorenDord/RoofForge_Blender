@@ -34,7 +34,7 @@ _TEMPLATE_ICON_SIDE_MARGIN = 24.0
 _WIDGET_UNIT_BASE = 20.0
 # Blender reserves a vertical category-tab rail on the left of the UI region.
 # Preview placement and sizing use the remaining active-tab content rectangle.
-_PANEL_CATEGORY_RAIL_UNITS = 1.5
+_PANEL_CATEGORY_RAIL_UNITS = 1.0
 
 
 def _prepare_geometry(plan_data):
@@ -101,9 +101,27 @@ def estimate_widget_unit(ui_scale=1.0):
     return max(1.0, round(_WIDGET_UNIT_BASE * scale))
 
 
-def preview_category_rail_width(widget_unit=20.0):
-    """Estimate the fixed category-tab rail width in Blender UI pixels."""
-    return max(0.0, float(widget_unit) * _PANEL_CATEGORY_RAIL_UNITS)
+def preview_category_rail_width(widget_unit=20.0, *, region=None, compact=False):
+    """Estimate Blender's category-tab gutter in region-local UI pixels.
+
+    Blender uses one UI widget unit for normal sidebar tabs and 1.4 units for
+    compact tabs. The gutter is additionally scaled by the region's View2D
+    zoom; infer that factor through its public region_to_view mapping.
+    """
+    tab_units = 1.4 if compact else _PANEL_CATEGORY_RAIL_UNITS
+    zoom = 1.0
+    if region is not None:
+        try:
+            view2d = region.view2d
+            height = max(1.0, float(region.height))
+            bottom_y = float(view2d.region_to_view(0.0, 0.0)[1])
+            top_y = float(view2d.region_to_view(0.0, height - 1.0)[1])
+            view_height = abs(top_y - bottom_y)
+            if view_height > 1.0e-9:
+                zoom = (height - 1.0) / view_height
+        except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+            pass
+    return max(0.0, float(widget_unit) * tab_units * zoom)
 
 
 def preview_icon_scale(region_width, *, widget_unit=20.0):
@@ -130,6 +148,7 @@ def _compute_canvas_layout(
     *,
     ui_scale=1.0,
     widget_unit=None,
+    category_rail_width=None,
 ):
     """Fit the roof inside the active sidebar tab's content rectangle.
 
@@ -144,10 +163,9 @@ def _compute_canvas_layout(
     if widget_unit is None:
         widget_unit = estimate_widget_unit(ui_scale)
     widget_unit = max(1.0, float(widget_unit))
-    category_rail_width = min(
-        preview_category_rail_width(widget_unit),
-        width * 0.4,
-    )
+    if category_rail_width is None:
+        category_rail_width = preview_category_rail_width(widget_unit)
+    category_rail_width = min(max(0.0, float(category_rail_width)), width * 0.4)
     panel_content_width = max(0.0, width - category_rail_width)
     icon_scale = preview_icon_scale(
         panel_content_width,
@@ -505,12 +523,23 @@ def _draw_vector_preview():
         except (AttributeError, TypeError, ValueError):
             pass
         widget_unit = estimate_widget_unit(ui_scale)
+        compact_tabs = False
+        try:
+            compact_tabs = bool(context.preferences.system.show_panel_tabs_compact)
+        except (AttributeError, ReferenceError, TypeError, ValueError):
+            pass
+        category_rail_width = preview_category_rail_width(
+            widget_unit,
+            region=region,
+            compact=compact_tabs,
+        )
         layout = _compute_canvas_layout(
             region.width,
             region.height,
             geometry["bounds"],
             ui_scale=ui_scale,
             widget_unit=widget_unit,
+            category_rail_width=category_rail_width,
         )
         if layout is None:
             return
