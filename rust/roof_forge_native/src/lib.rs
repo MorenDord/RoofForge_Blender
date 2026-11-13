@@ -183,7 +183,6 @@ struct IntervalLineData {
 #[derive(Debug, Clone, Copy)]
 struct IntervalVertex {
     point: [f64; 2],
-    velocity: [f64; 2],
 }
 
 fn interval_line_intersection(
@@ -211,21 +210,14 @@ fn interval_line_intersection(
         (rhs_first * d - b * rhs_second) / determinant,
         (a * rhs_second - rhs_first * c) / determinant,
     ];
-    let velocity = [
-        (first.speed * d - b * second.speed) / determinant,
-        (a * second.speed - first.speed * c) / determinant,
-    ];
-    if point
-        .iter()
-        .chain(velocity.iter())
-        .any(|value| !value.is_finite())
+    if point.iter().any(|value| !value.is_finite())
     {
         return Err(Diagnostic::error(
             "NON_FINITE_WAVEFRONT_VERTEX",
             "Пересечение подвижных рёбер породило нечисловую вершину.",
         ));
     }
-    Ok(IntervalVertex { point, velocity })
+    Ok(IntervalVertex { point })
 }
 
 fn interval_dedupe_polygon(points: &[[f64; 3]], tolerance: f64) -> Vec<[f64; 3]> {
