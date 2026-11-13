@@ -34,7 +34,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Store face attributes for roof component and source slope index.
 - Validate the closed shell for geometric self-intersections between non-adjacent face triangles, in addition to edge/vertex manifold topology. Intersecting results are rejected before Blender mesh creation.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer are removed. Blender's `POLYLINE_UNIFORM_COLOR` shader draws antialiased edges in a collapsible **Roof Plan** section nested inside the main **RoofForge** N-panel panel. Its transparent `template_icon` slot reserves a square in Blender's normal UI flow, pushing the subsequent Pitch and settings controls down. The GPU output is clipped to that slot with a scissor rectangle, so it cannot paint over Pitch fields or the neighbouring editor. The slot dimensions now follow Blender's actual `UI_UNIT_X/Y * icon_scale` rule (estimated from the exposed UI scale), and its position follows the panel's internal left inset instead of a guessed scrollbar-adjusted centre. The bounding box is fitted with a 7.5% margin. The draw-handler is active only while the nested section is expanded and visible. Facet numbers use an area-weighted centroid across all faces belonging to a slope, with a pole-of-inaccessibility fallback for strongly concave regions. Number size and line thickness remain adjustable.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer are removed. Blender's `POLYLINE_UNIFORM_COLOR` shader draws antialiased edges in a collapsible **Roof Plan** section nested inside the main **RoofForge** N-panel panel. Its transparent `template_icon` slot reserves a square in Blender's normal UI flow, pushing the subsequent Pitch and settings controls down. The GPU output is clipped to that slot with a scissor rectangle, so it cannot paint over Pitch fields or the neighbouring editor. The slot dimensions now follow Blender's actual `UI_UNIT_X/Y * icon_scale` rule (estimated from the exposed UI scale), and its position follows the exact midpoint of a CENTER-aligned UI row, shared by the placeholder and GPU overlay. The bounding box is fitted with a 7.5% margin. The draw-handler is active only while the nested section is expanded and visible. Facet numbers use an area-weighted centroid across all faces belonging to a slope, with a pole-of-inaccessibility fallback for strongly concave regions. Number size and line thickness remain adjustable.
 
 ## Geometry paths and limitations
 
@@ -49,7 +49,7 @@ This is a tested family of cases, not a proof for every possible simple polygon.
 
 ### Mixed-height 3D eaves
 
-If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver. With overhang, each source-edge plane still passes through its original endpoints; corner convergence computes a shared outer-corner point on the adjacent planes. Convex mixed-height fixtures are covered by CI. Concave mixed-height contours are not guaranteed; positive concave overhang requires all eaves to share one Z height.
+If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver for convex footprints. Mixed-height concave footprints are disabled in 0.3.16: the generator stops before surface construction and shows a warning. Flat-height concave L/U footprints remain supported through the weighted-wavefront path.
 
 ### Other current limits
 
@@ -57,12 +57,19 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave contours without overhang now use finite source-edge influence regions in the support-plane solver and are accepted only when boundary compatibility checks pass. Positive overhang on mixed-height concave eaves, offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain unsupported/rejected.
+- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave footprints are not supported and are rejected with a warning, regardless of overhang. Offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
+
+## RoofForge 0.3.16
+
+- Mixed-height concave XY contours are disabled in the production build and report a warning before the roof builder runs. Flat-eave concave contours and convex mixed-height contours remain available.
+- The experimental concave plane-envelope module remains in the repository for isolated research/tests but is excluded from the installable extension ZIP.
+- The vector preview uses a center-aligned placeholder row and centers its GPU canvas on that row at every N-panel width.
+- Coplanar cleanup uses one bounded tolerance for exact and approximate surfaces: 0.05° dihedral and 10 ppm of the mesh span. Regressions cover a 0.04° seam and preserve 0.08° / 5° ridges.
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.12-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.12.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.16-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.16.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 

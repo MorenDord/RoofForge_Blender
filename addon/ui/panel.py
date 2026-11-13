@@ -55,6 +55,10 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
             icon="MESH_DATA",
         )
 
+        status = str(settings.last_status or "")
+        if "временно отключено построение крыши" in status.lower():
+            layout.label(text=status, icon="ERROR")
+
         if settings.roof_plan_json:
             header, body = layout.panel(
                 "roof_forge_plan_preview",
@@ -84,8 +88,12 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     if icon_scale is None:
                         body.label(text="Widen the N-panel to view the plan", icon="INFO")
                     else:
-                        # ICON_NONE reserves the square; GPU paints only inside it.
-                        body.template_icon(0, scale=icon_scale)
+                        # Reserve the same square that the GPU overlay paints.
+                        # Center the UI widget so the draw handler shares its
+                        # horizontal midpoint without guessing the panel inset.
+                        preview_row = body.row()
+                        preview_row.alignment = "CENTER"
+                        preview_row.template_icon(0, scale=icon_scale)
 
                     debug_row = body.row()
                     debug_row.enabled = icon_scale is not None

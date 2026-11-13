@@ -70,8 +70,25 @@ def _cache_owner_id(owner) -> int | None:
         return id(owner)
 
 
+def _validate_supported_contour(points) -> None:
+    """Reject mixed-height concave footprints until their 3D solver is reliable."""
+    authored_points = tuple(tuple(float(value) for value in point) for point in points)
+    if (
+        not is_flat_eave_contour(authored_points)
+        and not is_convex_contour_xy(authored_points)
+    ):
+        raise GeometryInputError(
+            "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
+            "В RoofForge 0.3.16 временно отключено построение крыши "
+            "по вогнутому контуру с разной высотой вершин: результат "
+            "пока недостаточно надёжен. Используй вогнутый контур "
+            "с одинаковой высотой карниза или выпуклый контур.",
+        )
+
+
 def _build_roof_surface(points, pitches, overhang, corner_convergence):
     authored_points = tuple(tuple(float(value) for value in point) for point in points)
+    _validate_supported_contour(authored_points)
     if overhang > 0.0:
         surface = build_source_anchored_overhang_surface(
             authored_points, pitches, overhang,
@@ -114,6 +131,8 @@ def build_roof_payload(
             "Свес должен быть конечным неотрицательным расстоянием."
         )
 
+    # Never reuse a cached mixed-height concave surface from an earlier path.
+    _validate_supported_contour(points)
     owner_id = _cache_owner_id(cache_owner)
     signature = (
         tuple(tuple(float(value) for value in point) for point in points),
@@ -147,13 +166,14 @@ def clear_surface_cache() -> None:
 
 
 def _dissolve_coplanar_edges(mesh, *, exact_planar: bool = False) -> None:
-    """Merge planar patches without relaxing exact-surface planarity.
+    """Merge coplanar and practically near-coplanar patches.
 
-    Legacy approximate surfaces retain the historical near-coplanar cleanup.
-    Exact surfaces use a far tighter angular and distance tolerance so a
-    shallow but real roof-plane break is never dissolved into a warped n-gon.
-    The operation is repeated because a dissolve can expose new coplanar
-    neighbours. Degree-two remnants and loose internal geometry are removed.
+    Exact support-plane construction can still leave tiny angular and positional
+    residuals at nominally shared planes. Apply the same bounded cleanup window
+    to exact and approximate surfaces: up to 0.05 degrees and 10 ppm of the
+    mesh span. This removes numerical seams while retaining meaningful ridges.
+    The operation repeats because a dissolve can expose new neighbours.
+    Degree-two remnants and loose internal geometry are removed.
     """
     bm = bmesh.new()
     try:
@@ -163,17 +183,14 @@ def _dissolve_coplanar_edges(mesh, *, exact_planar: bool = False) -> None:
             span = max(
                 max(v.x for v in coordinates) - min(v.x for v in coordinates),
                 max(v.y for v in coordinates) - min(v.y for v in coordinates),
-                max(v.z for v in coordinates),
+                max(v.z for v in coordinates) - min(v.z for v in coordinates),
                 1.0,
             )
         else:
             span = 1.0
-        if exact_planar:
-            distance_tolerance = span * 1.0e-7
-            minimum_normal_dot = cos(radians(1.0e-5))
-        else:
-            distance_tolerance = span * 1.0e-5
-            minimum_normal_dot = cos(radians(0.05))
+        # Same bounded cleanup for exact and approximate surfaces.
+        distance_tolerance = span * 1.0e-5
+        minimum_normal_dot = cos(radians(0.05))
 
         # Each successful pass removes at least one face; the bound is a
         # defensive guard against unexpected BMesh behaviour on malformed data.
@@ -238,7 +255,8 @@ def _roof_face_metadata(mesh, surface, shell):
         max(v.co.y for v in mesh.vertices) - min(v.co.y for v in mesh.vertices),
         max(v.co.z for v in mesh.vertices) - min(v.co.z for v in mesh.vertices),
     )
-    tolerance = scale * 2.0e-6
+    # Match the near-coplanar dissolve window so merged faces retain metadata.
+    tolerance = scale * 1.0e-5
     component_values = []
     slope_values = []
     for polygon in mesh.polygons:

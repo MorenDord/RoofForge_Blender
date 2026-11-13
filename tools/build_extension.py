@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIRS = ("addon", "core")
 EXTRA_FILES = ("INSTALL_TEST_RU.md",)
+# Experimental mixed-height concave envelope code remains source/test-only.
+EXCLUDED_PACKAGE_PATHS = {"core/intersection_envelope.py"}
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
 
@@ -44,7 +46,12 @@ def collect_package_files() -> list[Path]:
         if not (package_root / "__init__.py").is_file():
             raise SystemExit(f"Missing Python package initializer: {directory}/__init__.py")
         for path in package_root.rglob("*.py"):
-            if "__pycache__" not in path.parts and path.is_file():
+            relative_path = path.relative_to(ROOT).as_posix()
+            if (
+                "__pycache__" not in path.parts
+                and path.is_file()
+                and relative_path not in EXCLUDED_PACKAGE_PATHS
+            ):
                 files.append(path)
     missing = [str(path.relative_to(ROOT)) for path in files if not path.is_file()]
     if missing:
@@ -74,6 +81,11 @@ def main() -> int:
             raise SystemExit(f"Package is missing required root files: {sorted(missing)}")
         if any(name.startswith(("tests/", "docs/", "roof_forge_2.8.4/")) for name in names):
             raise SystemExit("Development tests/docs or legacy add-on files leaked into the extension ZIP.")
+        leaked_experiments = EXCLUDED_PACKAGE_PATHS & names
+        if leaked_experiments:
+            raise SystemExit(
+                f"Experimental modules leaked into the extension ZIP: {sorted(leaked_experiments)}"
+            )
         bad_member = archive.testzip()
         if bad_member:
             raise SystemExit(f"Corrupt ZIP member: {bad_member}")

@@ -310,17 +310,17 @@ def main() -> None:
 
     # A narrow 0.05-degree facet is within the practical planar tolerance and
     # should not leave a long internal seam. A real 5-degree ridge must remain.
-    def two_panel_mesh(name, angle_degrees):
+    def two_panel_mesh(name, angle_degrees, base_z=0.0):
         width = 0.01
         length = 10.0
         z_offset = width * math.tan(math.radians(angle_degrees))
         panel_mesh = bpy.data.meshes.new(name)
         panel_mesh.from_pydata(
             [
-                (0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
-                (1.0, length, 0.0), (0.0, length, 0.0),
-                (1.0 + width, 0.0, z_offset),
-                (1.0 + width, length, z_offset),
+                (0.0, 0.0, base_z), (1.0, 0.0, base_z),
+                (1.0, length, base_z), (0.0, length, base_z),
+                (1.0 + width, 0.0, base_z + z_offset),
+                (1.0 + width, length, base_z + z_offset),
             ],
             [],
             [(0, 1, 2, 3), (1, 4, 5, 2)],
@@ -328,30 +328,38 @@ def main() -> None:
         panel_mesh.update(calc_edges=True)
         return panel_mesh
 
-    near_flat_mesh = two_panel_mesh("RoofForge_NearFlat_Seam", 0.04)
-    roof_build_module._dissolve_coplanar_edges(near_flat_mesh)
-    ensure(
-        len(near_flat_mesh.polygons) == 1,
-        "near-coplanar narrow facet left a redundant internal seam",
-    )
-    bpy.data.meshes.remove(near_flat_mesh)
-
-    ridge_mesh = two_panel_mesh("RoofForge_Real_Ridge", 5.0)
-    roof_build_module._dissolve_coplanar_edges(ridge_mesh)
-    ridge_bm = bmesh.new()
-    try:
-        ridge_bm.from_mesh(ridge_mesh)
-        ridge_bm.normal_update()
-        shared_ridge_edges = [
-            edge for edge in ridge_bm.edges if len(edge.link_faces) == 2
-        ]
-        ensure(
-            len(ridge_mesh.polygons) == 2 and len(shared_ridge_edges) == 1,
-            "real 5-degree roof ridge was incorrectly dissolved",
+    for exact_planar, base_z in ((False, 0.0), (True, 1000.0)):
+        near_flat_mesh = two_panel_mesh(
+            f"RoofForge_NearFlat_Seam_{exact_planar}", 0.04, base_z
         )
-    finally:
-        ridge_bm.free()
-    bpy.data.meshes.remove(ridge_mesh)
+        roof_build_module._dissolve_coplanar_edges(
+            near_flat_mesh, exact_planar=exact_planar
+        )
+        ensure(
+            len(near_flat_mesh.polygons) == 1,
+            f"near-coplanar 0.04-degree facet survived cleanup (exact={exact_planar})",
+        )
+        bpy.data.meshes.remove(near_flat_mesh)
+
+    for angle in (0.08, 5.0):
+        ridge_mesh = two_panel_mesh(f"RoofForge_Real_Ridge_{angle}", angle)
+        roof_build_module._dissolve_coplanar_edges(
+            ridge_mesh, exact_planar=True
+        )
+        ridge_bm = bmesh.new()
+        try:
+            ridge_bm.from_mesh(ridge_mesh)
+            ridge_bm.normal_update()
+            shared_ridge_edges = [
+                edge for edge in ridge_bm.edges if len(edge.link_faces) == 2
+            ]
+            ensure(
+                len(ridge_mesh.polygons) == 2 and len(shared_ridge_edges) == 1,
+                f"real {angle}-degree roof ridge was incorrectly dissolved",
+            )
+        finally:
+            ridge_bm.free()
+        bpy.data.meshes.remove(ridge_mesh)
 
 
     ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
@@ -805,8 +813,9 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
-    # A mixed-height concave contour must use exact planar source faces
-    # and the exact planar support-plane arrangement, never a distance field.
+    # Mixed-height concave footprints are deliberately disabled in 0.3.16.
+    # The block applies with and without overhang; convex mixed-height contours
+    # remain supported and are exercised below.
     mixed_concave_points = [
         (0.0, 0.0, 0.00),
         (3.0, 0.0, 0.05),
@@ -815,72 +824,6 @@ def main() -> None:
         (1.0, 3.0, 0.16),
         (0.0, 3.0, 0.10),
     ]
-    mixed_concave_pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
-    mixed_surface, mixed_shell, _mixed_solver = roof_build_for_units.build_roof_payload(
-        mixed_concave_points, mixed_concave_pitches, 0.01, 0.0
-    )
-    ensure(
-        mixed_surface.approximation_error == 0.0 and mixed_surface.refinement_depth == 0,
-        "mixed-height concave roof must not use a sampled or smoothed height field",
-    )
-    ensure(
-        len(mixed_surface.faces) <= 512,
-        "mixed-height concave exact plane arrangement exceeded the cell budget",
-    )
-    ensure(
-        len({index for index in mixed_surface.face_slope_indices if index >= 0}) == len(mixed_concave_points)
-        and all(-1 <= index < len(mixed_concave_points) for index in mixed_surface.face_slope_indices),
-        "every mixed-height roof cell must be an authored support plane or an explicit planar transition face",
-    )
-    mixed_mesh = roof_build_for_units.create_roof_mesh_data(
-        "RoofForge_Smoke_Mixed_Height_Concave", mixed_surface, mixed_shell
-    )
-    component_attribute = mixed_mesh.attributes.get("roof_forge_component")
-    slope_attribute = mixed_mesh.attributes.get("roof_forge_slope_index")
-    ensure(
-        component_attribute is not None and slope_attribute is not None
-        and len(component_attribute.data) == len(mixed_mesh.polygons)
-        and len(slope_attribute.data) == len(mixed_mesh.polygons),
-        "mixed-height concave mesh face metadata is missing or mismatched",
-    )
-    component_values = [item.value for item in component_attribute.data]
-    slope_values = [item.value for item in slope_attribute.data]
-    mixed_bm = bmesh.new()
-    try:
-        mixed_bm.from_mesh(mixed_mesh)
-        ensure(
-            all(len(edge.link_faces) == 2 for edge in mixed_bm.edges),
-            "mixed-height concave shell is not edge-manifold",
-        )
-        mixed_bm.normal_update()
-        span = max(
-            max((vertex.co[axis] for vertex in mixed_bm.verts), default=0.0)
-            - min((vertex.co[axis] for vertex in mixed_bm.verts), default=0.0)
-            for axis in range(3)
-        )
-        planarity_tolerance = max(1e-7, span * 1e-6)
-        non_planar_faces = []
-        for face in mixed_bm.faces:
-            if len(face.verts) < 4:
-                continue
-            origin = face.verts[0].co
-            normal = face.normal
-            residual = max(
-                abs(normal.dot(vertex.co - origin))
-                for vertex in face.verts
-            )
-            if residual > planarity_tolerance:
-                non_planar_faces.append((face.index, residual))
-        ensure(
-            not non_planar_faces,
-            f"mixed-height concave output contains non-planar polygons: {non_planar_faces[:8]}",
-        )
-    finally:
-        mixed_bm.free()
-    bpy.data.meshes.remove(mixed_mesh)
-
-    # U-shaped contour with a single elevated eave vertex exercises two
-    # reflex corners and several independent exact three-plane seam events.
     mixed_u_points = [
         (0.0, 0.0, 0.0),
         (4.0, 0.0, 0.0),
@@ -891,54 +834,62 @@ def main() -> None:
         (1.0, 4.0, 0.08),
         (0.0, 4.0, 0.0),
     ]
-    mixed_u_pitches = [40.0] * len(mixed_u_points)
-    mixed_u_surface, mixed_u_shell, _mixed_u_solver = roof_build_for_units.build_roof_payload(
-        mixed_u_points, mixed_u_pitches, 0.01, 0.0
-    )
-    ensure(
-        mixed_u_surface.approximation_error == 0.0
-        and mixed_u_surface.refinement_depth == 0,
-        "mixed-height U contour used a sampled or smoothed height field",
-    )
-    ensure(
-        abs(mixed_u_surface.surface_area_xy - 10.0) < 1e-7
-        and len(mixed_u_surface.faces) <= 512
-        and len({index for index in mixed_u_surface.face_slope_indices if index >= 0}) == len(mixed_u_points)
-        and all(-1 <= index < len(mixed_u_points) for index in mixed_u_surface.face_slope_indices),
-        "mixed-height U contour did not create a bounded exact planar support-plane arrangement",
-    )
-    mixed_u_mesh = roof_build_for_units.create_roof_mesh_data(
-        "RoofForge_Smoke_Mixed_Height_U", mixed_u_surface, mixed_u_shell
-    )
-    mixed_u_bm = bmesh.new()
-    try:
-        mixed_u_bm.from_mesh(mixed_u_mesh)
-        ensure(
-            all(len(edge.link_faces) == 2 for edge in mixed_u_bm.edges),
-            "mixed-height U contour shell is not edge-manifold",
-        )
-        mixed_u_bm.normal_update()
-        u_span = max(
-            max((vertex.co[axis] for vertex in mixed_u_bm.verts), default=0.0)
-            - min((vertex.co[axis] for vertex in mixed_u_bm.verts), default=0.0)
-            for axis in range(3)
-        )
-        u_planarity_tolerance = max(1e-7, u_span * 1e-6)
-        for face in mixed_u_bm.faces:
-            origin = face.verts[0].co
-            normal = face.normal
-            residual = max(
-                abs(normal.dot(vertex.co - origin))
-                for vertex in face.verts
-            )
-            ensure(
-                residual <= u_planarity_tolerance,
-                "mixed-height U contour contains a non-planar output face",
-            )
-    finally:
-        mixed_u_bm.free()
-    bpy.data.meshes.remove(mixed_u_mesh)
+    for label, points in (
+        ("L", mixed_concave_points),
+        ("U", mixed_u_points),
+    ):
+        for overhang_units in (0.0, 0.1):
+            try:
+                roof_build_for_units.build_roof_payload(
+                    points, [40.0] * len(points), 0.01, overhang_units
+                )
+            except Exception as exc:
+                ensure(
+                    getattr(exc, "code", "") == "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
+                    f"mixed-height concave {label} returned the wrong diagnostic: {exc}",
+                )
+            else:
+                ensure(
+                    False,
+                    f"mixed-height concave {label} unexpectedly reached the roof builder",
+                )
 
+    clear_scene()
+    unsupported_mesh = bpy.data.meshes.new("RoofForge_MixedHeightConcave_Disabled_Mesh")
+    unsupported_mesh.from_pydata(
+        mixed_concave_points,
+        [(index, (index + 1) % len(mixed_concave_points))
+         for index in range(len(mixed_concave_points))],
+        [],
+    )
+    unsupported_mesh.update()
+    unsupported_source = bpy.data.objects.new(
+        "RoofForge_MixedHeightConcave_Disabled", unsupported_mesh
+    )
+    bpy.context.scene.collection.objects.link(unsupported_source)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    unsupported_source.select_set(True)
+    bpy.context.view_layer.objects.active = unsupported_source
+    unsupported_settings = bpy.context.scene.roof_forge
+    unsupported_settings.eave_overhang_cm = 0.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare mixed-height concave pitch settings",
+    )
+    unsupported_result = bpy.ops.roof_forge.generate_surface()
+    ensure(
+        unsupported_result == {"CANCELLED"},
+        "mixed-height concave contour unexpectedly generated a roof",
+    )
+    ensure(
+        "временно отключено построение крыши" in unsupported_settings.last_status.lower(),
+        "mixed-height concave contour did not expose the user warning",
+    )
+    ensure(
+        unsupported_settings.generated_object is None,
+        "disabled mixed-height concave contour left a generated roof object",
+    )
 
     # The same offset-contour rebuild must work on non-flat XYZ eaves.
     clear_scene()

@@ -209,7 +209,12 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                 bpy.data.meshes.remove(new_mesh)
             message = getattr(exc, "message", str(exc))
             settings.last_status = str(message)
-            self.report({"ERROR"}, message)
+            report_level = (
+                {"WARNING"}
+                if getattr(exc, "code", "") == "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED"
+                else {"ERROR"}
+            )
+            self.report(report_level, message)
             return {"CANCELLED"}
 
         action = "Updated" if not created_object else "Created"

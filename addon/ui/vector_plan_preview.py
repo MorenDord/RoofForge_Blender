@@ -29,7 +29,6 @@ _PREVIEW_SLOT_TOP_UNITS = 4.0
 _PREVIEW_SLOT_MIN_SIDE = 96.0
 _PREVIEW_MARGIN_FRACTION = 0.075
 _PREVIEW_DRAW_INSET = 8.0
-_PANEL_CONTENT_LEFT_MARGIN_UNITS = 0.4
 _TEMPLATE_ICON_SCALE_BASE = 32.0
 _TEMPLATE_ICON_SIDE_MARGIN = 24.0
 _WIDGET_UNIT_BASE = 20.0
@@ -124,11 +123,11 @@ def _compute_canvas_layout(
     ui_scale=1.0,
     widget_unit=None,
 ):
-    """Fit the roof inside the actual template_icon button dimensions.
+    """Fit the roof inside a center-aligned template_icon button.
 
-    Blender sizes template_icon as U.widget_unit * icon_scale in both axes.
-    Its normal panel-column position starts at the UI_PANEL_MARGIN_X inset.
-    The next controls are laid out after that same icon button.
+    The panel draws the placeholder in a CENTER-aligned row, so its horizontal
+    center is the UI region midpoint. Blender sizes template_icon as
+    U.widget_unit * icon_scale in both axes.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
@@ -158,13 +157,16 @@ def _compute_canvas_layout(
     if scale <= 0.0:
         return None
 
-    # A normal panel column starts at Blender's UI_PANEL_MARGIN_X:
-    # 0.4 * U.widget_unit. The template_icon is left-aligned in that column;
-    # centring it in the whole region incorrectly shifts it to the right.
-    slot_left = _PANEL_CONTENT_LEFT_MARGIN_UNITS * widget_unit
+    # panel.py places template_icon in a CENTER-aligned row. Center the GPU
+    # canvas on that same row, independent of sidebar width and inner margins.
+    slot_left = (width - slot_side) * 0.5
     slot_top = height - _PREVIEW_SLOT_TOP_UNITS * widget_unit
     slot_bottom = slot_top - slot_side
-    if slot_bottom < 8.0 * ui_scale or slot_left + slot_side > width:
+    if (
+        slot_bottom < 8.0 * ui_scale
+        or slot_left < 0.0
+        or slot_left + slot_side > width
+    ):
         return None
 
     draw_left = slot_left + inset
@@ -294,6 +296,7 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
         f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
         f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
         f"template_icon: scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
+        f"Centered slot midpoint: {slot_left + slot_side * 0.5:.1f}px",
         (
             "Estimated slot L,B,R,T: "
             f"{slot_left:.1f},{slot_bottom:.1f},"

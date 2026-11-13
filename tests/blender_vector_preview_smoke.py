@@ -88,8 +88,8 @@ assert abs(center_a[0] - 5.0) < 1.0e-7
 assert abs(center_b[0] - 5.0) < 1.0e-7
 assert abs(center_a[1] - center_b[1]) < 1.0e-7
 
-# template_icon reserves U.widget_unit * scale. The previous 32px assumption
-# made the GPU square larger than the real UI item and shifted it to the right.
+# template_icon reserves U.widget_unit * scale and lives in a CENTER-aligned
+# row. Its GPU overlay must share the exact row midpoint at every panel width.
 assert module.estimate_widget_unit(1.333) == 27
 assert module.preview_icon_scale(72, widget_unit=20.0) is None
 layout = module._compute_canvas_layout(
@@ -101,7 +101,7 @@ wider_layout = module._compute_canvas_layout(
 assert layout is not None and wider_layout is not None
 assert abs(layout["slot_side"] - 185.0) < 1.0e-7
 assert abs(layout["icon_scale"] - (296.0 / 32.0)) < 1.0e-7
-assert abs(layout["slot_left"] - 8.0) < 1.0e-7
+assert abs(layout["slot_left"] - 67.5) < 1.0e-7
 assert abs(layout["slot_top"] - 820.0) < 1.0e-7
 assert abs(layout["slot_bottom"] - 635.0) < 1.0e-7
 assert abs(layout["margin"] - layout["draw_side"] * 0.075) < 1.0e-7
@@ -109,16 +109,16 @@ center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
-assert abs(layout["target_center"][0] - 100.5) < 1.0e-7
+assert abs(layout["target_center"][0] - 160.0) < 1.0e-7
 assert abs(layout["target_center"][1] - 727.5) < 1.0e-7
-assert layout["scissor"] == (8, 635, 185, 185)
+assert layout["scissor"] == (68, 635, 185, 185)
 assert module._translate_scissor(
     layout["scissor"], (100, 200, 320, 900)
 ) == (108, 835, 185, 185)
 assert abs(layout["draw_side"] - 169.0) < 1.0e-7
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
-assert abs(wider_layout["target_center"][0] - 131.75) < 1.0e-7
+assert abs(wider_layout["target_center"][0] - 210.0) < 1.0e-7
 assert abs(wider_layout["target_center"][1] - 696.25) < 1.0e-7
 
 fake_view2d = type("View2D", (), {
