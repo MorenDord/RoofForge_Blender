@@ -98,3 +98,14 @@ incompatible native module keeps the Python fallback available.
 
 The native wheel is no longer only a detached CI artifact: it is part of the
 installable 0.3.18 extension ZIP.
+
+
+## Complex flat convex eaves
+
+Flat convex footprints now support up to 256 boundary edges. The Blender
+adapter retains the 64-edge limit for concave and mixed-height footprints.
+For flat convex contours over 64 edges, source-aligned eave strips are built
+around the weighted-wavefront base roof instead of using the more expensive
+plane-envelope arrangement. The result retains one authored pitch and support
+plane per source edge, validates nested/non-self-intersecting outer boundaries,
+and is closed-shell checked before Blender datablock creation.

@@ -1,7 +1,7 @@
 """Verify the installed Blender Extension loads and uses all bundled Rust kernels.
 
 Run after installing the packaged extension with:
-    blender --command extension install-file -r user_default -e roof_forge-0.3.18.zip
+    blender --command extension install-file -r user_default -e roof_forge-0.3.19.zip
     blender --background --python tests/blender_native_extension_smoke.py
 """
 from __future__ import annotations

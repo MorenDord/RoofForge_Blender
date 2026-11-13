@@ -1,4 +1,4 @@
-# RoofForge 0.3.18 — установка и тестирование
+# RoofForge 0.3.19 — установка и тестирование
 
 Экспериментальная сборка для Blender 5.0+. Растерный PNG-превью полностью удалён. Остаётся только прямой GPU-векторный план в основной вкладке **RoofForge** N-панели.
 
@@ -33,8 +33,8 @@
 1. Удали предыдущую тестовую версию RoofForge в **Edit → Preferences → Get Extensions**.
 2. Открой Actions: https://github.com/MorenDord/RoofForge_Blender/actions
 3. Выбери последний успешный workflow **RoofForge tests** на ветке `feature/0.2.0-arbitrary-contours-live-pitch`.
-4. Скачай внешний архив `roof_forge-0.3.18-blender-5.0.1` и распакуй его один раз.
-5. Установи внутренний `roof_forge-0.3.18.zip` через **Preferences → Get Extensions → Install from Disk…**. Внутренний ZIP не распаковывай.
+4. Скачай внешний архив `roof_forge-0.3.19-blender-5.0.1` и распакуй его один раз.
+5. Установи внутренний `roof_forge-0.3.19.zip` через **Preferences → Get Extensions → Install from Disk…**. Внутренний ZIP не распаковывай.
 6. Внизу панели RoofForge должна появиться строка **Geometry core: Rust (5/5 kernels)**. Если отображается Python fallback, native wheel не загрузился.
 
 ## Проверка перед созданием
@@ -114,7 +114,7 @@
 Ограничение: положительный свес для вогнутого контура с разными высотами карниза всё ещё не поддерживается.
 
 
-## Native Rust core в Blender 0.3.18
+## Native Rust core в Blender 0.3.19
 
 В установочный ZIP теперь включены stable-ABI wheels для Linux x64, Windows x64, macOS x64 и macOS ARM64. Blender устанавливает совместимый wheel в собственный `site-packages` расширения; сетевое скачивание ядра при запуске не требуется.
 

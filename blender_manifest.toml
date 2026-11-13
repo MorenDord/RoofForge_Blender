@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "roof_forge"
-version = "0.3.18"
+version = "0.3.19"
 name = "RoofForge"
 tagline = "Procedural roof shell generator"
 maintainer = "MorenDord"
