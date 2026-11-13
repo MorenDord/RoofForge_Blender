@@ -51,15 +51,16 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build platform-native stable-ABI wheel
+        working-directory: rust/roof_forge_native
         shell: bash
         run: |
           python -m pip install "maturin>=1.9,<2.0"
           if [ "${{ matrix.platform }}" = "linux-x64" ]; then
-            python -m maturin build --release --compatibility manylinux_2_28 --out dist/wheels
+            python -m maturin build --release --compatibility manylinux_2_28 --out ../../dist/wheels
           else
-            python -m maturin build --release --out dist/wheels
+            python -m maturin build --release --out ../../dist/wheels
           fi
-          ls -lh dist/wheels/*.whl
+          ls -lh ../../dist/wheels/*.whl
       - name: Upload native platform wheel
         uses: actions/upload-artifact@v4
         with:
