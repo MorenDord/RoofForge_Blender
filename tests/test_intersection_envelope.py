@@ -9,6 +9,7 @@ from core.intersection_envelope import (
 from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
+from core.exact_spatial import validate_planar_face
 
 
 def _wavy_outline(outline, subdivisions, amplitude, z_amplitude=0.0):
@@ -163,22 +164,84 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
                     "GLOBAL_ENVELOPE_EAVE_UNDERCUT",
                 )
 
-    def test_dense_mixed_height_concave_contours_fail_closed_when_planes_do_not_form_a_surface(self):
+    def assert_transition_faceted_surface(self, surface, source_count):
+        transition_faces = [
+            face for face, source in zip(
+                surface.faces, surface.face_slope_indices
+            )
+            if source == -1
+        ]
+        self.assertTrue(
+            transition_faces,
+            "the completed surface must contain explicit transition facets",
+        )
+        self.assertEqual(
+            set(source for source in surface.face_slope_indices if source >= 0),
+            set(range(source_count)),
+        )
+
+        edge_uses = {}
+        for face, source in zip(surface.faces, surface.face_slope_indices):
+            for local_index, first in enumerate(face):
+                second = face[(local_index + 1) % len(face)]
+                key = (min(first, second), max(first, second))
+                edge_uses.setdefault(key, []).append(source)
+
+            if source == -1:
+                self.assertEqual(len(face), 3)
+                validate_planar_face(surface.vertices, face, eps=1e-8)
+            else:
+                plane = surface.planes[source]
+                for vertex_index in face:
+                    x, y, z = surface.vertices[vertex_index]
+                    self.assertAlmostEqual(z, plane.height(x, y), places=7)
+
+        for face, source in zip(surface.faces, surface.face_slope_indices):
+            if source != -1:
+                continue
+            for local_index, first in enumerate(face):
+                second = face[(local_index + 1) % len(face)]
+                key = (min(first, second), max(first, second))
+                sources = edge_uses[key]
+                self.assertEqual(
+                    len(sources), 2,
+                    "each transition-facet edge must be shared by one other face",
+                )
+                other_source = next(
+                    value for value in sources if value != -1
+                ) if any(value >= 0 for value in sources) else -1
+                if other_source >= 0:
+                    plane = surface.planes[other_source]
+                    for vertex_index in (first, second):
+                        x, y, z = surface.vertices[vertex_index]
+                        self.assertAlmostEqual(
+                            z, plane.height(x, y), places=7,
+                            msg="transition seam must stay on the adjacent support plane",
+                        )
+
+    def test_dense_mixed_height_concave_contours_use_exact_transition_facets(self):
         for fixture in (_dense_mixed_height_l, _dense_mixed_height_u):
             points, pitches = fixture()
             with self.subTest(vertices=len(points)):
-                # Confirm each fixture is valid and still supported by the
-                # existing exact spatial construction.
+                surface = build_intersection_envelope_surface(points, pitches)
                 reference = build_roof_surface(points, pitches)
+                self.assert_reference_surface(points, surface)
                 self.assert_reference_surface(points, reference)
+                self.assert_transition_faceted_surface(surface, len(points))
+                self.assert_transition_faceted_surface(reference, len(points))
+                self.assert_closed_shell(surface)
                 self.assert_closed_shell(reference)
 
-                with self.assertRaises(GeometryInputError) as context:
-                    build_intersection_envelope_surface(points, pitches)
-                self.assertEqual(
-                    context.exception.code,
-                    "PLANE_ENVELOPE_DISCONTINUITY",
-                )
+    def test_finite_envelope_can_be_inspected_without_transition_completion(self):
+        points, pitches = _dense_mixed_height_l()
+        with self.assertRaises(GeometryInputError) as context:
+            build_intersection_envelope_surface(
+                points, pitches, complete_transition_facets=False
+            )
+        self.assertEqual(
+            context.exception.code,
+            "PLANE_ENVELOPE_DISCONTINUITY",
+        )
 
 
 if __name__ == "__main__":

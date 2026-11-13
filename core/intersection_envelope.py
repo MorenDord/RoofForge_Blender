@@ -251,12 +251,12 @@ def _lower_envelope_finite_inward_cells(
     return output
 
 
-def build_intersection_envelope_surface(
+def _build_finite_intersection_envelope_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
     eps: float = 1e-9,
 ) -> RoofSurface:
-    """Build an exact support-plane roof without alpha or central-ring search.
+    """Build the local finite-support envelope before transition completion.
 
     One plane is constructed through every authored 3D eave edge at its
     requested pitch. Finite inward edge supports define which planes may
@@ -439,6 +439,215 @@ def build_intersection_envelope_surface(
     )
 
 
+
+
+
+def _has_reflex_vertex(domain: Sequence[Point2], eps: float) -> bool:
+    area = signed_area(domain)
+    if abs(area) <= eps:
+        return False
+    winding = 1.0 if area > 0.0 else -1.0
+    scale = max(_bbox_scale(domain), 1.0)
+    turn_tolerance = eps * scale * scale
+    for index, current in enumerate(domain):
+        previous = domain[index - 1]
+        following = domain[(index + 1) % len(domain)]
+        turn = (
+            (current[0] - previous[0]) * (following[1] - current[1])
+            - (current[1] - previous[1]) * (following[0] - current[0])
+        )
+        if turn * winding < -turn_tolerance:
+            return True
+    return False
+
+
+def _validate_transition_faceted_surface(
+    surface: RoofSurface,
+    source_count: int,
+    eps: float,
+) -> int:
+    """Validate exact planar transition facets and their support-plane seams."""
+    from .exact_spatial import validate_planar_face
+
+    if len(surface.faces) != len(surface.face_slope_indices):
+        raise GeometryInputError(
+            "TRANSITION_FACE_SOURCE_COUNT",
+            "Для каждой грани переходной поверхности должен быть задан источник.",
+        )
+
+    transition_indices = [
+        index for index, source in enumerate(surface.face_slope_indices)
+        if source == -1
+    ]
+    if not transition_indices:
+        raise GeometryInputError(
+            "TRANSITION_FACETS_MISSING",
+            "Событийная топология не создала ни одной отдельной переходной грани.",
+        )
+
+    used_sources = {
+        source for source in surface.face_slope_indices
+        if source >= 0
+    }
+    missing_sources = sorted(set(range(source_count)) - used_sources)
+    if missing_sources:
+        raise GeometryInputError(
+            "TRANSITION_SUPPORT_PLANE_UNUSED",
+            "Переходная топология не сохранила отдельные области скатов: "
+            + ", ".join(str(index + 1) for index in missing_sources),
+        )
+
+    scale = max(
+        _bbox_scale(surface.boundary_xy),
+        max((abs(value) for point in surface.vertices for value in point), default=1.0),
+        1.0,
+    )
+    tolerance = max(eps * scale * 20.0, 1e-10)
+    edge_uses: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+    for face_index, (face, source) in enumerate(
+        zip(surface.faces, surface.face_slope_indices)
+    ):
+        if len(face) < 3:
+            raise GeometryInputError(
+                "TRANSITION_DEGENERATE_FACE",
+                f"Грань {face_index + 1} не содержит трёх вершин.",
+            )
+        if source < -1 or source >= source_count:
+            raise GeometryInputError(
+                "TRANSITION_FACE_SOURCE_INDEX",
+                f"Грань {face_index + 1} ссылается на неверный источник {source}.",
+            )
+        if source == -1:
+            if len(face) != 3:
+                raise GeometryInputError(
+                    "TRANSITION_FACE_NOT_TRIANGULATED",
+                    "Переходная область должна быть разбита на отдельные треугольные фасеты.",
+                )
+            validate_planar_face(
+                surface.vertices, face, eps=max(eps * 10.0, 1e-10)
+            )
+        else:
+            plane = surface.planes[source]
+            for vertex_index in face:
+                x, y, z = surface.vertices[vertex_index]
+                residual = abs(z - plane.height(x, y))
+                if residual > tolerance * max(1.0, abs(z)):
+                    raise GeometryInputError(
+                        "TRANSITION_SUPPORT_FACE_OFF_PLANE",
+                        f"Грань {face_index + 1} не лежит на своей опорной плоскости {source + 1}.",
+                    )
+
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            edge_uses.setdefault(key, []).append((face_index, source))
+
+    # Every transition-facet edge is an internal seam: it must be shared by
+    # exactly one other planar face. If that face is an authored slope, the
+    # common edge must lie on that slope's exact support plane.
+    for face_index in transition_indices:
+        face = surface.faces[face_index]
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            uses = edge_uses.get(key, ())
+            if len(uses) != 2:
+                raise GeometryInputError(
+                    "TRANSITION_FACET_OPEN_EDGE",
+                    f"Ребро фасеты {face_index + 1} не разделяется ровно двумя гранями.",
+                )
+            other = next(
+                (entry for entry in uses if entry[0] != face_index),
+                None,
+            )
+            if other is None:
+                raise GeometryInputError(
+                    "TRANSITION_FACET_SELF_EDGE",
+                    "Переходная фасета использует одно ребро дважды.",
+                )
+            other_source = other[1]
+            if other_source >= 0:
+                plane = surface.planes[other_source]
+                for vertex_index in (first, second):
+                    x, y, z = surface.vertices[vertex_index]
+                    if abs(z - plane.height(x, y)) > tolerance * max(1.0, abs(z)):
+                        raise GeometryInputError(
+                            "TRANSITION_SEAM_OFF_SUPPORT",
+                            f"Стык переходной фасеты с плоскостью ската {other_source + 1} неточен.",
+                        )
+
+    return len(transition_indices)
+
+
+def build_intersection_envelope_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float = 1e-9,
+    *,
+    complete_transition_facets: bool = True,
+) -> RoofSurface:
+    """Build an exact roof, completing finite-support gaps with planar facets.
+
+    Convex/simple cases first use the finite inward edge-support envelope.
+    Mixed-height concave contours go directly to the exact seam-event
+    arrangement: adjacent source planes define each seam, a third support
+    plane defines its exact event node, and the remaining transition cells
+    are triangulated into individually planar facets.
+
+    If the finite envelope itself exposes an internal crack, the same exact
+    event-facet completion is used when enabled. No height averaging,
+    interpolation, smoothing, or relaxed planarity tolerance is used.
+    Set complete_transition_facets=False to inspect the finite envelope
+    alone and retain its fail-closed diagnostic.
+    """
+    if len(points) < 3:
+        raise GeometryInputError(
+            "POLY_TOO_SMALL",
+            "Контур должен содержать минимум три вершины.",
+        )
+    domain = tuple((float(point[0]), float(point[1])) for point in points)
+    z_values = tuple(float(point[2]) for point in points)
+    scale = max(
+        _bbox_scale(domain),
+        max(z_values) - min(z_values),
+        1.0,
+    )
+    mixed_height = max(z_values) - min(z_values) > eps * scale * 10.0
+    needs_event_topology = _has_reflex_vertex(domain, eps) and mixed_height
+
+    def build_transition_completion() -> RoofSurface:
+        from .exact_spatial import build_exact_planar_ring_surface
+
+        completed = build_exact_planar_ring_surface(
+            points, pitches_degrees, eps
+        )
+        _validate_transition_faceted_surface(completed, len(points), eps)
+        return completed
+
+    if complete_transition_facets and needs_event_topology:
+        return build_transition_completion()
+
+    try:
+        return _build_finite_intersection_envelope_surface(
+            points, pitches_degrees, eps
+        )
+    except GeometryInputError as finite_error:
+        if (
+            not complete_transition_facets
+            or finite_error.code != "PLANE_ENVELOPE_DISCONTINUITY"
+        ):
+            raise
+        try:
+            return build_transition_completion()
+        except GeometryInputError as transition_error:
+            raise GeometryInputError(
+                "PLANE_ENVELOPE_TRANSITION_UNRESOLVED",
+                "Конечные области влияния не образовали непрерывную поверхность "
+                f"({finite_error.code}: {finite_error.message}). "
+                "Точная событийная топология переходных фасет также не прошла "
+                f"проверку ({transition_error.code}: {transition_error.message}).",
+            ) from transition_error
 
 
 
