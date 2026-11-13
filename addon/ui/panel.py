@@ -84,7 +84,16 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     except (AttributeError, TypeError, ValueError):
                         pass
                     widget_unit = estimate_widget_unit(ui_scale)
-                    category_rail_width = preview_category_rail_width(widget_unit)
+                    compact_tabs = False
+                    try:
+                        compact_tabs = bool(context.preferences.system.show_panel_tabs_compact)
+                    except (AttributeError, ReferenceError, TypeError, ValueError):
+                        pass
+                    category_rail_width = preview_category_rail_width(
+                        widget_unit,
+                        region=context.region,
+                        compact=compact_tabs,
+                    )
                     icon_scale = preview_icon_scale(
                         max(0.0, region_width - category_rail_width),
                         widget_unit=widget_unit,
