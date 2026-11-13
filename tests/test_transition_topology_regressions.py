@@ -44,6 +44,48 @@ def _reverse_boundary_and_pitches(points, pitches):
     return reversed_points, reversed_pitches
 
 
+def _three_notch_contour():
+    xy = [
+        (0.0, 0.0), (14.0, 0.0), (14.0, 10.0),
+        (11.5, 10.0), (11.0, 6.5), (10.5, 10.0),
+        (7.5, 10.0), (7.0, 6.5), (6.5, 10.0),
+        (3.5, 10.0), (3.0, 6.5), (2.5, 10.0),
+        (0.0, 10.0),
+    ]
+    points = [
+        (x, y, 0.012 * math.sin(index * 0.73)
+         + 0.006 * math.cos(index * 1.19))
+        for index, (x, y) in enumerate(xy)
+    ]
+    pitches = [
+        32.0 + 2.8 * math.sin(index * 0.67)
+        + 1.4 * math.cos(index * 1.03)
+        for index in range(len(points))
+    ]
+    return points, pitches
+
+
+def _narrow_neck_contour(neck_width):
+    lower = 4.0 - 0.5 * neck_width
+    upper = 4.0 + 0.5 * neck_width
+    xy = [
+        (0.0, 0.0), (6.0, 0.0), (6.0, lower), (14.0, lower),
+        (14.0, 0.0), (20.0, 0.0), (20.0, 8.0), (14.0, 8.0),
+        (14.0, upper), (6.0, upper), (6.0, 8.0), (0.0, 8.0),
+    ]
+    points = [
+        (x, y, 0.009 * math.sin(index * 0.81)
+         + 0.004 * math.cos(index * 1.31))
+        for index, (x, y) in enumerate(xy)
+    ]
+    pitches = [
+        30.0 + 2.5 * math.sin(index * 0.91)
+        + 1.0 * math.cos(index * 0.47)
+        for index in range(len(points))
+    ]
+    return points, pitches
+
+
 class TransitionTopologyRegressionTests(unittest.TestCase):
     def assert_exact_closed_transition_surface(self, points, pitches, surface):
         source_count = len(points)
@@ -137,6 +179,26 @@ class TransitionTopologyRegressionTests(unittest.TestCase):
             "reversing the authored contour must not change the exact topology size",
         )
 
+
+    def test_three_reflex_notches_keep_exact_transition_topology(self):
+        points, pitches = _three_notch_contour()
+        surface = build_intersection_envelope_surface(points, pitches)
+        self.assert_exact_closed_transition_surface(points, pitches, surface)
+
+    def test_narrow_neck_with_four_reflex_vertices_remains_closed(self):
+        points, pitches = _narrow_neck_contour(0.60)
+        surface = build_intersection_envelope_surface(points, pitches)
+        self.assert_exact_closed_transition_surface(points, pitches, surface)
+
+    def test_sub_tolerance_neck_is_rejected_before_surface_assembly(self):
+        points, pitches = _narrow_neck_contour(1.0e-8)
+        with self.assertRaises(Exception) as context:
+            build_intersection_envelope_surface(points, pitches)
+        self.assertEqual(
+            getattr(context.exception, "code", None),
+            "VERTICAL_PROJECTED_EDGE",
+            "a neck narrower than the scale-aware edge tolerance must fail closed",
+        )
 
 if __name__ == "__main__":
     unittest.main()
