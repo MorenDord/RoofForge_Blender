@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import cProfile
 import json
 import math
+import pstats
 import statistics
 import time
 from pathlib import Path
@@ -113,6 +115,22 @@ def measure(collector, operation, repeats: int = 5) -> float:
     return statistics.median(values)
 
 
+def profile_top(collector, operation, limit: int = 20):
+    profiler = cProfile.Profile()
+    run_with_collector(collector, lambda: profiler.runcall(operation))
+    stats = pstats.Stats(profiler)
+    rows = sorted(stats.stats.items(), key=lambda item: item[1][3], reverse=True)
+    return [
+        {
+            "function": f"{Path(filename).name}:{line}({name})",
+            "calls": call_data[1],
+            "self_seconds": round(call_data[2], 6),
+            "cumulative_seconds": round(call_data[3], 6),
+        }
+        for (filename, line, name), call_data in rows[:limit]
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json-output", type=Path)
@@ -149,6 +167,12 @@ def main() -> int:
     )
     assert_surface_parity(python_surface, rust_surface)
 
+    surface_operation = lambda: wavefront.build_wavefront_roof_surface(points, pitches)
+    profiles = {
+        "python_surface_top_20": profile_top(python_collector, surface_operation),
+        "rust_surface_top_20": profile_top(rust_dispatch, surface_operation),
+    }
+
     measurements = []
     for label, operation in (
         ("weighted_wavefront_trace_64", lambda: wavefront.run_weighted_wavefront(points, pitches)),
@@ -172,6 +196,7 @@ def main() -> int:
         "repeats": args.repeats,
         "timing_unit": "milliseconds",
         "results": measurements,
+        "surface_assembly_profiles": profiles,
     }
     rendered = json.dumps(report, indent=2)
     print(rendered)
