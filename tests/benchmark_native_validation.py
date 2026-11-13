@@ -5,8 +5,12 @@ import argparse
 import json
 import math
 import statistics
+import sys
 import time
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from core.geometry import _validate_simple_polygon_python, validate_simple_polygon
 from core.native_bridge import (
