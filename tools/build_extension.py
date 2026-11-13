@@ -85,7 +85,7 @@ def wheel_platform(filename: str) -> str:
     platform_tag = parts[4]
     if platform_tag == "win_amd64":
         return "windows-x64"
-    if platform_tag.startswith("manylinux_2_28_x86_64"):
+    if platform_tag.startswith(("manylinux_2_17_x86_64", "manylinux2014_x86_64", "manylinux_2_28_x86_64")):
         return "linux-x64"
     if platform_tag.startswith("macosx_") and platform_tag.endswith("_x86_64"):
         return "macos-x64"
