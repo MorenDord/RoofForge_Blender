@@ -387,19 +387,30 @@ def _point_in_polygon(point: Point2, polygon: Sequence[Point2], tolerance: float
     return inside
 
 
-def _build_flat_wavefront_overhang_surface(points: Sequence[Point3], pitches_degrees: Sequence[float], distance: float, *, eps: float):
+def _build_flat_wavefront_overhang_surface(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    distance: float,
+    *,
+    eps: float,
+    corner_convergence: bool = True,
+):
     """Extend a flat-eave wavefront roof with exact planar eave strips."""
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
     if not is_flat_eave_contour(points, eps):
         raise GeometryInputError(
-            "OVERHANG_WAVEFRONT_NON_FLAT_EAVES",
-            "Для полосовой сборки свеса нужна одна общая высота всех карнизов. Выровняй исходные вершины по Z.",
+            "OVERHANG_CONCAVE_NON_FLAT_EAVES",
+            "Для свеса невыпуклого контура пока нужна одна общая высота всех карнизов. Выровняй исходные вершины по Z.",
         )
 
     source = tuple(tuple(float(value) for value in point) for point in points)
-    expanded = corner_converged_overhang_contour(source, pitches_degrees, distance, eps)
+    expanded = (
+        corner_converged_overhang_contour(source, pitches_degrees, distance, eps)
+        if corner_convergence
+        else offset_contour_outward(source, distance, eps)
+    )
     source_xy = tuple((point[0], point[1]) for point in source)
     expanded_xy = tuple((point[0], point[1]) for point in expanded)
     scale = max(
@@ -545,18 +556,33 @@ def build_source_anchored_overhang_surface(
                 "OVERHANG_CONCAVE_NEEDS_CORNER_CONVERGENCE",
                 "Для свеса невыпуклого контура включи «Сводить углы»: соседние полосы свеса должны сходиться в общей точке.",
             )
-        return _build_flat_wavefront_overhang_surface(source, pitches_degrees, distance, eps=1e-9)
+        return _build_flat_wavefront_overhang_surface(
+            source, pitches_degrees, distance, eps=1e-9,
+            corner_convergence=True,
+        )
 
     # Large flat convex contours are kept out of the quadratic plane-envelope
     # arrangement. Their eaves are built as exact source-plane strips around
     # the weighted-wavefront roof, using the same topology-checked ring path
     # as flat concave contours.
-    if corner_convergence and len(source) > 64:
+    if len(source) > 64:
         from .wavefront import is_flat_eave_contour
 
-        if is_flat_eave_contour(source, 1e-9):
+        equal_pitch = (
+            max(float(value) for value in pitches_degrees)
+            - min(float(value) for value in pitches_degrees)
+            <= 1.0e-7
+        )
+        if (
+            is_flat_eave_contour(source, 1e-9)
+            and (corner_convergence or equal_pitch)
+        ):
             return _build_flat_wavefront_overhang_surface(
-                source, pitches_degrees, distance, eps=1e-9
+                source,
+                pitches_degrees,
+                distance,
+                eps=1e-9,
+                corner_convergence=corner_convergence,
             )
 
     planes = build_boundary_planes(source, pitches_degrees)
