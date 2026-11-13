@@ -272,6 +272,11 @@ class TestRustWavefrontParity(unittest.TestCase):
     def test_native_events_match_python_for_clockwise_contour(self):
         self._assert_event_parity(32, clockwise=True)
 
+    def test_native_events_match_python_for_small_active_loops(self):
+        for count in range(3, 16):
+            with self.subTest(vertices=count):
+                self._assert_event_parity(count)
+
 
     @staticmethod
     def _run_with_collector(collector, operation):

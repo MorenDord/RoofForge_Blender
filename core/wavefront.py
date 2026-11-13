@@ -571,11 +571,11 @@ def collect_loop_events(
     time: float | None = None,
     eps: float = 1e-9,
 ) -> tuple[WavefrontEvent, ...]:
-    """Collect events, preferring one batched Rust call for larger active loops."""
+    """Collect events, preferring one batched Rust call for all valid active loops."""
     if time is None:
         time = min((edge.base_height for edge in edges.values()), default=0.0)
 
-    if len(loop.edge_ids) >= 16:
+    if len(loop.edge_ids) >= 3:
         from .native_bridge import (
             NativeGeometryError,
             collect_wavefront_events_native,
