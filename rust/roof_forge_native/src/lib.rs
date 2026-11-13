@@ -169,7 +169,6 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
-
 fn split_face_edges_at_shared_vertices_core(
     vertices: &[[f64; 3]],
     faces: &[Vec<usize>],
@@ -229,15 +228,8 @@ fn split_face_edges_at_shared_vertices_core(
             let end_id = face[(edge_index + 1) % face.len()];
             let start = vertices[start_id];
             let end = vertices[end_id];
-            let direction = [
-                end[0] - start[0],
-                end[1] - start[1],
-                end[2] - start[2],
-            ];
-            let length_sq = direction
-                .iter()
-                .map(|value| value * value)
-                .sum::<f64>();
+            let direction = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
+            let length_sq = direction.iter().map(|value| value * value).sum::<f64>();
             if !length_sq.is_finite() || length_sq <= tolerance_sq {
                 return Err(Diagnostic::error(
                     "ZERO_LENGTH_FACE_EDGE",
@@ -729,10 +721,11 @@ mod python {
             .into_iter()
             .map(|(x, y, z)| [x, y, z])
             .collect::<Vec<_>>();
-        split_face_edges_at_shared_vertices_core(&vertices, &faces, tolerance)
-            .map_err(|diagnostic| {
+        split_face_edges_at_shared_vertices_core(&vertices, &faces, tolerance).map_err(
+            |diagnostic| {
                 PyValueError::new_err(format!("{}|{}", diagnostic.code, diagnostic.message))
-            })
+            },
+        )
     }
 
     #[pyfunction(name = "collect_wavefront_events", signature = (lines, loop_id, time, eps=1e-9))]
@@ -786,7 +779,10 @@ mod python {
         module.add_function(wrap_pyfunction!(py_api_version, module)?)?;
         module.add_function(wrap_pyfunction!(py_validate_simple_polygon, module)?)?;
         module.add_function(wrap_pyfunction!(py_collect_wavefront_events, module)?)?;
-        module.add_function(wrap_pyfunction!(py_split_face_edges_at_shared_vertices, module)?)?;
+        module.add_function(wrap_pyfunction!(
+            py_split_face_edges_at_shared_vertices,
+            module
+        )?)?;
         Ok(())
     }
 }
@@ -887,8 +883,7 @@ mod tests {
             [1.0, 1.0, 0.0],
         ];
         let faces = vec![vec![0, 1, 2], vec![0, 3, 4, 2]];
-        let result =
-            split_face_edges_at_shared_vertices_core(&vertices, &faces, 1.0e-9).unwrap();
+        let result = split_face_edges_at_shared_vertices_core(&vertices, &faces, 1.0e-9).unwrap();
         assert_eq!(result[0], vec![0, 3, 1, 2]);
         assert_eq!(result[1], vec![0, 3, 4, 2]);
     }
