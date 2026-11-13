@@ -764,6 +764,7 @@ type WavefrontEventTuple = (
     (f64, f64),
     Vec<(usize, u64)>,
 );
+type WeldedVerticesTuple = (Vec<(f64, f64, f64)>, Vec<usize>);
 
 #[cfg(feature = "python-extension")]
 mod python {
@@ -804,7 +805,7 @@ mod python {
     fn py_weld_vertices_batch(
         points: Vec<(f64, f64, f64)>,
         tolerance: f64,
-    ) -> PyResult<(Vec<(f64, f64, f64)>, Vec<usize>)> {
+    ) -> PyResult<WeldedVerticesTuple> {
         let points = points
             .into_iter()
             .map(|(x, y, z)| [x, y, z])
