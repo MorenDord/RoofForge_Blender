@@ -154,6 +154,15 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                 next_button.edge_index = index - 1
                 next_button.direction = "NEXT"
 
+        if settings.pitch_snap_status:
+            status_row = layout.row()
+            is_snap_success = "общая вершина" in settings.pitch_snap_status.lower()
+            status_row.alert = not is_snap_success
+            status_row.label(
+                text=settings.pitch_snap_status,
+                icon="CHECKMARK" if is_snap_success else "INFO",
+            )
+
         layout.separator(factor=0.5)
         _draw_common_settings(layout, settings)
 

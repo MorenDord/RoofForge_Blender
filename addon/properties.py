@@ -5,8 +5,14 @@ import bpy
 def _pitch_changed(self, context):
     if context is None:
         return
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        return
+    settings = getattr(scene, "roof_forge", None)
+    if settings is not None:
+        settings.pitch_snap_status = ""
     from .live_update import schedule_live_update
-    schedule_live_update(context.scene)
+    schedule_live_update(scene)
 
 
 def _settings_changed(self, context):
@@ -120,3 +126,8 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
     source_name_snapshot: bpy.props.StringProperty(default="")
     generated_name_snapshot: bpy.props.StringProperty(default="")
     last_status: bpy.props.StringProperty(default="")
+    pitch_snap_status: bpy.props.StringProperty(
+        name="Pitch Snap Status",
+        default="",
+        options={"HIDDEN"},
+    )

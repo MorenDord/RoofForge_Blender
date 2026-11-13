@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.12.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Adjacent pitches can be made to meet at one shared outer corner point. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.21.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -23,6 +23,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - **Source-anchored eaves:** convex contours continue to use the original 3D support-plane envelope. Concave flat-eave L/U contours now use the weighted wavefront roof plus one exact coplanar overhang strip per source edge. With **Converge corners** enabled (required for concave contours), adjacent strips meet at one shared outer corner while each strip remains on its source slope plane. The source eave line remains fixed.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
 - Coplanar and practically coplanar internal edges are dissolved from the generated Blender mesh (up to 0.05° and 10 ppm of mesh span), including degree-two vertices and loose points left by loop-cut partitions. The pass repeats until no new planar neighbours remain. Planar patches collapse to clean N-gons; straight shell walls become larger quads/N-gons. Clear ridges, valleys, silhouette corners and the outer boundary remain.
+- Per-slope Pitch arrows find vertices formed by the other roof planes, solve the exact target angle, then verify a shared vertex in the rebuilt roof before changing the field.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm. Before the first roof build, **Initial Pitch** sets the value copied to every contour edge (default 30°); individual Pitch values can then be edited independently.
 - The first **Create / Update Roof** click reads the active contour and automatically creates the Pitch fields. No separate Load / Refresh Slope Angles action is required.
 - If the generated roof is deleted, Create / Update can recreate it from the stored source. Edit the source contour in Edit Mode, return to Object Mode and press Create / Update to rebuild from the edited boundary.
@@ -60,6 +61,12 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave footprints are not supported and are rejected with a warning, regardless of overhang. Offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
+## RoofForge 0.3.21
+
+- The left/right Pitch controls solve the exact angle at which the selected slope plane passes through a fixed vertex formed by the other roof slopes.
+- The candidate is accepted only after a full roof build confirms that the selected and neighbouring slopes share the same 3D vertex.
+- Each arrow searches only in its own pitch direction; no-match and geometry errors are reported in the panel instead of silently doing nothing.
+
 ## RoofForge 0.3.17
 
 - The vector-preview placeholder no longer uses `template_icon` or nested-layout horizontal alignment. A full-width spacer reserves its vertical space only.
@@ -75,7 +82,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.17-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.17.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.21-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.21.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -89,7 +96,7 @@ python -m unittest discover -s tests -v
 python tests/benchmark_geometry.py --repeats 3
 ```
 
-Blender 5.0.1 background smoke checks corner-converged convex eaves, positive L/U concave overhang, equal boundary-vertex count, uniform-offset fallback, source-edge support alignment, concave no-overhang, vector-plan edge extraction and stable label anchors, configurable initial pitch, one-click generation, delete/recreate from a stored source and rebuild after editing the source contour. Manual viewport QA is still required.
+Blender 5.0.1 background smoke checks corner-converged convex eaves, positive L/U concave overhang, source-edge support alignment, vector-plan edge extraction and stable label anchors, configurable initial pitch, one-click generation, delete/recreate from a stored source, rebuild after editing the source contour, and a real pitch-to-neighbouring-vertex snap that is verified in the generated roof. Manual viewport QA is still required.
 
 ## License
 

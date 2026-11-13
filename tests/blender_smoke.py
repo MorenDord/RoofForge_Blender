@@ -435,6 +435,10 @@ def main() -> None:
         "overhang corner-convergence option was not registered",
     )
     ensure(
+        hasattr(bpy.context.scene.roof_forge, "pitch_snap_status"),
+        "pitch vertex-snap status property was not registered",
+    )
+    ensure(
         not hasattr(bpy.types, "ROOFFORGE_OT_validate_input"),
         "Validate Roof operator class should no longer be registered",
     )

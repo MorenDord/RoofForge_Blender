@@ -338,6 +338,8 @@ def sync_slope_settings(settings, source, edge_count: int) -> bool:
         return False
 
     settings.slope_settings.clear()
+    if hasattr(settings, "pitch_snap_status"):
+        settings.pitch_snap_status = ""
     for edge_index in range(edge_count):
         item = settings.slope_settings.add()
         item.edge_index = edge_index
