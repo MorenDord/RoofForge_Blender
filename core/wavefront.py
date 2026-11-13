@@ -540,13 +540,13 @@ def find_split_candidates(loop: WavefrontLoop, edges: dict[int, MovingLine],
     return tuple(events)
 
 
-def collect_loop_events(
+def _collect_loop_events_python(
     loop: WavefrontLoop,
     edges: dict[int, MovingLine],
     time: float | None = None,
     eps: float = 1e-9,
 ) -> tuple[WavefrontEvent, ...]:
-    """Collect collapse and split candidates for one current loop state."""
+    """Reference Python implementation used when Rust is unavailable."""
     if time is None:
         time = min((edge.base_height for edge in edges.values()), default=0.0)
     vertices = _loop_vertices(loop, edges, time, eps)
@@ -563,6 +563,64 @@ def collect_loop_events(
     split = find_split_candidates(loop, edges, time, eps)
     events = (*collapse, *split)
     return tuple(sorted(events, key=WavefrontEventQueue._event_key))
+
+
+def collect_loop_events(
+    loop: WavefrontLoop,
+    edges: dict[int, MovingLine],
+    time: float | None = None,
+    eps: float = 1e-9,
+) -> tuple[WavefrontEvent, ...]:
+    """Collect events, preferring one batched Rust call for larger active loops."""
+    if time is None:
+        time = min((edge.base_height for edge in edges.values()), default=0.0)
+
+    if len(loop.edge_ids) >= 16:
+        from .native_bridge import (
+            NativeGeometryError,
+            collect_wavefront_events_native,
+        )
+
+        try:
+            raw_events = collect_wavefront_events_native(
+                (edges[edge_id] for edge_id in loop.edge_ids),
+                loop.loop_id,
+                time,
+                eps,
+            )
+        except NativeGeometryError as exc:
+            raise GeometryInputError(exc.code, exc.message) from exc
+
+        if raw_events is not None:
+            kinds = (
+                EventKind.EDGE_COLLAPSE,
+                EventKind.SPLIT_CANDIDATE,
+                EventKind.VERTEX_HIT,
+            )
+            return tuple(
+                WavefrontEvent(
+                    kinds[kind],
+                    event_time,
+                    loop.loop_id,
+                    edge_id=edge_id,
+                    vertex_id=vertex_id,
+                    target_edge_id=target_edge_id,
+                    position=position,
+                    participant_generations=tuple(participants),
+                    loop_generation=loop.generation,
+                )
+                for (
+                    kind,
+                    event_time,
+                    edge_id,
+                    vertex_id,
+                    target_edge_id,
+                    position,
+                    participants,
+                ) in raw_events
+            )
+
+    return _collect_loop_events_python(loop, edges, time, eps)
 
 
 

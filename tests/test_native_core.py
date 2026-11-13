@@ -11,7 +11,14 @@ from core.geometry import (
 )
 from core.native_bridge import (
     NATIVE_BACKEND_AVAILABLE,
+    NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
     validate_simple_polygon_native,
+)
+from core.wavefront import (
+    WavefrontLoop,
+    _collect_loop_events_python,
+    build_moving_lines,
+    collect_loop_events,
 )
 
 
@@ -79,6 +86,73 @@ class TestRustGeometryParity(unittest.TestCase):
         expected = _validate_simple_polygon_python(points)
         actual = validate_simple_polygon(points)
         self.assertEqual(_diagnostic_tuples(actual), _diagnostic_tuples(expected))
+
+
+
+
+@unittest.skipUnless(
+    NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
+    "Rust wavefront event collector is not installed",
+)
+class TestRustWavefrontParity(unittest.TestCase):
+    @staticmethod
+    def _fixture(count: int, clockwise: bool = False):
+        points = []
+        for index in range(count):
+            angle = 2.0 * math.pi * index / count
+            radius = 10.0 if index % 2 == 0 else 8.6
+            points.append((radius * math.cos(angle), radius * math.sin(angle), 0.0))
+        if clockwise:
+            points.reverse()
+        pitches = [
+            32.0 + 4.0 * math.sin(index * 1.371)
+            + 2.5 * math.cos(index * 0.613)
+            for index in range(count)
+        ]
+        return points, pitches
+
+    def _assert_event_parity(self, count: int, clockwise: bool = False):
+        points, pitches = self._fixture(count, clockwise)
+        lines = build_moving_lines(points, pitches)
+        edges = {line.edge_id: line for line in lines}
+        loop = WavefrontLoop(7, tuple(line.edge_id for line in lines), generation=3)
+
+        expected = _collect_loop_events_python(loop, edges, time=0.0, eps=1e-9)
+        actual = collect_loop_events(loop, edges, time=0.0, eps=1e-9)
+        self.assertEqual(len(actual), len(expected))
+
+        for native_event, python_event in zip(actual, expected):
+            self.assertEqual(native_event.kind, python_event.kind)
+            self.assertAlmostEqual(native_event.time, python_event.time, delta=1e-12)
+            self.assertEqual(
+                (
+                    native_event.loop_id,
+                    native_event.edge_id,
+                    native_event.vertex_id,
+                    native_event.target_edge_id,
+                ),
+                (
+                    python_event.loop_id,
+                    python_event.edge_id,
+                    python_event.vertex_id,
+                    python_event.target_edge_id,
+                ),
+            )
+            self.assertAlmostEqual(native_event.position[0], python_event.position[0], delta=1e-12)
+            self.assertAlmostEqual(native_event.position[1], python_event.position[1], delta=1e-12)
+            self.assertEqual(
+                native_event.participant_generations,
+                python_event.participant_generations,
+            )
+            self.assertEqual(native_event.loop_generation, python_event.loop_generation)
+
+    def test_native_events_match_python_for_concave_variable_pitch_loops(self):
+        for count in (16, 32, 48, 64):
+            with self.subTest(vertices=count):
+                self._assert_event_parity(count)
+
+    def test_native_events_match_python_for_clockwise_contour(self):
+        self._assert_event_parity(32, clockwise=True)
 
 
 if __name__ == "__main__":
