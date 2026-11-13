@@ -7,6 +7,8 @@ from .vector_plan_preview import (
     set_preview_slot_visible,
 )
 
+from ...core import native_bridge
+
 
 def _draw_common_settings(layout, settings):
     layout.prop(settings, "thickness_cm", text="Thickness (cm)")
@@ -126,6 +128,25 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
 
         layout.separator(factor=0.5)
         _draw_common_settings(layout, settings)
+
+        native_kernel_count = sum((
+            native_bridge.NATIVE_BACKEND_AVAILABLE,
+            native_bridge.NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
+            native_bridge.NATIVE_WAVEFRONT_INTERVAL_AVAILABLE,
+            native_bridge.NATIVE_VERTEX_WELD_AVAILABLE,
+            native_bridge.NATIVE_FACE_CONFORMANCE_AVAILABLE,
+        ))
+        backend_row = layout.row()
+        backend_row.enabled = False
+        if native_kernel_count == 5:
+            backend_row.label(text="Geometry core: Rust (5/5 kernels)", icon="CHECKMARK")
+        elif native_kernel_count:
+            backend_row.label(
+                text=f"Geometry core: Rust ({native_kernel_count}/5 kernels)",
+                icon="INFO",
+            )
+        else:
+            backend_row.label(text="Geometry core: Python fallback", icon="INFO")
 
 
 __all__ = ["ROOFFORGE_PT_panel"]

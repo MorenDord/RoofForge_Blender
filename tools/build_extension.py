@@ -14,7 +14,7 @@ PACKAGE_DIRS = ("addon", "core")
 EXTRA_FILES = ("INSTALL_TEST_RU.md",)
 # Experimental mixed-height concave envelope code remains source/test-only.
 EXCLUDED_PACKAGE_PATHS = {"core/intersection_envelope.py"}
-SEMVER = re.compile(r"^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
 NATIVE_PLATFORMS = {
     "linux-x64",
     "windows-x64",
@@ -142,7 +142,7 @@ def collect_native_wheels(wheels_dir: Path | None, required: bool) -> list[tuple
 def render_packaged_manifest(source_text: str, wheels: list[tuple[Path, str]]) -> str:
     if not wheels:
         return source_text
-    if re.search(r"^\\s*(?:platforms|wheels)\\s*=", source_text, flags=re.MULTILINE):
+    if re.search(r"^\s*(?:platforms|wheels)\s*=", source_text, flags=re.MULTILINE):
         raise SystemExit("Source manifest already contains platforms or wheels entries.")
 
     platform_values = ", ".join(f'"{platform}"' for platform in sorted(NATIVE_PLATFORMS))

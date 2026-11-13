@@ -81,3 +81,20 @@ Every migrated operation must:
 
 Do not remove the Python reference implementation until parity has remained
 green across the supported Blender and Python test matrix.
+
+
+## Blender Extension wheel packaging (0.3.18)
+
+The installable extension ZIP bundles the `roof_forge_native` abi3 wheel for
+Linux x64, Windows x64, macOS x64, and macOS ARM64. The package manifest lists
+these wheel files and supported platforms; Blender installs the compatible
+wheel into the extension's private `site-packages` directory.
+
+The native package workflow installs the ZIP into Blender 5.0.1, starts Blender
+again, imports the installed extension package, verifies all five native
+kernels, generates a 64-edge variable-pitch roof through the production
+wavefront path, and creates a real Blender Mesh datablock. A missing or
+incompatible native module keeps the Python fallback available.
+
+The native wheel is no longer only a detached CI artifact: it is part of the
+installable 0.3.18 extension ZIP.
