@@ -771,7 +771,7 @@ mod python {
     use super::{
         collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
         validate_simple_polygon, weld_vertices_batch_core, WavefrontEventTuple, WavefrontLineData,
-        WavefrontLineTuple,
+        WavefrontLineTuple, WeldedVerticesTuple,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
