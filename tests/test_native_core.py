@@ -5,6 +5,8 @@ import math
 import random
 import unittest
 
+from core import geometry as geometry_module
+from core import native_bridge as native_bridge_module
 from core import wavefront as wavefront_module
 from core.geometry import (
     _validate_simple_polygon_python,
@@ -362,14 +364,26 @@ class TestRustWavefrontParity(unittest.TestCase):
     def _run_with_collector(collector, operation, interval_recorder=None):
         original = wavefront_module.collect_loop_events
         original_interval = wavefront_module._record_wavefront_interval
+        original_face_conformance = native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE
+        original_vertex_weld = native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE
+        original_validation_threshold = geometry_module._NATIVE_VALIDATION_MIN_VERTICES
+        python_backend = collector is wavefront_module._collect_loop_events_python
         wavefront_module.collect_loop_events = collector
         if interval_recorder is not None:
             wavefront_module._record_wavefront_interval = interval_recorder
+        native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE = not python_backend
+        native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE = not python_backend
+        geometry_module._NATIVE_VALIDATION_MIN_VERTICES = (
+            2**31 if python_backend else original_validation_threshold
+        )
         try:
             return operation()
         finally:
             wavefront_module.collect_loop_events = original
             wavefront_module._record_wavefront_interval = original_interval
+            native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE = original_face_conformance
+            native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE = original_vertex_weld
+            geometry_module._NATIVE_VALIDATION_MIN_VERTICES = original_validation_threshold
 
     def _assert_trace_parity(self, expected, actual):
         self.assertEqual(expected.terminal_kind, actual.terminal_kind)

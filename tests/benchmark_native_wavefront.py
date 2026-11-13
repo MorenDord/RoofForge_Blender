@@ -14,6 +14,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from core import geometry as geometry_module
+from core import native_bridge as native_bridge_module
 from core import wavefront
 
 
@@ -34,19 +36,33 @@ def fixture(count: int = 64):
 def run_with_collector(collector, operation, interval_recorder=None):
     original = wavefront.collect_loop_events
     original_interval = wavefront._record_wavefront_interval
+    original_face_conformance = native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE
+    original_vertex_weld = native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE
+    original_validation_threshold = geometry_module._NATIVE_VALIDATION_MIN_VERTICES
+    python_backend = collector is wavefront._collect_loop_events_python
     if interval_recorder is None:
         interval_recorder = (
             wavefront._record_wavefront_interval_python
-            if collector is wavefront._collect_loop_events_python
+            if python_backend
             else wavefront._record_wavefront_interval
         )
     wavefront.collect_loop_events = collector
     wavefront._record_wavefront_interval = interval_recorder
+    # Keep the baseline fully Python: event search, interval recording,
+    # polygon validation, face conformance and vertex welding.
+    native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE = not python_backend
+    native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE = not python_backend
+    geometry_module._NATIVE_VALIDATION_MIN_VERTICES = (
+        2**31 if python_backend else original_validation_threshold
+    )
     try:
         return operation()
     finally:
         wavefront.collect_loop_events = original
         wavefront._record_wavefront_interval = original_interval
+        native_bridge_module.NATIVE_FACE_CONFORMANCE_AVAILABLE = original_face_conformance
+        native_bridge_module.NATIVE_VERTEX_WELD_AVAILABLE = original_vertex_weld
+        geometry_module._NATIVE_VALIDATION_MIN_VERTICES = original_validation_threshold
 
 
 def assert_close(first: float, second: float, tolerance: float = 1.0e-12):
@@ -211,7 +227,7 @@ def main() -> int:
 
     report = {
         "fixture": "64-vertex alternating-radius concave contour with variable per-edge pitch",
-        "parity": "full event sequence, wavefront facets, skeleton arcs, welded surface faces and vertices",
+        "parity": "full Python fallback vs all-native event sequence, interval facets, skeleton arcs, vertex welding, T-junction conformance, validation and final mesh",
         "repeats": args.repeats,
         "timing_unit": "milliseconds",
         "results": measurements,
