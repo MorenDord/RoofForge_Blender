@@ -79,68 +79,16 @@ def main() -> int:
 
     points, pitches = fixture(64)
 
-    queue_type = wavefront.WavefrontEventQueue
-    optimized_push_many = queue_type.push_many
+    # Warm up once so import/first-call effects do not dominate timings.
+    warm_state = wavefront.create_wavefront_state(points, pitches)
+    warm_batches = drain_state(warm_state)
 
-    def incremental_push_many(self, events):
-        for event in events:
-            self.push(event)
-
-    def state_signature(state):
-        return (
-            tuple(state.processed_events),
-            tuple(state.facets),
-            tuple(state.skeleton_arcs),
-            tuple(sorted(state.terminal_loops.items())),
-            tuple(sorted(state.loops.items())),
-            tuple(sorted(state.edges.items())),
-            state.current_time,
-        )
-
-    # Warm both strategies once, then alternate them to reduce CI-runner drift.
-    previous_push_many = queue_type.push_many
-    warm_batches = 0
-    try:
-        for implementation in (incremental_push_many, optimized_push_many):
-            queue_type.push_many = implementation
-            warm_state = wavefront.create_wavefront_state(points, pitches)
-            warm_batches = drain_state(warm_state)
-
-        variant_samples = {"incremental": [], "adaptive_batch": []}
-        variant_signatures = {}
-        for run_index in range(args.runs):
-            order = (
-                (("incremental", incremental_push_many),
-                 ("adaptive_batch", optimized_push_many))
-                if run_index % 2 == 0
-                else (("adaptive_batch", optimized_push_many),
-                      ("incremental", incremental_push_many))
-            )
-            for label, implementation in order:
-                queue_type.push_many = implementation
-                state = wavefront.create_wavefront_state(points, pitches)
-                started = time.perf_counter()
-                drain_state(state)
-                variant_samples[label].append(
-                    (time.perf_counter() - started) * 1000.0
-                )
-                variant_signatures[label] = state_signature(state)
-    finally:
-        queue_type.push_many = previous_push_many
-
-    if variant_signatures["incremental"] != variant_signatures["adaptive_batch"]:
-        raise RuntimeError("Incremental and adaptive batch queue paths changed wavefront output.")
-
-    incremental_ms = statistics.median(variant_samples["incremental"])
-    adaptive_batch_ms = statistics.median(variant_samples["adaptive_batch"])
-    push_many_ab = {
-        "incremental_ms_median": round(incremental_ms, 3),
-        "adaptive_batch_ms_median": round(adaptive_batch_ms, 3),
-        "adaptive_batch_speedup": round(incremental_ms / adaptive_batch_ms, 4)
-        if adaptive_batch_ms else None,
-        "incremental_ms_samples": [round(value, 3) for value in variant_samples["incremental"]],
-        "adaptive_batch_ms_samples": [round(value, 3) for value in variant_samples["adaptive_batch"]],
-    }
+    durations_ms = []
+    for _ in range(args.runs):
+        state = wavefront.create_wavefront_state(points, pitches)
+        started = time.perf_counter()
+        drain_state(state)
+        durations_ms.append((time.perf_counter() - started) * 1000.0)
 
     # Profile only the state-machine loop. State creation and contour
     # validation deliberately remain outside the profiled region.
@@ -175,8 +123,8 @@ def main() -> int:
         "scope": "advance_wavefront_state loop only; state creation, contour validation and final roof mesh assembly excluded",
         "runs": args.runs,
         "timing_unit": "milliseconds",
-        "state_machine_wall_ms_median": round(adaptive_batch_ms, 3),
-        "push_many_ab": push_many_ab,
+        "state_machine_wall_ms_median": round(statistics.median(durations_ms), 3),
+        "state_machine_wall_ms_samples": [round(value, 3) for value in durations_ms],
         "event_batches": profiled_batches,
         "processed_events": len(profiled_state.processed_events),
         "discarded_stale_events": profiled_state.event_queue.discarded_stale,
