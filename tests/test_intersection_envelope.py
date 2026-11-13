@@ -163,7 +163,7 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
 
     def test_dense_mixed_height_u_96_matches_exact_topology_invariants(self):
         points, pitches = _dense_mixed_height_u()
-        surface = build_intersection_envelope_surface(points, pitches)
+        surface = build_global_plane_intersection_surface(points, pitches)
         reference = build_roof_surface(points, pitches)
         self.assert_exact_support_surface(points, surface)
         self.assert_reference_surface(points, reference)
