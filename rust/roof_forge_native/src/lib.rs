@@ -169,7 +169,6 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct WavefrontLineData {
     edge_id: usize,
@@ -306,7 +305,11 @@ fn collect_wavefront_events_core(
     }
 
     let polygon: Vec<[f64; 2]> = vertices.iter().map(|vertex| vertex.point).collect();
-    let winding = if signed_area(&polygon) > 0.0 { 1.0 } else { -1.0 };
+    let winding = if signed_area(&polygon) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     let (mut min_x, mut max_x) = (polygon[0][0], polygon[0][0]);
     let (mut min_y, mut max_y) = (polygon[0][1], polygon[0][1]);
     for point in polygon.iter().skip(1) {
@@ -478,7 +481,9 @@ fn collect_wavefront_events_core(
             .then_with(|| first.vertex_id.cmp(&second.vertex_id))
             .then_with(|| first.edge_id.cmp(&second.edge_id))
             .then_with(|| {
-                first.target_edge_id.unwrap_or(usize::MAX)
+                first
+                    .target_edge_id
+                    .unwrap_or(usize::MAX)
                     .cmp(&second.target_edge_id.unwrap_or(usize::MAX))
             })
     });
@@ -498,7 +503,10 @@ type WavefrontEventTuple = (
 
 #[cfg(feature = "python-extension")]
 mod python {
-    use super::{collect_wavefront_events_core, validate_simple_polygon, WavefrontLineData, WavefrontLineTuple, WavefrontEventTuple};
+    use super::{
+        collect_wavefront_events_core, validate_simple_polygon, WavefrontEventTuple,
+        WavefrontLineData, WavefrontLineTuple,
+    };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
     use pyo3::types::PyModule;
@@ -584,7 +592,7 @@ mod python {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_simple_polygon;
+    use super::{collect_wavefront_events_core, validate_simple_polygon, WavefrontLineData};
 
     #[test]
     fn accepts_clockwise_and_counter_clockwise_squares() {
@@ -615,17 +623,53 @@ mod tests {
     #[test]
     fn collects_square_wavefront_collapse_events() {
         let lines = [
-            WavefrontLineData { edge_id: 0, normal: [0.0, 1.0], offset: 0.0, speed: 1.0, tangent: [1.0, 0.0], generation: 0, base_height: 0.0 },
-            WavefrontLineData { edge_id: 1, normal: [-1.0, 0.0], offset: -4.0, speed: 1.0, tangent: [0.0, 1.0], generation: 0, base_height: 0.0 },
-            WavefrontLineData { edge_id: 2, normal: [0.0, -1.0], offset: -4.0, speed: 1.0, tangent: [-1.0, 0.0], generation: 0, base_height: 0.0 },
-            WavefrontLineData { edge_id: 3, normal: [1.0, 0.0], offset: 0.0, speed: 1.0, tangent: [0.0, -1.0], generation: 0, base_height: 0.0 },
+            WavefrontLineData {
+                edge_id: 0,
+                normal: [0.0, 1.0],
+                offset: 0.0,
+                speed: 1.0,
+                tangent: [1.0, 0.0],
+                generation: 0,
+                base_height: 0.0,
+            },
+            WavefrontLineData {
+                edge_id: 1,
+                normal: [-1.0, 0.0],
+                offset: -4.0,
+                speed: 1.0,
+                tangent: [0.0, 1.0],
+                generation: 0,
+                base_height: 0.0,
+            },
+            WavefrontLineData {
+                edge_id: 2,
+                normal: [0.0, -1.0],
+                offset: -4.0,
+                speed: 1.0,
+                tangent: [-1.0, 0.0],
+                generation: 0,
+                base_height: 0.0,
+            },
+            WavefrontLineData {
+                edge_id: 3,
+                normal: [1.0, 0.0],
+                offset: 0.0,
+                speed: 1.0,
+                tangent: [0.0, -1.0],
+                generation: 0,
+                base_height: 0.0,
+            },
         ];
         let events = collect_wavefront_events_core(&lines, 5, 0.0, 1.0e-9).unwrap();
         assert_eq!(events.len(), 4);
         assert!(events.iter().all(|event| event.kind == 0));
         assert!(events.iter().all(|event| (event.time - 2.0).abs() < 1.0e-9));
-        assert!(events.iter().all(|event| (event.position[0] - 2.0).abs() < 1.0e-9));
-        assert!(events.iter().all(|event| (event.position[1] - 2.0).abs() < 1.0e-9));
+        assert!(events
+            .iter()
+            .all(|event| (event.position[0] - 2.0).abs() < 1.0e-9));
+        assert!(events
+            .iter()
+            .all(|event| (event.position[1] - 2.0).abs() < 1.0e-9));
         assert!(events.iter().all(|event| event.loop_id == 5));
     }
 
