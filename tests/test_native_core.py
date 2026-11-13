@@ -5,6 +5,7 @@ import math
 import random
 import unittest
 
+from core import wavefront as wavefront_module
 from core.geometry import (
     _validate_simple_polygon_python,
     validate_simple_polygon,
@@ -153,6 +154,96 @@ class TestRustWavefrontParity(unittest.TestCase):
 
     def test_native_events_match_python_for_clockwise_contour(self):
         self._assert_event_parity(32, clockwise=True)
+
+
+    @staticmethod
+    def _run_with_collector(collector, operation):
+        original = wavefront_module.collect_loop_events
+        wavefront_module.collect_loop_events = collector
+        try:
+            return operation()
+        finally:
+            wavefront_module.collect_loop_events = original
+
+    def _assert_trace_parity(self, expected, actual):
+        self.assertEqual(expected.terminal_kind, actual.terminal_kind)
+        self.assertEqual(expected.input_winding, actual.input_winding)
+        self.assertEqual(len(expected.events), len(actual.events))
+        self.assertEqual(len(expected.facets), len(actual.facets))
+        self.assertEqual(len(expected.skeleton_arcs), len(actual.skeleton_arcs))
+        self.assertAlmostEqual(expected.terminal_time, actual.terminal_time, delta=1e-12)
+        self.assertAlmostEqual(expected.source_area, actual.source_area, delta=1e-10)
+        self.assertAlmostEqual(expected.projected_facet_area, actual.projected_facet_area, delta=1e-10)
+
+        for first, second in zip(expected.events, actual.events):
+            self.assertEqual(
+                (
+                    first.kind, first.loop_id, first.edge_id, first.vertex_id,
+                    first.target_edge_id, first.participant_generations,
+                    first.loop_generation,
+                ),
+                (
+                    second.kind, second.loop_id, second.edge_id, second.vertex_id,
+                    second.target_edge_id, second.participant_generations,
+                    second.loop_generation,
+                ),
+            )
+            self.assertAlmostEqual(first.time, second.time, delta=1e-12)
+            self.assertEqual(first.position is None, second.position is None)
+            if first.position is not None:
+                self.assertAlmostEqual(first.position[0], second.position[0], delta=1e-12)
+                self.assertAlmostEqual(first.position[1], second.position[1], delta=1e-12)
+
+        for first, second in zip(expected.facets, actual.facets):
+            self.assertEqual(first.source_edge_id, second.source_edge_id)
+            self.assertAlmostEqual(first.start_time, second.start_time, delta=1e-12)
+            self.assertAlmostEqual(first.end_time, second.end_time, delta=1e-12)
+            self.assertEqual(len(first.vertices), len(second.vertices))
+            for point_a, point_b in zip(first.vertices, second.vertices):
+                for value_a, value_b in zip(point_a, point_b):
+                    self.assertAlmostEqual(value_a, value_b, delta=1e-12)
+
+        for first, second in zip(expected.skeleton_arcs, actual.skeleton_arcs):
+            self.assertAlmostEqual(first.event_time, second.event_time, delta=1e-12)
+            for point_a, point_b in ((first.start, second.start), (first.end, second.end)):
+                for value_a, value_b in zip(point_a, point_b):
+                    self.assertAlmostEqual(value_a, value_b, delta=1e-12)
+
+    def test_full_weighted_wavefront_trace_and_surface_match_python(self):
+        points, pitches = self._fixture(64)
+        python_collector = wavefront_module._collect_loop_events_python
+        native_collector = wavefront_module.collect_loop_events
+
+        python_trace = self._run_with_collector(
+            python_collector,
+            lambda: wavefront_module.run_weighted_wavefront(points, pitches),
+        )
+        native_trace = self._run_with_collector(
+            native_collector,
+            lambda: wavefront_module.run_weighted_wavefront(points, pitches),
+        )
+        self._assert_trace_parity(python_trace, native_trace)
+
+        python_surface = self._run_with_collector(
+            python_collector,
+            lambda: wavefront_module.build_wavefront_roof_surface(points, pitches),
+        )
+        native_surface = self._run_with_collector(
+            native_collector,
+            lambda: wavefront_module.build_wavefront_roof_surface(points, pitches),
+        )
+        self.assertEqual(python_surface.faces, native_surface.faces)
+        self.assertEqual(python_surface.face_slope_indices, native_surface.face_slope_indices)
+        self.assertEqual(len(python_surface.vertices), len(native_surface.vertices))
+        for point_a, point_b in zip(python_surface.vertices, native_surface.vertices):
+            for value_a, value_b in zip(point_a, point_b):
+                self.assertAlmostEqual(value_a, value_b, delta=1e-12)
+        self.assertAlmostEqual(
+            python_surface.source_area_xy, native_surface.source_area_xy, delta=1e-10
+        )
+        self.assertAlmostEqual(
+            python_surface.surface_area_xy, native_surface.surface_area_xy, delta=1e-10
+        )
 
 
 if __name__ == "__main__":

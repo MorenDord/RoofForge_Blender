@@ -113,6 +113,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Benchmark full Python and Rust roof generation
+        run: python tests/benchmark_native_wavefront.py --repeats 5 --json-output rust-native-wavefront.json
+      - name: Upload end-to-end native benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-native-wavefront
+          path: rust-native-wavefront.json
+          if-no-files-found: error
+          retention-days: 30
+
   geometry-benchmarks:
     runs-on: ubuntu-latest
     needs: pure-python-tests
