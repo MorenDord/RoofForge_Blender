@@ -253,8 +253,7 @@ fn split_face_edges_at_shared_vertices_core(
             let mut points_on_edge: Vec<(f64, usize)> = Vec::new();
             let edge_length = length_sq.sqrt();
             let endpoint_margin = tolerance / edge_length;
-            for candidate_position in candidate_start..candidate_end {
-                let candidate_id = order[candidate_position];
+            for &candidate_id in order.iter().take(candidate_end).skip(candidate_start) {
                 if candidate_id == start_id || candidate_id == end_id {
                     continue;
                 }
