@@ -169,7 +169,6 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct IntervalLineData {
     edge_id: usize,
@@ -216,7 +215,11 @@ fn interval_line_intersection(
         (first.speed * d - b * second.speed) / determinant,
         (a * second.speed - first.speed * c) / determinant,
     ];
-    if point.iter().chain(velocity.iter()).any(|value| !value.is_finite()) {
+    if point
+        .iter()
+        .chain(velocity.iter())
+        .any(|value| !value.is_finite())
+    {
         return Err(Diagnostic::error(
             "NON_FINITE_WAVEFRONT_VERTEX",
             "Пересечение подвижных рёбер породило нечисловую вершину.",
@@ -286,9 +289,9 @@ fn record_wavefront_interval_core(
         return Ok((Vec::new(), Vec::new()));
     }
 
-    let expected_count = loop_counts.iter().try_fold(0_usize, |sum, count| {
-        sum.checked_add(*count)
-    });
+    let expected_count = loop_counts
+        .iter()
+        .try_fold(0_usize, |sum, count| sum.checked_add(*count));
     if expected_count != Some(lines.len()) || loop_counts.iter().any(|count| *count < 3) {
         return Err(Diagnostic::error(
             "INVALID_WAVEFRONT_INTERVAL_LOOPS",
@@ -296,7 +299,11 @@ fn record_wavefront_interval_core(
         ));
     }
     for line in lines {
-        if line.normal.iter().chain(line.tangent.iter()).any(|value| !value.is_finite())
+        if line
+            .normal
+            .iter()
+            .chain(line.tangent.iter())
+            .any(|value| !value.is_finite())
             || !line.offset.is_finite()
             || !line.speed.is_finite()
             || !line.base_height.is_finite()
@@ -326,22 +333,16 @@ fn record_wavefront_interval_core(
             let previous = &loop_lines[(index + loop_count - 1) % loop_count];
             let current = &loop_lines[index];
             vertices_start.push(interval_line_intersection(
-                previous,
-                current,
-                start_time,
-                epsilon,
+                previous, current, start_time, epsilon,
             )?);
             vertices_end.push(interval_line_intersection(
-                previous,
-                current,
-                end_time,
-                epsilon,
+                previous, current, end_time, epsilon,
             )?);
         }
 
         for (first, second) in vertices_start.iter().zip(vertices_end.iter()) {
-            let distance = (second.point[0] - first.point[0])
-                .hypot(second.point[1] - first.point[1]);
+            let distance =
+                (second.point[0] - first.point[0]).hypot(second.point[1] - first.point[1]);
             if distance > epsilon {
                 skeleton_arcs.push((
                     (first.point[0], first.point[1], start_time),
@@ -384,21 +385,18 @@ fn record_wavefront_interval_core(
                 continue;
             }
 
-            let projected: Vec<[f64; 2]> = fragment
-                .iter()
-                .map(|point| [point[0], point[1]])
-                .collect();
+            let projected: Vec<[f64; 2]> =
+                fragment.iter().map(|point| [point[0], point[1]]).collect();
             if signed_area(&projected).abs() <= time_tolerance * time_tolerance {
                 continue;
             }
 
             for point in &fragment {
                 let expected_z = edge.base_height
-                    + ((edge.normal[0] * point[0] + edge.normal[1] * point[1])
-                        - edge.offset)
+                    + ((edge.normal[0] * point[0] + edge.normal[1] * point[1]) - edge.offset)
                         / edge.speed;
-                let z_tolerance = (time_tolerance * 10.0)
-                    .max(epsilon * 1.0_f64.max(point[2].abs()) * 1000.0);
+                let z_tolerance =
+                    (time_tolerance * 10.0).max(epsilon * 1.0_f64.max(point[2].abs()) * 1000.0);
                 if (expected_z - point[2]).abs() > z_tolerance {
                     return Err(Diagnostic::error(
                         "FACET_NOT_PLANAR",
@@ -1031,8 +1029,8 @@ type WeldedVerticesTuple = (Vec<(f64, f64, f64)>, Vec<usize>);
 #[cfg(feature = "python-extension")]
 mod python {
     use super::{
-        collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
-        record_wavefront_interval_core, validate_simple_polygon,
+        collect_wavefront_events_core, record_wavefront_interval_core,
+        split_face_edges_at_shared_vertices_core, validate_simple_polygon,
         weld_vertices_batch_core, IntervalLineData, IntervalLineTuple, WavefrontEventTuple,
         WavefrontIntervalTuple, WavefrontLineData, WavefrontLineTuple, WeldedVerticesTuple,
     };
