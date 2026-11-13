@@ -137,7 +137,9 @@ def _lower_envelope_finite_inward_cells(
     triangles = triangulate_simple_polygon(domain, eps)
     output: list[list[list[Point2]]] = [[] for _ in planes]
     scale = max(_bbox_scale(domain), 1.0)
-    area_tolerance = eps * scale * scale
+    # Preserve small but resolvable arrangement cells near acute corners.
+    # Topology validation below rejects genuinely degenerate faces/edges.
+    area_tolerance = eps * scale * scale * 1.0e-3
     point_tolerance = eps * scale * 20.0
     winding = 1.0 if signed_area(domain) > 0.0 else -1.0
 
@@ -279,7 +281,7 @@ def build_intersection_envelope_surface(
         1.0,
     )
     weld_tolerance = max(1e-12, eps * scale * 2.0)
-    area_tolerance = eps * scale * scale
+    area_tolerance = eps * scale * scale * 1.0e-3
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []
@@ -321,6 +323,7 @@ def build_intersection_envelope_surface(
         registry.vertices,
         faces,
         weld_tolerance * 2.0,
+        minimum_edge_length=weld_tolerance,
     )
     edge_usage = _mesh_edge_usage(faces)
     if any(uses > 2 for uses in edge_usage.values()):

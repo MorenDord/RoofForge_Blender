@@ -66,6 +66,8 @@ def _split_face_edges_at_shared_vertices(
     vertices: Sequence[Point3],
     faces: Sequence[Face],
     tolerance: float,
+    *,
+    minimum_edge_length: float | None = None,
 ) -> list[Face]:
     """Conform face boundaries by inserting shared vertices on long edges.
 
@@ -74,7 +76,15 @@ def _split_face_edges_at_shared_vertices(
     two shorter edges meeting at a vertex. This pass inserts that existing
     vertex into the long edge without moving geometry or changing the face
     region, so edge-incidence validation sees matching topology.
+
+    The optional minimum_edge_length separates the edge degeneracy threshold
+    from the search tolerance for T-junctions. The default preserves the
+    historical behavior.
     """
+    minimum_length = tolerance if minimum_edge_length is None else minimum_edge_length
+    if minimum_length <= 0.0:
+        raise ValueError("minimum_edge_length must be positive")
+    minimum_length_sq = minimum_length * minimum_length
     tolerance_sq = tolerance * tolerance
     output: list[Face] = []
     axis_orders: list[list[int]] = []
@@ -95,7 +105,7 @@ def _split_face_edges_at_shared_vertices(
             end = vertices[end_id]
             direction = tuple(end[axis] - start[axis] for axis in range(3))
             length_sq = sum(value * value for value in direction)
-            if length_sq <= tolerance_sq:
+            if length_sq <= minimum_length_sq:
                 raise GeometryInputError(
                     "ZERO_LENGTH_FACE_EDGE",
                     "После сборки фасет найдено ребро нулевой длины.",

@@ -152,9 +152,20 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
             build_intersection_envelope_surface(points, [20.0, 35.0, 20.0, 35.0])
         self.assertEqual(context.exception.code, "PITCH_BELOW_EAVE_GRADE")
 
+    def test_global_envelope_rejects_dense_concave_planes_that_undercut_eave(self):
+        for fixture in (_dense_mixed_height_l, _dense_mixed_height_u):
+            points, pitches = fixture()
+            with self.subTest(vertices=len(points)):
+                with self.assertRaises(GeometryInputError) as context:
+                    build_global_plane_intersection_surface(points, pitches)
+                self.assertEqual(
+                    context.exception.code,
+                    "GLOBAL_ENVELOPE_EAVE_UNDERCUT",
+                )
+
     def test_dense_mixed_height_l_96_matches_exact_topology_invariants(self):
         points, pitches = _dense_mixed_height_l()
-        surface = build_global_plane_intersection_surface(points, pitches)
+        surface = build_intersection_envelope_surface(points, pitches)
         reference = build_roof_surface(points, pitches)
         self.assert_exact_support_surface(points, surface)
         self.assert_reference_surface(points, reference)
