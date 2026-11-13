@@ -14,7 +14,7 @@ PACKAGE_DIRS = ("addon", "core")
 EXTRA_FILES = ("INSTALL_TEST_RU.md",)
 # Experimental mixed-height concave envelope code remains source/test-only.
 EXCLUDED_PACKAGE_PATHS = {"core/intersection_envelope.py"}
-SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 NATIVE_PLATFORMS = {
     "linux-x64",
     "windows-x64",
