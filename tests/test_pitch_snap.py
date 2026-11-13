@@ -38,6 +38,28 @@ class PitchSnapTests(unittest.TestCase):
         surface = make_surface(3)
         self.assertEqual(count_slope_upper_vertices(surface, POINTS, 0), 3)
 
+    def test_internal_face_split_vertices_do_not_count_as_intersections(self):
+        vertices = (
+            POINTS[0],
+            POINTS[1],
+            (10.0, 5.0, 3.0),
+            (5.0, 10.0, 4.0),
+            (0.0, 5.0, 3.0),
+            (5.0, 5.0, 2.0),  # Interior tessellation node.
+        )
+        surface = SimpleNamespace(
+            vertices=vertices,
+            faces=(
+                (0, 1, 5),
+                (1, 2, 5),
+                (2, 3, 5),
+                (3, 4, 5),
+                (4, 0, 5),
+            ),
+            face_slope_indices=(0, 0, 0, 0, 0),
+        )
+        self.assertEqual(count_slope_upper_vertices(surface, POINTS, 0), 3)
+
     def test_next_finds_first_reduction_in_increasing_direction(self):
         def build_surface(_points, pitches):
             angle = pitches[0]
