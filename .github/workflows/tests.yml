@@ -123,6 +123,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Profile native wavefront event state machine
+        run: python tests/profile_native_state_machine.py --runs 5 --json-output native-state-machine-profile.json
+      - name: Upload native state machine profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-native-state-machine-profile
+          path: native-state-machine-profile.json
+          if-no-files-found: error
+          retention-days: 30
+
   geometry-benchmarks:
     runs-on: ubuntu-latest
     needs: pure-python-tests
