@@ -34,7 +34,8 @@
 2. Открой Actions: https://github.com/MorenDord/RoofForge_Blender/actions
 3. Выбери последний успешный workflow **RoofForge tests** на ветке `feature/0.2.0-arbitrary-contours-live-pitch`.
 4. Скачай внешний архив `roof_forge-0.3.18-blender-5.0.1` и распакуй его один раз.
-5. Установи внутренний `roof_forge-0.3.18.zip` через **Preferences → Get Extensions → Install from Disk…**. Внутренний ZIP не распаковывай.\n6. Внизу панели RoofForge должна появиться строка **Geometry core: Rust (5/5 kernels)**. Если отображается Python fallback, native wheel не загрузился.
+5. Установи внутренний `roof_forge-0.3.18.zip` через **Preferences → Get Extensions → Install from Disk…**. Внутренний ZIP не распаковывай.
+6. Внизу панели RoofForge должна появиться строка **Geometry core: Rust (5/5 kernels)**. Если отображается Python fallback, native wheel не загрузился.
 
 ## Проверка перед созданием
 
