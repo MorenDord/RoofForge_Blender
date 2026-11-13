@@ -114,7 +114,7 @@ assert abs(layout["target_center"][1] - 727.5) < 1.0e-7
 assert layout["scissor"] == (68, 635, 185, 185)
 assert module._translate_scissor(
     layout["scissor"], (100, 200, 320, 900)
-) == (108, 835, 185, 185)
+) == (168, 835, 185, 185)
 assert abs(layout["draw_side"] - 169.0) < 1.0e-7
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
