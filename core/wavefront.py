@@ -16,7 +16,7 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
-from heapq import heappop, heappush
+from heapq import heapify, heappop, heappush
 from math import hypot, isfinite, tan, radians
 from typing import Sequence
 
@@ -165,9 +165,55 @@ class WavefrontEventQueue:
         heappush(self._heap, (self._event_key(event), self._sequence, event))
         self._sequence += 1
 
+    def _insert_pending_entries(
+        self,
+        pending: list[tuple[tuple, int, WavefrontEvent]],
+    ) -> None:
+        """Insert a prepared event batch without changing sequence ordering.
+
+        For sufficiently large batches relative to the existing heap, extending
+        and heapifying is cheaper than performing one sift-up per event. Small
+        batches keep the incremental heappush path.
+        """
+        pending_count = len(pending)
+        if not pending_count:
+            return
+
+        combined_count = len(self._heap) + pending_count
+        estimated_sift_levels = combined_count.bit_length() - 1
+        if (
+            pending_count >= 32
+            and pending_count * estimated_sift_levels >= combined_count
+        ):
+            self._heap.extend(pending)
+            heapify(self._heap)
+            return
+
+        for entry in pending:
+            heappush(self._heap, entry)
+
     def push_many(self, events: Sequence[WavefrontEvent]) -> None:
+        # Preserve the simple path and its exact partial-insertion behavior for
+        # small batches. Large batches avoid repeated Python method dispatch.
+        if len(events) < 32:
+            for event in events:
+                self.push(event)
+            return
+
+        pending: list[tuple[tuple, int, WavefrontEvent]] = []
         for event in events:
-            self.push(event)
+            if not isfinite(event.time):
+                # Match push(): valid events before the invalid item remain
+                # queued, even when a later batch member is rejected.
+                self._insert_pending_entries(pending)
+                raise GeometryInputError(
+                    "INVALID_EVENT_TIME",
+                    "Время события волнового фронта должно быть конечным."
+                )
+            pending.append((self._event_key(event), self._sequence, event))
+            self._sequence += 1
+
+        self._insert_pending_entries(pending)
 
     def __len__(self) -> int:
         return len(self._heap)
