@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "roof-forge-native"
+version = "0.1.0"
+description = "Native geometry primitives for the RoofForge Blender extension"
+requires-python = ">=3.10"
+
+[tool.maturin]
+module-name = "roof_forge_native"
+features = ["python-extension"]
