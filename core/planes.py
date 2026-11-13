@@ -116,38 +116,14 @@ def boundary_envelope_conflicts(
                     crossing = (boundary - p0) / delta
                     if 0.0 < crossing < 1.0:
                         breaks.append(crossing)
-
-            # A finite source edge only influences its inward side. Points
-            # in a remote concave lobe may project onto the segment from the
-            # back side and must not activate that edge's support plane.
-            edge_length = hypot(ox, oy)
-            side_tolerance = eps * scale * edge_length
-
-            def inward_side_at(t: float) -> float:
-                x = start[0] + (end[0] - start[0]) * t
-                y = start[1] + (end[1] - start[1]) * t
-                return winding * (
-                    ox * (y - other_start[1])
-                    - oy * (x - other_start[0])
-                )
-
-            side0, side1 = inward_side_at(0.0), inward_side_at(1.0)
-            side_delta = side1 - side0
-            if abs(side_delta) > side_tolerance:
-                crossing = (-side_tolerance - side0) / side_delta
-                if 0.0 < crossing < 1.0:
-                    breaks.append(crossing)
             breaks.sort()
 
             for t0, t1 in zip(breaks, breaks[1:]):
-                midpoint = (t0 + t1) * 0.5
-                midpoint_projection = projection_at(midpoint)
+                midpoint_projection = projection_at((t0 + t1) * 0.5)
                 if not (eps < midpoint_projection < 1.0 - eps):
                     continue
-                if inward_side_at(midpoint) < -side_tolerance:
-                    continue
                 undercut = False
-                for t in (t0, midpoint, t1):
+                for t in (t0, (t0 + t1) * 0.5, t1):
                     x = start[0] + (end[0] - start[0]) * t
                     y = start[1] + (end[1] - start[1]) * t
                     if other.height(x, y) - own.height(x, y) < -z_tol:

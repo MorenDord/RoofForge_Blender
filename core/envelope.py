@@ -154,7 +154,6 @@ def lower_envelope_restricted_cells(
     scale = max(_bbox_scale(domain), _bbox_scale(support), 1.0)
     area_eps = eps * scale * scale
     point_tolerance = eps * scale * 20.0
-    winding = 1.0 if signed_area(support) > 0.0 else -1.0
 
     edge_data: list[tuple[float, float, float, float, float, float]] = []
     for index, start in enumerate(support):
@@ -219,18 +218,11 @@ def lower_envelope_restricted_cells(
                 sum(point[1] for point in cell) / len(cell),
             )
             active = []
-            for index, (sx, sy, dx, dy, length_sq, edge_length) in enumerate(edge_data):
+            for index, (sx, sy, dx, dy, length_sq, _length) in enumerate(edge_data):
                 projection = (
                     (sample[0] - sx) * dx + (sample[1] - sy) * dy
                 ) / length_sq
-                inward_side = winding * (
-                    dx * (sample[1] - sy) - dy * (sample[0] - sx)
-                )
-                side_tolerance = point_tolerance * edge_length
-                if (
-                    point_tolerance < projection < 1.0 - point_tolerance
-                    and inward_side >= -side_tolerance
-                ):
+                if point_tolerance < projection < 1.0 - point_tolerance:
                     active.append(index)
 
             if not active:

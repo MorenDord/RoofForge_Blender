@@ -1,21 +1,246 @@
-"""Experimental exact roof construction from boundary support-plane intersections.
+"""Experimental exact lower-envelope solver with finite inward edge supports.
 
-The solver builds the lower envelope of one analytical plane per 3D eave
-edge. It does not search for a central ring, fit a height field, or move
-vertices away from their support planes. Finite source-edge activation keeps
-a reflex edge from competing outside its authored projection interval.
+Each 3D eave edge defines one analytical support plane. The support plane is
+eligible only in the inward halfspace of its own finite source segment. The
+XY domain is split along exact support/endpoint lines; within each resulting
+cell, all active support-plane equalities are solved analytically.
+
+This implementation is intentionally separate from the legacy overhang and
+roof-surface assembly paths, whose edge-activation semantics are different.
 """
 from __future__ import annotations
 
-from math import isfinite
+from math import hypot
 from typing import Sequence
 
-from .geometry import GeometryInputError, _bbox_scale, signed_area
-from .mesh import RoofSurface, build_roof_surface_from_planes
-from .planes import boundary_envelope_conflicts, build_boundary_planes
+from .geometry import (
+    GeometryInputError,
+    PlaneZ,
+    _bbox_scale,
+    clip_half_plane,
+    lower_envelope_regions,
+    signed_area,
+    triangulate_simple_polygon,
+)
+from .mesh import (
+    RoofSurface,
+    _VertexRegistry,
+    _mesh_edge_usage,
+    _split_face_edges_at_shared_vertices,
+    validate_surface_boundary_edges,
+)
+from .planes import build_boundary_planes
 
-Point3 = tuple[float, float, float]
 Point2 = tuple[float, float]
+Point3 = tuple[float, float, float]
+Face = tuple[int, ...]
+
+
+def _validate_finite_inward_eave_support(
+    points: Sequence[Point3],
+    planes: Sequence[PlaneZ],
+    eps: float,
+) -> None:
+    """Reject only competitors active on a finite source edge's inward side."""
+    domain = [(point[0], point[1]) for point in points]
+    winding = 1.0 if signed_area(domain) > 0.0 else -1.0
+    scale = max(_bbox_scale(domain), 1.0)
+    z_tolerance = eps * scale
+    projection_tolerance = max(eps * 10.0, 1e-12)
+
+    for edge_index, start in enumerate(points):
+        end = points[(edge_index + 1) % len(points)]
+        own = planes[edge_index]
+        for other_index, other in enumerate(planes):
+            if other_index == edge_index:
+                continue
+            other_start = points[other_index]
+            other_end = points[(other_index + 1) % len(points)]
+            ox = other_end[0] - other_start[0]
+            oy = other_end[1] - other_start[1]
+            length_sq = ox * ox + oy * oy
+            edge_length = hypot(ox, oy)
+            if edge_length <= eps * scale:
+                continue
+
+            def projection_at(t: float) -> float:
+                x = start[0] + (end[0] - start[0]) * t
+                y = start[1] + (end[1] - start[1]) * t
+                return ((x - other_start[0]) * ox + (y - other_start[1]) * oy) / length_sq
+
+            side_tolerance = eps * scale * edge_length
+
+            def inward_side_at(t: float) -> float:
+                x = start[0] + (end[0] - start[0]) * t
+                y = start[1] + (end[1] - start[1]) * t
+                return winding * (
+                    ox * (y - other_start[1])
+                    - oy * (x - other_start[0])
+                )
+
+            breaks = [0.0, 1.0]
+            p0, p1 = projection_at(0.0), projection_at(1.0)
+            projection_delta = p1 - p0
+            if abs(projection_delta) > projection_tolerance:
+                for boundary in (0.0, 1.0):
+                    crossing = (boundary - p0) / projection_delta
+                    if 0.0 < crossing < 1.0:
+                        breaks.append(crossing)
+
+            side0, side1 = inward_side_at(0.0), inward_side_at(1.0)
+            side_delta = side1 - side0
+            if abs(side_delta) > side_tolerance:
+                crossing = (-side_tolerance - side0) / side_delta
+                if 0.0 < crossing < 1.0:
+                    breaks.append(crossing)
+
+            breaks.sort()
+            for t0, t1 in zip(breaks, breaks[1:]):
+                midpoint = 0.5 * (t0 + t1)
+                projection = projection_at(midpoint)
+                if not (
+                    projection_tolerance < projection < 1.0 - projection_tolerance
+                    and inward_side_at(midpoint) >= -side_tolerance
+                ):
+                    continue
+                for t in (t0, midpoint, t1):
+                    x = start[0] + (end[0] - start[0]) * t
+                    y = start[1] + (end[1] - start[1]) * t
+                    if other.height(x, y) - own.height(x, y) < -z_tolerance:
+                        raise GeometryInputError(
+                            "BOUNDARY_UNDERCUT",
+                            f"Плоскость ската {other_index + 1} опускается ниже "
+                            f"карниза ската {edge_index + 1} в своей конечной "
+                            "внутренней области влияния.",
+                        )
+
+
+def _lower_envelope_finite_inward_cells(
+    domain: Sequence[Point2],
+    planes: Sequence[PlaneZ],
+    eps: float,
+) -> list[list[list[Point2]]]:
+    """Partition a concave footprint by finite inward support activation.
+
+    Projection endpoint lines and source support lines make the active set
+    constant inside every arrangement cell. Each cell is then clipped by
+    exact affine plane-equality halfspaces to form the lower envelope.
+    """
+    count = len(domain)
+    if count < 3 or len(planes) != count:
+        raise GeometryInputError(
+            "PLANE_COUNT",
+            "Для каждого ребра 3D-контура нужна одна опорная плоскость.",
+        )
+
+    triangles = triangulate_simple_polygon(domain, eps)
+    output: list[list[list[Point2]]] = [[] for _ in planes]
+    scale = max(_bbox_scale(domain), 1.0)
+    area_tolerance = eps * scale * scale
+    point_tolerance = eps * scale * 20.0
+    winding = 1.0 if signed_area(domain) > 0.0 else -1.0
+
+    edge_data: list[tuple[float, float, float, float, float, float]] = []
+    for index, start in enumerate(domain):
+        end = domain[(index + 1) % count]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length_sq = dx * dx + dy * dy
+        length = hypot(dx, dy)
+        if length <= eps * scale:
+            raise GeometryInputError(
+                "DEGENERATE_EDGE",
+                f"Ребро {index + 1} исходного контура имеет нулевую длину.",
+            )
+        edge_data.append((start[0], start[1], dx, dy, length_sq, length))
+
+    def split_cells(
+        cells: Sequence[Sequence[Point2]],
+        a: float,
+        b: float,
+        c: float,
+    ) -> list[list[Point2]]:
+        function_tolerance = eps * scale * hypot(a, b)
+        next_cells: list[list[Point2]] = []
+        for cell in cells:
+            negative = clip_half_plane(cell, -a, -b, -c, function_tolerance)
+            positive = clip_half_plane(cell, a, b, c, function_tolerance)
+            negative_valid = (
+                len(negative) >= 3
+                and abs(signed_area(negative)) > area_tolerance
+            )
+            positive_valid = (
+                len(positive) >= 3
+                and abs(signed_area(positive)) > area_tolerance
+            )
+            if negative_valid and positive_valid:
+                next_cells.extend((negative, positive))
+            elif negative_valid:
+                next_cells.append(negative)
+            elif positive_valid:
+                next_cells.append(positive)
+        return next_cells
+
+    for triangle in triangles:
+        arrangement_cells: list[list[Point2]] = [list(triangle)]
+        for sx, sy, dx, dy, _length_sq, _length in edge_data:
+            # Inward-support line.
+            arrangement_cells = split_cells(
+                arrangement_cells, -dy, dx, dy * sx - dx * sy
+            )
+            # Start and end of the finite orthogonal projection interval.
+            arrangement_cells = split_cells(
+                arrangement_cells, dx, dy, -(dx * sx + dy * sy)
+            )
+            ex, ey = sx + dx, sy + dy
+            arrangement_cells = split_cells(
+                arrangement_cells, dx, dy, -(dx * ex + dy * ey)
+            )
+            if not arrangement_cells:
+                break
+
+        for cell in arrangement_cells:
+            sample = (
+                sum(point[0] for point in cell) / len(cell),
+                sum(point[1] for point in cell) / len(cell),
+            )
+            active: list[int] = []
+            for index, (sx, sy, dx, dy, length_sq, edge_length) in enumerate(edge_data):
+                projection = (
+                    (sample[0] - sx) * dx + (sample[1] - sy) * dy
+                ) / length_sq
+                inward_side = winding * (
+                    dx * (sample[1] - sy) - dy * (sample[0] - sx)
+                )
+                if (
+                    point_tolerance < projection < 1.0 - point_tolerance
+                    and inward_side >= -point_tolerance * edge_length
+                ):
+                    active.append(index)
+
+            # A corner wedge has no interior projection onto either adjacent
+            # finite segment. Its only valid supports are the two incident
+            # source edges at the nearest contour vertex.
+            if not active:
+                nearest_vertex = min(
+                    range(count),
+                    key=lambda index: (
+                        (sample[0] - domain[index][0]) ** 2
+                        + (sample[1] - domain[index][1]) ** 2
+                    ),
+                )
+                active = [(nearest_vertex - 1) % count, nearest_vertex]
+
+            regions = lower_envelope_regions(
+                cell, [planes[index] for index in active], eps
+            )
+            for local_index, region in enumerate(regions):
+                if (
+                    len(region) >= 3
+                    and abs(signed_area(region)) > area_tolerance
+                ):
+                    output[active[local_index]].append(region)
+
+    return output
 
 
 def build_intersection_envelope_surface(
@@ -23,104 +248,177 @@ def build_intersection_envelope_surface(
     pitches_degrees: Sequence[float],
     eps: float = 1e-9,
 ) -> RoofSurface:
-    """Build a roof from exact per-edge planes and their lower-envelope seams.
+    """Build an exact support-plane roof without alpha or central-ring search.
 
-    The result is accepted only when:
-    * each input edge has a valid support plane at its requested pitch;
-    * no competing finite source edge undercuts an authored eave segment;
-    * the plane-envelope cells cover the footprint without cracks or
-      non-manifold edges; and
-    * every authored support plane owns at least one non-zero roof face.
-
-    This is an experimental alternative to the spatial event/ring solver. It
-    is intentionally not wired into the add-on's default generation path yet.
+    One plane is constructed through every authored 3D eave edge at its
+    requested pitch. Finite inward edge supports define which planes may
+    compete at each point. The active planes are partitioned by exact pairwise
+    height equalities, then assembled into a conforming planar mesh.
     """
     if len(points) < 3:
         raise GeometryInputError(
             "POLY_TOO_SMALL",
             "Контур должен содержать минимум три вершины.",
         )
-
-    raw_points = tuple(
+    normalized: tuple[Point3, ...] = tuple(
         tuple(float(value) for value in point)
         for point in points
-    )
-    if any(
-        len(point) != 3 or not all(isfinite(value) for value in point)
-        for point in raw_points
-    ):
-        raise GeometryInputError(
-            "NON_FINITE",
-            "Координаты 3D-контура должны быть конечными числами.",
-        )
-    normalized: tuple[Point3, ...] = raw_points  # type: ignore[assignment]
+    )  # type: ignore[assignment]
     domain: tuple[Point2, ...] = tuple(
         (point[0], point[1]) for point in normalized
     )
-
     planes = build_boundary_planes(normalized, pitches_degrees, eps)
-    conflicts = boundary_envelope_conflicts(
-        normalized,
-        planes,
-        eps,
-        active_contour=normalized,
-    )
-    if conflicts:
-        first = conflicts[0]
-        raise GeometryInputError(first.code, first.message)
 
-    area = abs(signed_area(domain))
+    _validate_finite_inward_eave_support(normalized, planes, eps)
+    cells_by_slope = _lower_envelope_finite_inward_cells(domain, planes, eps)
+
     scale = max(
         _bbox_scale(domain),
-        max(point[2] for point in normalized)
-        - min(point[2] for point in normalized),
+        max(point[2] for point in normalized) - min(point[2] for point in normalized),
         1.0,
     )
-    if area <= eps * scale * scale:
+    weld_tolerance = max(1e-12, eps * scale * 2.0)
+    area_tolerance = eps * scale * scale
+    registry = _VertexRegistry(weld_tolerance)
+    faces: list[Face] = []
+    face_slope_indices: list[int] = []
+    face_keys: set[tuple[int, ...]] = set()
+
+    for slope_index, cells in enumerate(cells_by_slope):
+        plane = planes[slope_index]
+        for cell in cells:
+            if len(cell) < 3 or abs(signed_area(cell)) <= area_tolerance:
+                continue
+            face_indices = [
+                registry.add((x, y, plane.height(x, y)))
+                for x, y in cell
+            ]
+            compact: list[int] = []
+            for vertex_index in face_indices:
+                if not compact or compact[-1] != vertex_index:
+                    compact.append(vertex_index)
+            if len(compact) > 1 and compact[0] == compact[-1]:
+                compact.pop()
+            if len(set(compact)) < 3:
+                continue
+            if signed_area(cell) < 0.0:
+                compact.reverse()
+            key = tuple(sorted(compact))
+            if key in face_keys:
+                continue
+            face_keys.add(key)
+            faces.append(tuple(compact))
+            face_slope_indices.append(slope_index)
+
+    if not faces:
         raise GeometryInputError(
-            "DEGENERATE_DOMAIN",
-            "Проекция контура имеет практически нулевую площадь.",
+            "EMPTY_ROOF",
+            "Пересечения опорных плоскостей не создали областей крыши.",
         )
 
-    # Cell assembly analytically clips the footprint by support-plane
-    # inequalities, welds exact intersection vertices, splits T-junctions,
-    # and validates domain coverage plus the outer boundary chain.
-    surface = build_roof_surface_from_planes(
-        domain,
-        planes,
-        source_area_xy=area,
-        eps=eps,
-        active_contour=domain,
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices,
+        faces,
+        weld_tolerance * 2.0,
     )
+    edge_usage = _mesh_edge_usage(faces)
+    if any(uses > 2 for uses in edge_usage.values()):
+        raise GeometryInputError(
+            "NON_MANIFOLD_SURFACE",
+            "Пересечения опорных плоскостей создали неманифолдное ребро.",
+        )
 
-    used_sources = {
-        source_index
-        for source_index in surface.face_slope_indices
-        if source_index >= 0
-    }
-    missing = sorted(set(range(len(planes))) - used_sources)
-    if missing:
+    boundary_edges = validate_surface_boundary_edges(
+        registry.vertices,
+        faces,
+        domain,
+        weld_tolerance * 2.0,
+    )
+    for first, second in boundary_edges:
+        p, q = registry.vertices[first], registry.vertices[second]
+        matches = []
+        for edge_index, start in enumerate(normalized):
+            end = normalized[(edge_index + 1) % len(normalized)]
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length_sq = dx * dx + dy * dy
+            if length_sq <= weld_tolerance * weld_tolerance:
+                continue
+
+            def parameter_and_distance(point: Point3):
+                rx, ry = point[0] - start[0], point[1] - start[1]
+                parameter = (rx * dx + ry * dy) / length_sq
+                distance = abs(dx * ry - dy * rx) / (length_sq ** 0.5)
+                return parameter, distance
+
+            tp, dp = parameter_and_distance(p)
+            tq, dq = parameter_and_distance(q)
+            if (
+                dp <= weld_tolerance * 5.0
+                and dq <= weld_tolerance * 5.0
+                and -weld_tolerance <= tp <= 1.0 + weld_tolerance
+                and -weld_tolerance <= tq <= 1.0 + weld_tolerance
+            ):
+                zp = start[2] + tp * (end[2] - start[2])
+                zq = start[2] + tq * (end[2] - start[2])
+                if (
+                    abs(p[2] - zp) <= weld_tolerance * max(1.0, abs(zp))
+                    and abs(q[2] - zq) <= weld_tolerance * max(1.0, abs(zq))
+                ):
+                    matches.append(edge_index)
+        if len(matches) != 1:
+            raise GeometryInputError(
+                "SUPPORT_PLANE_EAVE_MISMATCH",
+                "Огибающая не сохранила исходную 3D-линию карниза.",
+            )
+
+    used_sources = set(face_slope_indices)
+    missing_sources = sorted(set(range(len(planes))) - used_sources)
+    if missing_sources:
         raise GeometryInputError(
             "PLANE_ENVELOPE_UNUSED_SUPPORT",
-            "Нижняя огибающая не сохранила области следующих заданных скатов: "
-            + ", ".join(str(index + 1) for index in missing),
+            "Не сохранились области следующих опорных плоскостей: "
+            + ", ".join(str(index + 1) for index in missing_sources),
         )
 
-    tolerance = max(1e-12, eps * scale * 100.0)
     for face_index, (face, source_index) in enumerate(
-        zip(surface.faces, surface.face_slope_indices)
+        zip(faces, face_slope_indices)
     ):
         plane = planes[source_index]
         for vertex_index in face:
-            x, y, z = surface.vertices[vertex_index]
-            residual = abs(z - plane.height(x, y))
-            if residual > tolerance * max(1.0, abs(z)):
+            x, y, z = registry.vertices[vertex_index]
+            if abs(z - plane.height(x, y)) > weld_tolerance * max(1.0, abs(z)):
                 raise GeometryInputError(
                     "PLANE_ENVELOPE_OFF_SUPPORT",
                     f"Вершина грани {face_index + 1} вышла из плоскости ската {source_index + 1}.",
                 )
 
-    return surface
+    surface_area = sum(
+        abs(signed_area([
+            (registry.vertices[index][0], registry.vertices[index][1])
+            for index in face
+        ]))
+        for face in faces
+    )
+    source_area = abs(signed_area(domain))
+    if abs(surface_area - source_area) > max(
+        area_tolerance * 100.0, source_area * 1e-7
+    ):
+        raise GeometryInputError(
+            "DOMAIN_COVERAGE_MISMATCH",
+            "Ячейки опорных плоскостей не покрывают контур без дыр и перекрытий.",
+        )
+
+    return RoofSurface(
+        vertices=tuple(registry.vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_slope_indices),
+        planes=tuple(planes),
+        source_area_xy=source_area,
+        surface_area_xy=surface_area,
+        boundary_xy=domain,
+        approximation_error=0.0,
+        refinement_depth=0,
+    )
 
 
 __all__ = ["build_intersection_envelope_surface"]

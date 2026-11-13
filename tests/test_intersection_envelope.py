@@ -103,6 +103,15 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
         self.assertAlmostEqual(surface.surface_area_xy, expected_area, places=7)
         self.assertAlmostEqual(surface.source_area_xy, expected_area, places=7)
 
+    def assert_reference_surface(self, points, surface):
+        self.assertTrue(surface.faces)
+        self.assertEqual(surface.approximation_error, 0.0)
+        self.assertEqual(surface.refinement_depth, 0)
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        expected_area = abs(signed_area([(p[0], p[1]) for p in points]))
+        self.assertAlmostEqual(surface.surface_area_xy, expected_area, places=7)
+        self.assertAlmostEqual(surface.source_area_xy, expected_area, places=7)
+
     def assert_closed_shell(self, surface):
         shell = build_roof_shell(surface, 0.10)
         self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
@@ -145,7 +154,7 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
         surface = build_intersection_envelope_surface(points, pitches)
         reference = build_roof_surface(points, pitches)
         self.assert_exact_support_surface(points, surface)
-        self.assert_exact_support_surface(points, reference)
+        self.assert_reference_surface(points, reference)
         self.assert_closed_shell(surface)
         self.assert_closed_shell(reference)
 
@@ -154,7 +163,7 @@ class PlaneIntersectionEnvelopeTests(unittest.TestCase):
         surface = build_intersection_envelope_surface(points, pitches)
         reference = build_roof_surface(points, pitches)
         self.assert_exact_support_surface(points, surface)
-        self.assert_exact_support_surface(points, reference)
+        self.assert_reference_surface(points, reference)
         self.assert_closed_shell(surface)
         self.assert_closed_shell(reference)
 
