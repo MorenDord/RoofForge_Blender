@@ -122,7 +122,7 @@ class TestRustMeshConformance(unittest.TestCase):
                 actual = split_face_edges_at_shared_vertices_native(
                     vertices, faces, tolerance
                 )
-                self.assertEqual(actual, [tuple(face) for face in expected])
+                self.assertEqual([tuple(face) for face in actual], [tuple(face) for face in expected])
 
     def test_native_conformance_matches_python_on_deterministic_generated_meshes(self):
         rng = random.Random(917_203)
@@ -147,7 +147,7 @@ class TestRustMeshConformance(unittest.TestCase):
             actual = split_face_edges_at_shared_vertices_native(
                 vertices, faces, tolerance
             )
-            self.assertEqual(actual, [tuple(face) for face in expected])
+            self.assertEqual([tuple(face) for face in actual], [tuple(face) for face in expected])
 
 
 @unittest.skipUnless(
