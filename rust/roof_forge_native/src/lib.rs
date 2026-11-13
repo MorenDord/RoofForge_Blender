@@ -169,7 +169,6 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
-
 fn weld_vertices_batch_core(
     points: &[[f64; 3]],
     tolerance: f64,
@@ -770,8 +769,8 @@ type WavefrontEventTuple = (
 mod python {
     use super::{
         collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
-        validate_simple_polygon, weld_vertices_batch_core, WavefrontEventTuple,
-        WavefrontLineData, WavefrontLineTuple,
+        validate_simple_polygon, weld_vertices_batch_core, WavefrontEventTuple, WavefrontLineData,
+        WavefrontLineTuple,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
@@ -997,7 +996,10 @@ mod tests {
             [0.0, 1.0, 0.0],
         ];
         let (vertices, indices) = weld_vertices_batch_core(&points, 1.0e-6).unwrap();
-        assert_eq!(vertices, vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
+        assert_eq!(
+            vertices,
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
         assert_eq!(indices, vec![0, 1, 0, 0, 0, 2]);
     }
 
