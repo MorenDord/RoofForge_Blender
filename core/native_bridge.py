@@ -72,3 +72,31 @@ def collect_wavefront_events_native(lines, loop_id: int, time: float,
         if separator:
             raise NativeGeometryError(code, message) from exc
         raise
+
+
+NATIVE_FACE_CONFORMANCE_AVAILABLE = (
+    NATIVE_BACKEND_AVAILABLE
+    and callable(getattr(_native, "split_face_edges_at_shared_vertices", None))
+)
+
+
+def split_face_edges_at_shared_vertices_native(vertices, faces, tolerance: float):
+    """Conform mesh face boundaries using Rust, or return None for Python fallback."""
+    if not NATIVE_FACE_CONFORMANCE_AVAILABLE:
+        return None
+
+    vertex_records = [
+        (float(point[0]), float(point[1]), float(point[2]))
+        for point in vertices
+    ]
+    face_records = [tuple(int(vertex_id) for vertex_id in face) for face in faces]
+    try:
+        return _native.split_face_edges_at_shared_vertices(
+            vertex_records, face_records, float(tolerance)
+        )
+    except ValueError as exc:
+        raw = str(exc)
+        code, separator, message = raw.partition("|")
+        if separator:
+            raise NativeGeometryError(code, message) from exc
+        raise

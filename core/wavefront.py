@@ -2086,9 +2086,28 @@ def build_wavefront_roof_surface(
     # A split can introduce a vertex in the interior of an earlier facet edge.
     # Make every incident face use the same edge segmentation before manifold
     # validation; otherwise a geometric T-junction appears as an open edge.
-    faces = _split_face_edges_at_shared_vertices(
-        registry.vertices, faces, weld_tolerance * 5.0
-    )
+    conformed_faces = None
+    if len(faces) >= 64 and len(registry.vertices) >= 128:
+        from .native_bridge import (
+            NATIVE_FACE_CONFORMANCE_AVAILABLE,
+            NativeGeometryError,
+            split_face_edges_at_shared_vertices_native,
+        )
+
+        if NATIVE_FACE_CONFORMANCE_AVAILABLE:
+            try:
+                conformed_faces = split_face_edges_at_shared_vertices_native(
+                    registry.vertices, faces, weld_tolerance * 5.0
+                )
+            except NativeGeometryError as exc:
+                raise GeometryInputError(exc.code, exc.message) from exc
+
+    if conformed_faces is None:
+        faces = _split_face_edges_at_shared_vertices(
+            registry.vertices, faces, weld_tolerance * 5.0
+        )
+    else:
+        faces = [tuple(face) for face in conformed_faces]
 
     surface_area = sum(
         abs(signed_area([(registry.vertices[i][0], registry.vertices[i][1]) for i in face]))

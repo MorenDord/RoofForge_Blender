@@ -169,6 +169,189 @@ fn validate_simple_polygon(points: &[[f64; 2]], eps: f64) -> Vec<Diagnostic> {
     issues
 }
 
+
+fn split_face_edges_at_shared_vertices_core(
+    vertices: &[[f64; 3]],
+    faces: &[Vec<usize>],
+    tolerance: f64,
+) -> Result<Vec<Vec<usize>>, Diagnostic> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Diagnostic::error(
+            "INVALID_TOLERANCE",
+            "Допуск согласования рёбер должен быть конечным и положительным.",
+        ));
+    }
+    if vertices.iter().flatten().any(|value| !value.is_finite()) {
+        return Err(Diagnostic::error(
+            "NON_FINITE_SURFACE_VERTEX",
+            "Сетка содержит NaN или бесконечную координату.",
+        ));
+    }
+
+    let tolerance_sq = tolerance * tolerance;
+    let mut axis_orders: [Vec<usize>; 3] = std::array::from_fn(|_| Vec::new());
+    let mut axis_values: [Vec<f64>; 3] = std::array::from_fn(|_| Vec::new());
+
+    for axis in 0..3 {
+        let mut order: Vec<usize> = (0..vertices.len()).collect();
+        order.sort_by(|first, second| {
+            vertices[*first][axis]
+                .partial_cmp(&vertices[*second][axis])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| first.cmp(second))
+        });
+        let values = order
+            .iter()
+            .map(|vertex_id| vertices[*vertex_id][axis])
+            .collect();
+        axis_orders[axis] = order;
+        axis_values[axis] = values;
+    }
+
+    let mut output = Vec::with_capacity(faces.len());
+    for face in faces {
+        if face.is_empty() {
+            return Err(Diagnostic::error(
+                "DEGENERATE_CONFORMED_FACE",
+                "Разбиение T-junction создало вырожденную грань.",
+            ));
+        }
+        if face.iter().any(|vertex_id| *vertex_id >= vertices.len()) {
+            return Err(Diagnostic::error(
+                "INVALID_FACE_VERTEX",
+                "Грань ссылается на отсутствующую вершину сетки.",
+            ));
+        }
+
+        let mut expanded = Vec::new();
+        for edge_index in 0..face.len() {
+            let start_id = face[edge_index];
+            let end_id = face[(edge_index + 1) % face.len()];
+            let start = vertices[start_id];
+            let end = vertices[end_id];
+            let direction = [
+                end[0] - start[0],
+                end[1] - start[1],
+                end[2] - start[2],
+            ];
+            let length_sq = direction
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>();
+            if !length_sq.is_finite() || length_sq <= tolerance_sq {
+                return Err(Diagnostic::error(
+                    "ZERO_LENGTH_FACE_EDGE",
+                    "После объединения фасет найдено ребро нулевой длины.",
+                ));
+            }
+
+            let mut search_axis = 0_usize;
+            for axis in 1..3 {
+                if direction[axis].abs() < direction[search_axis].abs() {
+                    search_axis = axis;
+                }
+            }
+            let lower_value = start[search_axis].min(end[search_axis]) - tolerance;
+            let upper_value = start[search_axis].max(end[search_axis]) + tolerance;
+            let values = &axis_values[search_axis];
+            let order = &axis_orders[search_axis];
+            let candidate_start = values.partition_point(|value| *value < lower_value);
+            let candidate_end = values.partition_point(|value| *value <= upper_value);
+
+            let mut points_on_edge: Vec<(f64, usize)> = Vec::new();
+            let edge_length = length_sq.sqrt();
+            let endpoint_margin = tolerance / edge_length;
+            for candidate_position in candidate_start..candidate_end {
+                let candidate_id = order[candidate_position];
+                if candidate_id == start_id || candidate_id == end_id {
+                    continue;
+                }
+                let candidate = vertices[candidate_id];
+                let mut outside = false;
+                for axis in 0..3 {
+                    if axis == search_axis {
+                        continue;
+                    }
+                    if candidate[axis] < start[axis].min(end[axis]) - tolerance
+                        || candidate[axis] > start[axis].max(end[axis]) + tolerance
+                    {
+                        outside = true;
+                        break;
+                    }
+                }
+                if outside {
+                    continue;
+                }
+
+                let relative = [
+                    candidate[0] - start[0],
+                    candidate[1] - start[1],
+                    candidate[2] - start[2],
+                ];
+                let parameter = (relative[0] * direction[0]
+                    + relative[1] * direction[1]
+                    + relative[2] * direction[2])
+                    / length_sq;
+                if parameter <= endpoint_margin || parameter >= 1.0 - endpoint_margin {
+                    continue;
+                }
+
+                let projected = [
+                    start[0] + parameter * direction[0],
+                    start[1] + parameter * direction[1],
+                    start[2] + parameter * direction[2],
+                ];
+                let dx = candidate[0] - projected[0];
+                let dy = candidate[1] - projected[1];
+                let dz = candidate[2] - projected[2];
+                let distance_sq = dx * dx + dy * dy + dz * dz;
+                if distance_sq <= tolerance_sq {
+                    points_on_edge.push((parameter, candidate_id));
+                }
+            }
+
+            points_on_edge.sort_by(|first, second| {
+                first
+                    .0
+                    .partial_cmp(&second.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| first.1.cmp(&second.1))
+            });
+            if expanded.is_empty() {
+                expanded.push(start_id);
+            }
+            expanded.extend(points_on_edge.into_iter().map(|(_, vertex_id)| vertex_id));
+            if expanded.last().copied() != Some(end_id) {
+                expanded.push(end_id);
+            }
+        }
+
+        let mut compact = Vec::with_capacity(expanded.len());
+        for vertex_id in expanded {
+            if compact.last().copied() != Some(vertex_id) {
+                compact.push(vertex_id);
+            }
+        }
+        if compact.len() > 1 && compact.first() == compact.last() {
+            compact.pop();
+        }
+        let unique_count = compact
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        if unique_count < 3 {
+            return Err(Diagnostic::error(
+                "DEGENERATE_CONFORMED_FACE",
+                "Разбиение T-junction создало вырожденную грань.",
+            ));
+        }
+        output.push(compact);
+    }
+
+    Ok(output)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct WavefrontLineData {
     edge_id: usize,
@@ -504,8 +687,8 @@ type WavefrontEventTuple = (
 #[cfg(feature = "python-extension")]
 mod python {
     use super::{
-        collect_wavefront_events_core, validate_simple_polygon, WavefrontEventTuple,
-        WavefrontLineData, WavefrontLineTuple,
+        collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
+        validate_simple_polygon, WavefrontEventTuple, WavefrontLineData, WavefrontLineTuple,
     };
     use pyo3::exceptions::PyValueError;
     use pyo3::prelude::*;
@@ -533,6 +716,23 @@ mod python {
                 )
             })
             .collect()
+    }
+
+
+    #[pyfunction(name = "split_face_edges_at_shared_vertices")]
+    fn py_split_face_edges_at_shared_vertices(
+        vertices: Vec<(f64, f64, f64)>,
+        faces: Vec<Vec<usize>>,
+        tolerance: f64,
+    ) -> PyResult<Vec<Vec<usize>>> {
+        let vertices = vertices
+            .into_iter()
+            .map(|(x, y, z)| [x, y, z])
+            .collect::<Vec<_>>();
+        split_face_edges_at_shared_vertices_core(&vertices, &faces, tolerance)
+            .map_err(|diagnostic| {
+                PyValueError::new_err(format!("{}|{}", diagnostic.code, diagnostic.message))
+            })
     }
 
     #[pyfunction(name = "collect_wavefront_events", signature = (lines, loop_id, time, eps=1e-9))]
@@ -586,13 +786,17 @@ mod python {
         module.add_function(wrap_pyfunction!(py_api_version, module)?)?;
         module.add_function(wrap_pyfunction!(py_validate_simple_polygon, module)?)?;
         module.add_function(wrap_pyfunction!(py_collect_wavefront_events, module)?)?;
+        module.add_function(wrap_pyfunction!(py_split_face_edges_at_shared_vertices, module)?)?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_wavefront_events_core, validate_simple_polygon, WavefrontLineData};
+    use super::{
+        collect_wavefront_events_core, split_face_edges_at_shared_vertices_core,
+        validate_simple_polygon, WavefrontLineData,
+    };
 
     #[test]
     fn accepts_clockwise_and_counter_clockwise_squares() {
@@ -671,6 +875,22 @@ mod tests {
             .iter()
             .all(|event| (event.position[1] - 2.0).abs() < 1.0e-9));
         assert!(events.iter().all(|event| event.loop_id == 5));
+    }
+
+    #[test]
+    fn splits_face_edges_at_shared_vertices_without_changing_face_regions() {
+        let vertices = [
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+        ];
+        let faces = vec![vec![0, 1, 2], vec![0, 3, 4, 2]];
+        let result =
+            split_face_edges_at_shared_vertices_core(&vertices, &faces, 1.0e-9).unwrap();
+        assert_eq!(result[0], vec![0, 3, 1, 2]);
+        assert_eq!(result[1], vec![0, 3, 4, 2]);
     }
 
     #[test]

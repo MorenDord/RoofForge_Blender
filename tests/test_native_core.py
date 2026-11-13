@@ -12,7 +12,9 @@ from core.geometry import (
 )
 from core.native_bridge import (
     NATIVE_BACKEND_AVAILABLE,
+    NATIVE_FACE_CONFORMANCE_AVAILABLE,
     NATIVE_WAVEFRONT_EVENTS_AVAILABLE,
+    split_face_edges_at_shared_vertices_native,
     validate_simple_polygon_native,
 )
 from core.wavefront import (
@@ -89,6 +91,63 @@ class TestRustGeometryParity(unittest.TestCase):
         self.assertEqual(_diagnostic_tuples(actual), _diagnostic_tuples(expected))
 
 
+
+
+@unittest.skipUnless(
+    NATIVE_FACE_CONFORMANCE_AVAILABLE,
+    "Rust face-conformance kernel is not installed",
+)
+class TestRustMeshConformance(unittest.TestCase):
+    def test_t_junction_splitting_matches_python_reference(self):
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 1.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (1.0, 0.5, 0.0),
+            (1.0, 0.5, 1.0e-7),
+        ]
+        faces = [
+            (0, 1, 2, 5),
+            (0, 3, 4, 5),
+            (3, 1, 2, 4),
+        ]
+        for tolerance in (1.0e-9, 1.0e-6):
+            with self.subTest(tolerance=tolerance):
+                expected = wavefront_module._split_face_edges_at_shared_vertices(
+                    vertices, faces, tolerance
+                )
+                actual = split_face_edges_at_shared_vertices_native(
+                    vertices, faces, tolerance
+                )
+                self.assertEqual(actual, [tuple(face) for face in expected])
+
+    def test_native_conformance_matches_python_on_deterministic_generated_meshes(self):
+        rng = random.Random(917_203)
+        for case in range(30):
+            vertices = []
+            for index in range(18):
+                vertices.append((
+                    float(index % 6),
+                    float(index // 6),
+                    rng.uniform(-1.0e-8, 1.0e-8),
+                ))
+            faces = [
+                (0, 5, 17, 12),
+                (0, 2, 14, 12),
+                (2, 5, 17, 14),
+                (1, 4, 16, 13),
+            ]
+            tolerance = (1.0 + (case % 3)) * 1.0e-7
+            expected = wavefront_module._split_face_edges_at_shared_vertices(
+                vertices, faces, tolerance
+            )
+            actual = split_face_edges_at_shared_vertices_native(
+                vertices, faces, tolerance
+            )
+            self.assertEqual(actual, [tuple(face) for face in expected])
 
 
 @unittest.skipUnless(
