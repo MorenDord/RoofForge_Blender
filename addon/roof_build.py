@@ -99,7 +99,10 @@ def _build_roof_surface(points, pitches, overhang, corner_convergence):
         elif (
             len(authored_points) > 64
             and is_flat_eave_contour(authored_points)
-            and corner_convergence
+            and (
+                corner_convergence
+                or max(pitches) - min(pitches) <= 1.0e-7
+            )
         ):
             solver = "WEIGHTED_WAVEFRONT_CONVEX_OVERHANG_RING"
         else:

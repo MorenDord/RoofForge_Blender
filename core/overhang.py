@@ -393,9 +393,9 @@ def _build_flat_wavefront_overhang_surface(
     distance: float,
     *,
     eps: float,
-    corner_convergence: bool = True,
 ):
     """Extend a flat-eave wavefront roof with exact planar eave strips."""
+
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .wavefront import build_wavefront_roof_surface, is_flat_eave_contour
 
@@ -406,10 +406,12 @@ def _build_flat_wavefront_overhang_surface(
         )
 
     source = tuple(tuple(float(value) for value in point) for point in points)
-    expanded = (
-        corner_converged_overhang_contour(source, pitches_degrees, distance, eps)
-        if corner_convergence
-        else offset_contour_outward(source, distance, eps)
+    # The strip ring needs one 3D point at every outer corner. For equal
+    # pitches this is the same XY miter offset even when the UI's corner
+    # convergence option is off; only the corner Z is lifted onto both
+    # adjacent authored support planes.
+    expanded = corner_converged_overhang_contour(
+        source, pitches_degrees, distance, eps
     )
     source_xy = tuple((point[0], point[1]) for point in source)
     expanded_xy = tuple((point[0], point[1]) for point in expanded)
@@ -558,7 +560,6 @@ def build_source_anchored_overhang_surface(
             )
         return _build_flat_wavefront_overhang_surface(
             source, pitches_degrees, distance, eps=1e-9,
-            corner_convergence=True,
         )
 
     # Large flat convex contours are kept out of the quadratic plane-envelope
@@ -582,7 +583,6 @@ def build_source_anchored_overhang_surface(
                 pitches_degrees,
                 distance,
                 eps=1e-9,
-                corner_convergence=corner_convergence,
             )
 
     planes = build_boundary_planes(source, pitches_degrees)
