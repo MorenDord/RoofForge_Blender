@@ -210,8 +210,7 @@ fn interval_line_intersection(
         (rhs_first * d - b * rhs_second) / determinant,
         (a * rhs_second - rhs_first * c) / determinant,
     ];
-    if point.iter().any(|value| !value.is_finite())
-    {
+    if point.iter().any(|value| !value.is_finite()) {
         return Err(Diagnostic::error(
             "NON_FINITE_WAVEFRONT_VERTEX",
             "Пересечение подвижных рёбер породило нечисловую вершину.",
