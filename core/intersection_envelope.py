@@ -233,8 +233,13 @@ def _lower_envelope_finite_inward_cells(
                 )
                 active = [(nearest_vertex - 1) % count, nearest_vertex]
 
+            # The general helper uses eps both for clipping and as an
+            # absolute projected-area cutoff. Dense concave roofs can contain
+            # valid tiny cells near corners, so use a tighter local clipping
+            # threshold here and let mesh topology validation reject degeneracy.
+            region_eps = max(eps * 1.0e-3, 1.0e-14)
             regions = lower_envelope_regions(
-                cell, [planes[index] for index in active], eps
+                cell, [planes[index] for index in active], region_eps
             )
             for local_index, region in enumerate(regions):
                 if (
