@@ -6,6 +6,8 @@ Run from the repository root:
 from __future__ import annotations
 
 import importlib
+import json
+import math
 import sys
 from pathlib import Path
 
@@ -27,16 +29,39 @@ def clear_scene() -> None:
         bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def create_square_object(name: str):
+def create_square_object(name: str, with_face: bool = False):
     mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
     mesh.from_pydata(
         [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0),
          (4.0, 3.0, 0.0), (0.0, 3.0, 0.0)],
         [(0, 1), (1, 2), (2, 3), (3, 0)],
-        [],
+        [(0, 1, 2, 3)] if with_face else [],
     )
     mesh.update()
-    mesh.edges.foreach_set("select", [True] * len(mesh.edges))
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
+def create_xyz_rectangle(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.2),
+        (4.0, 3.0, 0.4),
+        (0.0, 3.0, 0.1),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     for selected in list(bpy.context.selected_objects):
@@ -53,6 +78,95 @@ def matrices_close(first, second, tolerance=1e-6) -> bool:
     )
 
 
+def create_l_contour(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (8.0, 0.0, 0.0),
+        (8.0, 4.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (4.0, 8.0, 0.0),
+        (0.0, 8.0, 0.0),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
+def create_u_contour(name: str):
+    points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (3.0, 4.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 4.0, 0.0),
+        (0.0, 4.0, 0.0),
+    ]
+    edges = [(index, (index + 1) % len(points)) for index in range(len(points))]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    mesh.edges.foreach_set("select", [False] * len(mesh.edges))
+    mesh.vertices.foreach_set("select", [False] * len(mesh.vertices))
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
+def create_regular_wire_loop(name: str, edge_count: int):
+    points = [
+        (math.cos(2.0 * math.pi * index / edge_count),
+         math.sin(2.0 * math.pi * index / edge_count),
+         0.0)
+        for index in range(edge_count)
+    ]
+    edges = [(index, (index + 1) % edge_count) for index in range(edge_count)]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
+
+def create_elliptical_wire_loop(name: str, edge_count: int, radius_x: float, radius_y: float):
+    points = [
+        (
+            radius_x * math.cos(2.0 * math.pi * index / edge_count),
+            radius_y * math.sin(2.0 * math.pi * index / edge_count),
+            0.0,
+        )
+        for index in range(edge_count)
+    ]
+    edges = [(index, (index + 1) % edge_count) for index in range(edge_count)]
+    mesh = bpy.data.meshes.new(f"{name}_SourceMesh")
+    mesh.from_pydata(points, edges, [])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 def check_generated_shell(source, source_coordinates) -> None:
     generated = [
         obj for obj in bpy.data.objects
@@ -65,19 +179,67 @@ def check_generated_shell(source, source_coordinates) -> None:
     ensure(roof.data.attributes.get("roof_forge_component") is not None, "component face attribute missing")
     ensure(roof.data.attributes.get("roof_forge_slope_index") is not None, "slope face attribute missing")
     ensure(len(roof.data.polygons) > 0, "generated mesh has no polygons")
-    ensure(len(source.data.vertices) == 4, "source vertex count changed")
+    ensure(
+        len(roof.data.attributes["roof_forge_component"].data) == len(roof.data.polygons)
+        and len(roof.data.attributes["roof_forge_slope_index"].data) == len(roof.data.polygons),
+        "roof face metadata does not match the dissolved mesh topology",
+    )
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(roof.data)
+        bm.normal_update()
+        coords = [vertex.co for vertex in bm.verts]
+        span = max(
+            max(v.x for v in coords) - min(v.x for v in coords),
+            max(v.y for v in coords) - min(v.y for v in coords),
+            max(v.z for v in coords) - min(v.z for v in coords),
+            1.0,
+        )
+        tolerance = span * 1.0e-5
+        loose_vertices = [vertex.index for vertex in bm.verts if not vertex.link_edges]
+        two_edge_vertices = [
+            vertex.index for vertex in bm.verts if len(vertex.link_edges) == 2
+        ]
+        ensure(not loose_vertices, f"generated roof has loose vertices: {loose_vertices[:8]}")
+        ensure(
+            not two_edge_vertices,
+            f"generated roof retains unnecessary degree-two loop-cut vertices: {two_edge_vertices[:8]}",
+        )
+        ensure(
+            all(len(face.verts) >= 3 for face in bm.faces),
+            "generated roof contains a face with fewer than three vertices",
+        )
+        remaining_coplanar = []
+        for edge in bm.edges:
+            if len(edge.link_faces) != 2:
+                continue
+            first, second = edge.link_faces
+            if first.normal.dot(second.normal) < math.cos(math.radians(0.05)):
+                continue
+            origin = first.verts[0].co
+            if all(
+                abs(first.normal.dot(vertex.co - origin)) <= tolerance
+                for vertex in second.verts
+            ):
+                remaining_coplanar.append(edge.index)
+        ensure(
+            not remaining_coplanar,
+            f"coplanar internal roof edges were not dissolved: {remaining_coplanar[:8]}",
+        )
+    finally:
+        bm.free()
+    ensure(len(source.data.vertices) == len(source_coordinates), "source vertex count changed")
     after = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     ensure(after == source_coordinates, "source coordinates changed")
     ensure(matrices_close(roof.matrix_world, source.matrix_world), "generated transform differs from source")
 
 
-def run_case(name: str, edit_mode: bool) -> None:
+def run_case(name: str, edit_mode: bool, with_face: bool = False) -> None:
     clear_scene()
-    source = create_square_object(name)
+    source = create_square_object(name, with_face=with_face)
     source_coordinates = tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
     settings = bpy.context.scene.roof_forge
-    settings.pitch_default = 35.0
-    settings.thickness = 0.12
+    settings.thickness_cm = 1.0
 
     if edit_mode:
         bpy.ops.object.mode_set(mode="EDIT")
@@ -88,12 +250,10 @@ def run_case(name: str, edit_mode: bool) -> None:
         for vertex in bm.verts:
             vertex.select_set(False)
         for edge in bm.edges:
-            edge.select_set(True)
+            edge.select_set(False)
         bm.select_flush_mode()
         bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
 
-    validate_result = bpy.ops.roof_forge.validate_input()
-    ensure(validate_result == {"FINISHED"}, f"validation operator failed in {'Edit' if edit_mode else 'Object'} Mode")
     generate_result = bpy.ops.roof_forge.generate_surface()
     ensure(generate_result == {"FINISHED"}, f"generation operator failed in {'Edit' if edit_mode else 'Object'} Mode")
 
@@ -106,15 +266,837 @@ def main() -> None:
     ensure(bpy.app.version >= (5, 0, 0), f"requires Blender 5.0+, got {bpy.app.version_string}")
     extension.register()
     extension.register()  # Registration must be safe to call twice.
-    ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
 
-    run_case("RoofForge_Smoke_ObjectMode", edit_mode=False)
-    run_case("RoofForge_Smoke_EditMode", edit_mode=True)
+    # A subdivided cuboid is a deterministic cleanup fixture: every side is
+    # one planar patch. The final mesh must be exactly 8 vertices, 12 edges
+    # and 6 quad faces.
+    roof_build_module = importlib.import_module(f"{extension.__name__}.addon.roof_build")
+    prism_mesh = bpy.data.meshes.new("RoofForge_CoplanarDissolve_Fixture")
+    nx = ny = 2
+    coord_to_index = {}
+    prism_vertices = []
+
+    def prism_vertex(i, j, z):
+        key = (float(i), float(j), float(z))
+        if key not in coord_to_index:
+            coord_to_index[key] = len(prism_vertices)
+            prism_vertices.append(key)
+        return coord_to_index[key]
+
+    prism_faces = []
+    for i in range(nx):
+        for j in range(ny):
+            prism_faces.append((
+                prism_vertex(i, j, 1), prism_vertex(i + 1, j, 1),
+                prism_vertex(i + 1, j + 1, 1), prism_vertex(i, j + 1, 1),
+            ))
+            prism_faces.append((
+                prism_vertex(i, j, 0), prism_vertex(i, j + 1, 0),
+                prism_vertex(i + 1, j + 1, 0), prism_vertex(i + 1, j, 0),
+            ))
+    for i in range(nx):
+        prism_faces.append((
+            prism_vertex(i, 0, 0), prism_vertex(i + 1, 0, 0),
+            prism_vertex(i + 1, 0, 1), prism_vertex(i, 0, 1),
+        ))
+        prism_faces.append((
+            prism_vertex(i, ny, 0), prism_vertex(i, ny, 1),
+            prism_vertex(i + 1, ny, 1), prism_vertex(i + 1, ny, 0),
+        ))
+    for j in range(ny):
+        prism_faces.append((
+            prism_vertex(0, j, 0), prism_vertex(0, j, 1),
+            prism_vertex(0, j + 1, 1), prism_vertex(0, j + 1, 0),
+        ))
+        prism_faces.append((
+            prism_vertex(nx, j, 0), prism_vertex(nx, j + 1, 0),
+            prism_vertex(nx, j + 1, 1), prism_vertex(nx, j, 1),
+        ))
+    prism_mesh.from_pydata(prism_vertices, [], prism_faces)
+    prism_mesh.update(calc_edges=True)
+    ensure(
+        len(prism_mesh.vertices) > 8 and len(prism_mesh.polygons) > 6,
+        "coplanar cleanup fixture was not subdivided before processing",
+    )
+    roof_build_module._dissolve_coplanar_edges(prism_mesh)
+    ensure(
+        len(prism_mesh.vertices) == 8
+        and len(prism_mesh.edges) == 12
+        and len(prism_mesh.polygons) == 6
+        and all(len(face.vertices) == 4 for face in prism_mesh.polygons),
+        "coplanar cleanup did not reduce a subdivided prism to 8 vertices / 12 edges / 6 quads",
+    )
+    bpy.data.meshes.remove(prism_mesh)
+
+    # A narrow 0.05-degree facet is within the practical planar tolerance and
+    # should not leave a long internal seam. A real 5-degree ridge must remain.
+    def two_panel_mesh(name, angle_degrees, base_z=0.0):
+        width = 0.01
+        length = 10.0
+        z_offset = width * math.tan(math.radians(angle_degrees))
+        panel_mesh = bpy.data.meshes.new(name)
+        panel_mesh.from_pydata(
+            [
+                (0.0, 0.0, base_z), (1.0, 0.0, base_z),
+                (1.0, length, base_z), (0.0, length, base_z),
+                (1.0 + width, 0.0, base_z + z_offset),
+                (1.0 + width, length, base_z + z_offset),
+            ],
+            [],
+            [(0, 1, 2, 3), (1, 4, 5, 2)],
+        )
+        panel_mesh.update(calc_edges=True)
+        return panel_mesh
+
+    for exact_planar, base_z in ((False, 0.0), (True, 1000.0)):
+        near_flat_mesh = two_panel_mesh(
+            f"RoofForge_NearFlat_Seam_{exact_planar}", 0.04, base_z
+        )
+        roof_build_module._dissolve_coplanar_edges(
+            near_flat_mesh, exact_planar=exact_planar
+        )
+        ensure(
+            len(near_flat_mesh.polygons) == 1,
+            f"near-coplanar 0.04-degree facet survived cleanup (exact={exact_planar})",
+        )
+        bpy.data.meshes.remove(near_flat_mesh)
+
+    for angle in (0.08, 5.0):
+        ridge_mesh = two_panel_mesh(f"RoofForge_Real_Ridge_{angle}", angle)
+        roof_build_module._dissolve_coplanar_edges(
+            ridge_mesh, exact_planar=True
+        )
+        ridge_bm = bmesh.new()
+        try:
+            ridge_bm.from_mesh(ridge_mesh)
+            ridge_bm.normal_update()
+            shared_ridge_edges = [
+                edge for edge in ridge_bm.edges if len(edge.link_faces) == 2
+            ]
+            ensure(
+                len(ridge_mesh.polygons) == 2 and len(shared_ridge_edges) == 1,
+                f"real {angle}-degree roof ridge was incorrectly dissolved",
+            )
+        finally:
+            ridge_bm.free()
+        bpy.data.meshes.remove(ridge_mesh)
+
+
+    ensure(hasattr(bpy.types.Scene, "roof_forge"), "Scene settings were not registered")
+    ensure(
+        not hasattr(bpy.types, "ROOFFORGE_OT_select_slope_edge"),
+        "Legacy Edit Mode source-edge selection operator is still registered",
+    )
+    panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
+    panel_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
+    ensure(
+        "get_roof_plan_icon" not in panel_code.co_names
+        and "plan_show_raster" not in panel_code.co_consts,
+        "Raster preview must be completely removed from the RoofForge panel",
+    )
+    ensure(
+        "initial_pitch" in panel_code.co_consts,
+        "pre-create initial pitch control is missing from the main panel",
+    )
+    ensure(
+        "prepare_slopes" not in panel_code.co_names,
+        "Load / Refresh Slope Angles should not be part of the user panel",
+    )
+    ensure(
+        "Show" not in panel_code.co_consts,
+        "Pitch panel should not require Edit Mode edge-selection buttons",
+    )
+    ensure(
+        hasattr(bpy.types, "ROOFFORGE_PT_main"),
+        "RoofForge sidebar panel was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "plan_label_scale"),
+        "number-size control was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "plan_line_width"),
+        "plan line-thickness control was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "initial_pitch"),
+        "initial pitch control was not registered",
+    )
+    ensure(
+        not hasattr(bpy.context.scene.roof_forge, "plan_show_raster"),
+        "Raster preview settings must not be registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "roof_plan_json"),
+        "generated roof plan data property was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "overhang_corner_convergence"),
+        "overhang corner-convergence option was not registered",
+    )
+    ensure(
+        hasattr(bpy.context.scene.roof_forge, "pitch_snap_status"),
+        "pitch vertex-snap status property was not registered",
+    )
+    ensure(
+        not hasattr(bpy.types, "ROOFFORGE_OT_validate_input"),
+        "Validate Roof operator class should no longer be registered",
+    )
+
+    # No mesh elements are selected: the add-on must find the contour itself.
+    run_case("RoofForge_Smoke_ObjectMode_Wire", edit_mode=False)
+    run_case("RoofForge_Smoke_EditMode_Wire", edit_mode=True)
+    # Also exercise boundary extraction from an actual surface mesh face.
+    run_case("RoofForge_Smoke_ObjectMode_Surface", edit_mode=False, with_face=True)
+    run_case("RoofForge_Smoke_EditMode_Surface", edit_mode=True, with_face=True)
+
+    # The top-view plan is generated from the same stored ordered contour.
+    clear_scene()
+    plan_source = create_square_object("RoofForge_Smoke_Numbered_Plan")
+    plan_settings = bpy.context.scene.roof_forge
+    plan_settings.initial_pitch = 37.5
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "first-click roof generation without Load / Refresh Slope Angles failed",
+    )
+    ensure(
+        len(plan_settings.slope_settings) == 4,
+        "Generate did not initialise per-edge pitch settings automatically",
+    )
+    ensure(
+        all(abs(item.pitch - 37.5) < 1e-7 for item in plan_settings.slope_settings),
+        "first-click generation did not use the configurable initial pitch",
+    )
+    plan_settings.initial_pitch = 30.0
+    ensure(
+        len(json.loads(plan_settings.outline_preview_json)) == 4,
+        "Generate did not store the source contour for the roof plan",
+    )
+    plan_points = json.loads(plan_settings.outline_preview_json)
+    plan_data = json.loads(plan_settings.roof_plan_json)
+    ensure(
+        len(plan_data.get("faces", ())) > 0 and len(plan_data.get("planes", ())) == 4,
+        "generated facet plan did not preserve the actual roof topology",
+    )
+    plan_core = importlib.import_module(f"{extension.__name__}.core.roof_plan")
+    ensure(
+        len(plan_core.visible_roof_edges(plan_data)) > 4,
+        "facet plan is missing the roof's internal ridge lines",
+    )
+    vertices, faces, slopes, _planes = plan_core.normalise_roof_plan(plan_data)
+    ensure(
+        len(plan_core.slope_region_centers(vertices, faces, slopes)) == 4,
+        "vector preview did not compute one stable label anchor per slope",
+    )
+    ensure(
+        all(abs(float(plan_points[i][2])) < 1e-9 for i in range(4)),
+        "roof plan changed source contour coordinates",
+    )
+
+    # Recreate after the result is deleted while the source is no longer active.
+    plan_roof = plan_settings.generated_object
+    plan_source.select_set(False)
+    bpy.context.view_layer.objects.active = plan_roof
+    plan_roof.select_set(True)
+    bpy.data.objects.remove(plan_roof, do_unlink=True)
+    bpy.context.view_layer.update()
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Generate did not recover the stored source after deleting the roof",
+    )
+    recreated_plan_roof = plan_settings.generated_object
+    ensure(
+        recreated_plan_roof is not None
+        and recreated_plan_roof.get("roof_forge_generated", False),
+        "deleted roof was not recreated from the stored contour object",
+    )
+
+    # Edit the source contour in Edit Mode, exit, then explicitly rebuild.
+    recreated_plan_roof.select_set(False)
+    plan_source.select_set(True)
+    bpy.context.view_layer.objects.active = plan_source
+    bpy.ops.object.mode_set(mode="EDIT")
+    bm_source = bmesh.from_edit_mesh(plan_source.data)
+    bm_source.verts.ensure_lookup_table()
+    bm_source.verts[0].co.x -= 0.25
+    bmesh.update_edit_mesh(plan_source.data, loop_triangles=False, destructive=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    old_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in recreated_plan_roof.data.vertices
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Create / Update failed after editing the source contour in Edit Mode",
+    )
+    new_rebuilt_vertices = tuple(
+        tuple(float(value) for value in vertex.co)
+        for vertex in plan_settings.generated_object.data.vertices
+    )
+    ensure(
+        old_rebuilt_vertices != new_rebuilt_vertices,
+        "manual regeneration did not use the edited source contour",
+    )
+
+
+    # A pitch arrow must solve a real neighbouring-plane vertex. The
+    # reference point is computed without assembling an invalid roof with one
+    # source plane removed, then confirmed in the final production surface.
+    clear_scene()
+    snap_source = create_square_object("RoofForge_Smoke_Pitch_Vertex_Snap")
+    snap_settings = bpy.context.scene.roof_forge
+    snap_settings.initial_pitch = 20.0
+    snap_settings.eave_overhang_cm = 0.0
+    snap_settings.live_update = False
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "could not create the pitch-snap source roof",
+    )
+    for slope_index, item in enumerate(snap_settings.slope_settings):
+        item.pitch = 20.0 if slope_index == 0 else 30.0
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "could not create the asymmetric reference roof for pitch snapping",
+    )
+    expected_snap_angle = math.degrees(
+        math.atan(2.0 * math.tan(math.radians(30.0)))
+    )
+    ensure(
+        bpy.ops.roof_forge.pitch_intersection_step(
+            edge_index=0,
+            direction="NEXT",
+        ) == {"FINISHED"},
+        "pitch vertex-snap operator did not complete",
+    )
+    actual_snap_angle = float(snap_settings.slope_settings[0].pitch)
+    ensure(
+        abs(actual_snap_angle - expected_snap_angle) < 1.0e-3,
+        f"pitch snap found {actual_snap_angle:.6f}°, expected {expected_snap_angle:.6f}°",
+    )
+    ensure(
+        "общая вершина" in snap_settings.pitch_snap_status.lower(),
+        f"pitch snap did not report a verified shared vertex: {snap_settings.pitch_snap_status}",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "roof did not rebuild after pitch vertex snapping",
+    )
+    snap_plan_data = json.loads(snap_settings.roof_plan_json)
+    snap_vertices, snap_faces, snap_slopes, _snap_planes = plan_core.normalise_roof_plan(
+        snap_plan_data
+    )
+    expected_vertex = (2.0, 1.0, 2.0 * math.tan(math.radians(30.0)))
+    target_vertex_index = min(
+        range(len(snap_vertices)),
+        key=lambda index: math.dist(snap_vertices[index], expected_vertex),
+    )
+    ensure(
+        math.dist(snap_vertices[target_vertex_index], expected_vertex) < 1.0e-4,
+        "rebuilt roof is missing the analytically targeted neighbouring vertex",
+    )
+    target_owners = {
+        int(slope_index)
+        for face, slope_index in zip(snap_faces, snap_slopes)
+        if target_vertex_index in face and int(slope_index) >= 0
+    }
+    ensure(
+        0 in target_owners and len(target_owners) >= 2,
+        f"target point is not shared by the selected and neighbouring slopes: {target_owners}",
+    )
+
+    # Restore shared scene defaults so later smoke fixtures remain isolated.
+    snap_settings.initial_pitch = 30.0
+
+    # 64 is the enforced alpha limit, not merely a benchmark target.
+    clear_scene()
+    # Complex flat convex contours may use up to 256 boundary edges. The
+    # previous global 64-edge cap prevented the generator from reaching the
+    # convex overhang path at all.
+    clear_scene()
+    complex_convex = create_elliptical_wire_loop(
+        "RoofForge_Smoke_Convex_Overhang_72", 72, 4.0, 2.8
+    )
+    complex_source_coordinates = tuple(
+        tuple(float(c) for c in vertex.co)
+        for vertex in complex_convex.data.vertices
+    )
+    mesh_io = importlib.import_module(f"{extension.__name__}.addon.adapters.mesh_io")
+    complex_boundary = mesh_io.read_object_boundary(complex_convex)
+    ensure(
+        len(complex_boundary) == 72,
+        "flat convex 72-edge contour was rejected by the input adapter",
+    )
+    complex_settings = bpy.context.scene.roof_forge
+    complex_settings.thickness_cm = 1.0
+    complex_settings.eave_overhang_cm = 15.0
+    complex_settings.overhang_corner_convergence = True
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare 72 convex contour pitches",
+    )
+    ensure(
+        len(complex_settings.slope_settings) == 72,
+        "expected 72 pitch settings for the complex convex contour",
+    )
+    for index, item in enumerate(complex_settings.slope_settings):
+        item.pitch = (
+            34.0
+            + 0.8 * math.sin(2.0 * math.pi * index / 72.0 * 3.0)
+            + 0.4 * math.cos(2.0 * math.pi * index / 72.0 * 5.0)
+        )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        f"complex 72-edge convex contour with overhang failed: {complex_settings.last_status}",
+    )
+    complex_roof = complex_settings.generated_object
+    ensure(complex_roof is not None, "complex convex overhang roof was not created")
+    ensure(
+        complex_roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONVEX_OVERHANG_RING",
+        "complex convex contour did not use the scalable wavefront overhang-ring solver",
+    )
+    complex_coords = [vertex.co for vertex in complex_roof.data.vertices]
+    ensure(
+        min(vertex.x for vertex in complex_coords) < -4.05
+        and max(vertex.x for vertex in complex_coords) > 4.05
+        and min(vertex.y for vertex in complex_coords) < -2.85
+        and max(vertex.y for vertex in complex_coords) > 2.85,
+        "complex convex overhang did not expand beyond all four source bounds",
+    )
+    check_generated_shell(complex_convex, complex_source_coordinates)
+
+    # Concave flat-eave L contour with independent pitch per boundary edge.
+    clear_scene()
+    source = create_l_contour("RoofForge_Smoke_Concave_L")
+    source_coordinates = tuple(
+        tuple(float(c) for c in vertex.co) for vertex in source.data.vertices
+    )
+    settings = bpy.context.scene.roof_forge
+    settings.thickness_cm = 1.0
+    settings.eave_overhang_cm = 15.0
+    settings.live_update = True
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare per-edge pitch settings",
+    )
+    ensure(len(settings.slope_settings) == 6, "expected one pitch setting per L contour edge")
+    ensure(
+        all(abs(item.pitch - 30.0) < 1e-7 for item in settings.slope_settings),
+        "new per-edge pitch fields must default to 30 degrees",
+    )
+    ensure(
+        abs(settings.thickness_cm - 1.0) < 1e-7,
+        "default roof thickness must be 1 cm",
+    )
+    ensure(not hasattr(settings, "pitch_default"), "Default Pitch field should be removed")
+    for index, item in enumerate(settings.slope_settings):
+        item.pitch = 31.0 + index * 1.5
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "per-edge concave L generation failed",
+    )
+    roof = settings.generated_object
+    ensure(roof is not None, "generated roof pointer was not stored")
+    ensure(
+        roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING",
+        "flat concave L did not use the weighted wavefront overhang-ring solver",
+    )
+    l_coords = [vertex.co for vertex in roof.data.vertices]
+    ensure(min(v.x for v in l_coords) < -0.05, "concave L overhang did not extend left")
+    ensure(min(v.y for v in l_coords) < -0.05, "concave L overhang did not extend downward")
+    ensure(max(v.x for v in l_coords) > 8.05, "concave L overhang did not extend right")
+    ensure(max(v.y for v in l_coords) > 8.05, "concave L overhang did not extend upward")
+    ensure(
+        len(roof.data.attributes["roof_forge_slope_index"].data) > 0,
+        "per-face slope metadata is missing",
+    )
+    before_update = tuple(tuple(float(c) for c in vertex.co) for vertex in roof.data.vertices)
+
+    # Execute the scheduled timer callback directly in background mode; GUI
+    # sessions run the same callback after the normal debounce interval.
+    live_update = importlib.import_module(
+        f"{extension.__name__}.addon.live_update"
+    )
+    # A thickness-only live update must reuse the cached upper surface.
+    roof_build = importlib.import_module(f"{extension.__name__}.addon.roof_build")
+    original_wavefront_builder = roof_build.build_wavefront_roof_surface
+    old_thickness = settings.thickness_cm
+    try:
+        roof_build.build_wavefront_roof_surface = lambda *args, **kwargs: (
+            (_ for _ in ()).throw(AssertionError("surface solver ran during thickness-only update"))
+        )
+        settings.thickness_cm = old_thickness + 0.5
+        live_update._run_pending_update()
+        ensure(
+            abs(float(roof.get("roof_forge_thickness_cm")) - settings.thickness_cm) < 1e-7,
+            "thickness-only cached rebuild did not update shell metadata",
+        )
+    finally:
+        roof_build.build_wavefront_roof_surface = original_wavefront_builder
+        live_update.cancel_pending_live_update()
+
+    live_update = importlib.import_module(
+        f"{extension.__name__}.addon.live_update"
+    )
+    settings.slope_settings[0].pitch += 2.0
+    live_update._run_pending_update()
+    live_update.cancel_pending_live_update()
+    after_update = tuple(tuple(float(c) for c in vertex.co) for vertex in roof.data.vertices)
+    ensure(before_update != after_update, "live pitch edit did not rebuild the generated mesh")
+    ensure(
+        tuple(tuple(float(c) for c in vertex.co) for vertex in source.data.vertices)
+        == source_coordinates,
+        "concave source contour changed during generation or live update",
+    )
+
+    bpy.data.objects.remove(roof, do_unlink=True)
+    bpy.context.view_layer.update()
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "Create / Update failed after the generated roof object was deleted",
+    )
+    recreated = settings.generated_object
+    ensure(recreated is not None, "generated object pointer was not restored after deletion")
+    ensure(
+        bpy.data.objects.get(recreated.name) is recreated,
+        "re-created roof is not registered in bpy.data.objects",
+    )
+    ensure(
+        bpy.context.scene.objects.get(recreated.name) is recreated,
+        "re-created roof is not linked to the active scene",
+    )
+    ensure(
+        recreated.get("roof_forge_generated", False),
+        "re-created object is missing RoofForge metadata",
+    )
+    generated_for_source = [
+        obj for obj in bpy.context.scene.objects
+        if obj.get("roof_forge_generated")
+        and obj.get("roof_forge_source_name") == source.name
+    ]
+    ensure(
+        len(generated_for_source) == 1,
+        f"expected exactly one re-created roof, got {len(generated_for_source)}",
+    )
+
+
+    # Concave U contour without overhang: preserve the established solver.
+    clear_scene()
+    u_source = create_u_contour("RoofForge_Smoke_Concave_U")
+    u_settings = bpy.context.scene.roof_forge
+    u_settings.thickness_cm = 1.0
+    u_settings.eave_overhang_cm = 0.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare U contour pitch settings",
+    )
+    ensure(len(u_settings.slope_settings) == 8, "expected eight U contour slopes")
+    for item in u_settings.slope_settings:
+        item.pitch = 30.0
+    ensure(
+        all(abs(item.pitch - 30.0) < 1e-7 for item in u_settings.slope_settings),
+        "U wavefront fixture must use the validated equal-pitch profile",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "concave U contour did not generate with overhang disabled",
+    )
+    u_roof = u_settings.generated_object
+    ensure(u_roof is not None, "concave U generated roof pointer missing")
+    ensure(
+        len(u_roof.data.polygons) > 0,
+        "concave U generated an empty mesh",
+    )
+
+    # Positive overhang is now available for a supported flat-eave U contour.
+    u_settings.eave_overhang_cm = 15.0
+    u_settings.live_update = False
+    u_settings.overhang_corner_convergence = True
+    for item in u_settings.slope_settings:
+        item.pitch = 30.0
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "concave U contour with positive overhang did not generate",
+    )
+    u_overhang_roof = u_settings.generated_object
+    ensure(u_overhang_roof is not None, "concave U overhang roof pointer missing")
+    ensure(
+        u_overhang_roof.get("roof_forge_solver") == "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING",
+        "concave U did not use the weighted wavefront overhang-ring solver",
+    )
+    u_overhang_coords = [vertex.co for vertex in u_overhang_roof.data.vertices]
+    ensure(min(v.x for v in u_overhang_coords) < -0.05, "concave U overhang did not extend left")
+    ensure(min(v.y for v in u_overhang_coords) < -0.05, "concave U overhang did not extend downward")
+    ensure(max(v.x for v in u_overhang_coords) > 4.05, "concave U overhang did not extend right")
+    ensure(max(v.y for v in u_overhang_coords) > 4.05, "concave U overhang did not extend upward")
+
+    roof_build_for_units = importlib.import_module(
+        f"{extension.__name__}.addon.roof_build"
+    )
+    ensure(
+        abs(roof_build_for_units.centimeters_to_blender_units(1.0, bpy.context.scene) - 0.01) < 1e-9,
+        "1 cm must convert to 0.01 Blender units when scale_length is 1",
+    )
+    original_unit_scale = bpy.context.scene.unit_settings.scale_length
+    try:
+        bpy.context.scene.unit_settings.scale_length = 0.5
+        ensure(
+            abs(roof_build_for_units.centimeters_to_blender_units(1.0, bpy.context.scene) - 0.02) < 1e-9,
+            "centimeter conversion did not honour scene unit scale_length",
+        )
+    finally:
+        bpy.context.scene.unit_settings.scale_length = original_unit_scale
+
+    delay_settings = u_settings
+    delay_settings.live_update_delay_ms = 0
+    ensure(
+        live_update.live_update_delay_seconds(delay_settings) == 0.0,
+        "zero-ms debounce did not disable the configured delay",
+    )
+    delay_settings.live_update_delay_ms = 230
+    ensure(
+        abs(live_update.live_update_delay_seconds(delay_settings) - 0.230) < 1e-9,
+        "live update delay slider did not convert milliseconds to seconds",
+    )
+    delay_settings.live_update_delay_ms = 0
+
+    # Convex roof rebuilt from one expanded contour.
+    clear_scene()
+    convex_source = create_square_object("RoofForge_Smoke_Convex_Overhang")
+    convex_settings = bpy.context.scene.roof_forge
+    convex_settings.thickness_cm = 1.0
+    convex_settings.eave_overhang_cm = 25.0
+    convex_settings.overhang_corner_convergence = True
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare convex overhang pitch settings",
+    )
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare individual convex pitches",
+    )
+    ensure(
+        len(convex_settings.slope_settings) == 4,
+        "expected four individual convex pitches",
+    )
+    for item, pitch in zip(convex_settings.slope_settings, (30.0, 35.0, 40.0, 32.0)):
+        item.pitch = pitch
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "convex contour with individual pitch and eave overhang did not generate",
+    )
+    convex_roof = convex_settings.generated_object
+    ensure(convex_roof is not None, "convex overhang roof pointer missing")
+    ensure(
+        convex_roof.get("roof_forge_overhang_support") == "SOURCE_CONTOUR_UNDERSIDE",
+        "generated overhang metadata does not identify the original support contour",
+    )
+    ensure(
+        convex_roof.get("roof_forge_overhang_corner_convergence") is True,
+        "corner convergence mode was not persisted on the generated roof",
+    )
+    support_surface, support_shell, _support_solver = roof_build_for_units.build_roof_payload(
+        [
+            tuple(float(c) for c in vertex.co)
+            for vertex in convex_source.data.vertices
+        ],
+        [30.0, 35.0, 40.0, 32.0],
+        roof_build_for_units.centimeters_to_blender_units(
+            convex_settings.thickness_cm, bpy.context.scene
+        ),
+        roof_build_for_units.centimeters_to_blender_units(
+            convex_settings.eave_overhang_cm, bpy.context.scene
+        ),
+        cache_owner=convex_source,
+    )
+    ensure(support_shell.extrude_up, "eave shell did not extrude upward from its source-aligned underside")
+    for edge_index, start in enumerate([
+        tuple(float(c) for c in vertex.co)
+        for vertex in convex_source.data.vertices
+    ]):
+        end = tuple(float(c) for c in convex_source.data.vertices[(edge_index + 1) % 4].co)
+        support_plane = support_surface.planes[edge_index]
+        ensure(
+            abs(support_plane.height(start[0], start[1]) - start[2]) < 1e-7
+            and abs(support_plane.height(end[0], end[1]) - end[2]) < 1e-7,
+            f"support surface moved away from original eave edge {edge_index + 1}",
+        )
+    ensure(
+        support_shell.vertices[len(support_surface.vertices):] == support_surface.vertices,
+        "overhang underside vertices do not match the source-anchored support surface",
+    )
+    coords = [vertex.co for vertex in convex_roof.data.vertices]
+    ensure(min(v.x for v in coords) < -0.20, "overhang did not extend the left eave")
+    ensure(min(v.y for v in coords) < -0.20, "overhang did not extend the lower eave")
+    ensure(max(v.x for v in coords) > 4.20, "overhang did not extend the right eave")
+    ensure(max(v.y for v in coords) > 3.20, "overhang did not extend the upper eave")
+
+    component_values = [
+        item.value for item in convex_roof.data.attributes["roof_forge_component"].data
+    ]
+    slope_values = [
+        item.value for item in convex_roof.data.attributes["roof_forge_slope_index"].data
+    ]
+    top_slope_values = [
+        slope for component, slope in zip(component_values, slope_values)
+        if component == 0
+    ]
+    ensure(
+        all(0 <= slope < 4 for slope in top_slope_values),
+        "the rebuilt roof must contain only the original four edge pitches and no separate eave-cap faces",
+    )
+    ensure(
+        len(top_slope_values) == len(convex_roof.data.attributes["roof_forge_slope_index"].data)
+        - len([value for value in component_values if value == 1])
+        - len([value for value in component_values if value == 2]),
+        "roof top face metadata count is inconsistent",
+    )
+
+    # Mixed-height concave footprints are deliberately disabled in 0.3.16.
+    # The block applies with and without overhang; convex mixed-height contours
+    # remain supported and are exercised below.
+    mixed_concave_points = [
+        (0.0, 0.0, 0.00),
+        (3.0, 0.0, 0.05),
+        (3.0, 1.0, 0.08),
+        (1.0, 1.0, 0.12),
+        (1.0, 3.0, 0.16),
+        (0.0, 3.0, 0.10),
+    ]
+    mixed_u_points = [
+        (0.0, 0.0, 0.0),
+        (4.0, 0.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (3.0, 4.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 4.0, 0.08),
+        (0.0, 4.0, 0.0),
+    ]
+    for label, points in (
+        ("L", mixed_concave_points),
+        ("U", mixed_u_points),
+    ):
+        for overhang_units in (0.0, 0.1):
+            try:
+                roof_build_for_units.build_roof_payload(
+                    points, [40.0] * len(points), 0.01, overhang_units
+                )
+            except Exception as exc:
+                ensure(
+                    getattr(exc, "code", "") == "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
+                    f"mixed-height concave {label} returned the wrong diagnostic: {exc}",
+                )
+            else:
+                ensure(
+                    False,
+                    f"mixed-height concave {label} unexpectedly reached the roof builder",
+                )
+
+    clear_scene()
+    unsupported_mesh = bpy.data.meshes.new("RoofForge_MixedHeightConcave_Disabled_Mesh")
+    unsupported_mesh.from_pydata(
+        mixed_concave_points,
+        [(index, (index + 1) % len(mixed_concave_points))
+         for index in range(len(mixed_concave_points))],
+        [],
+    )
+    unsupported_mesh.update()
+    unsupported_source = bpy.data.objects.new(
+        "RoofForge_MixedHeightConcave_Disabled", unsupported_mesh
+    )
+    bpy.context.scene.collection.objects.link(unsupported_source)
+    for selected in list(bpy.context.selected_objects):
+        selected.select_set(False)
+    unsupported_source.select_set(True)
+    bpy.context.view_layer.objects.active = unsupported_source
+    unsupported_settings = bpy.context.scene.roof_forge
+    unsupported_settings.eave_overhang_cm = 0.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare mixed-height concave pitch settings",
+    )
+    unsupported_result = bpy.ops.roof_forge.generate_surface()
+    ensure(
+        unsupported_result == {"CANCELLED"},
+        "mixed-height concave contour unexpectedly generated a roof",
+    )
+    ensure(
+        "временно отключено построение крыши" in unsupported_settings.last_status.lower(),
+        "mixed-height concave contour did not expose the user warning",
+    )
+    ensure(
+        unsupported_settings.generated_object is None,
+        "disabled mixed-height concave contour left a generated roof object",
+    )
+
+    # The same offset-contour rebuild must work on non-flat XYZ eaves.
+    clear_scene()
+    xyz_source = create_xyz_rectangle("RoofForge_Smoke_XYZ_Overhang")
+    xyz_settings = bpy.context.scene.roof_forge
+    xyz_settings.thickness_cm = 1.0
+    xyz_settings.eave_overhang_cm = 20.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare non-flat contour pitch settings",
+    )
+    for item, pitch in zip(xyz_settings.slope_settings, (38.0, 40.0, 42.0, 39.0)):
+        item.pitch = pitch
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "non-flat contour with individual pitch and overhang did not generate",
+    )
+    xyz_roof = xyz_settings.generated_object
+    ensure(xyz_roof is not None, "non-flat overhang roof pointer missing")
+    ensure(
+        xyz_roof.get("roof_forge_solver") == "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR",
+        "non-flat overhang did not preserve the original 3D support planes",
+    )
+    ensure(
+        abs(float(xyz_roof.get("roof_forge_overhang_cm")) - 20.0) < 1e-7,
+        "non-flat overhang centimeters were not preserved in metadata",
+    )
+
+    # An oversized concave offset that closes the U notch must still be rejected.
+    clear_scene()
+    concave_source = create_u_contour("RoofForge_Smoke_Concave_Overhang_Too_Large")
+    concave_settings = bpy.context.scene.roof_forge
+    concave_settings.eave_overhang_cm = 150.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare concave U overhang pitch settings",
+    )
+    stable_u_pitches = (
+        51.3401917459, 53.1301023542, 45.0, 38.6598082541,
+        39.8055710923, 35.5376777919, 45.0, 59.0362434679,
+    )
+    for item, pitch in zip(concave_settings.slope_settings, stable_u_pitches):
+        item.pitch = pitch
+    try:
+        oversized_result = bpy.ops.roof_forge.generate_surface()
+    except RuntimeError as exc:
+        oversized_diagnostic = str(exc).lower()
+        ensure(
+            "самопересекается" in oversized_diagnostic or "схлоп" in oversized_diagnostic,
+            "over-wide concave offset did not report its invalid outer contour",
+        )
+    else:
+        ensure(
+            oversized_result == {"CANCELLED"},
+            "over-wide concave offset unexpectedly bypassed the polygon-topology guard",
+        )
+    ensure(
+        "самопересекается" in concave_settings.last_status.lower()
+        or "схлоп" in concave_settings.last_status.lower(),
+        "over-wide concave offset did not preserve its diagnostic in panel status",
+    )
 
     extension.unregister()
     extension.unregister()  # Unregistration must be safe to call twice.
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
-    print(f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: Object Mode + Edit Mode")
+    print(
+        f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
+        "automatic boundary detection, transparent facet plan, convex and concave source-aligned overhang, concave no-overhang and live rebuild"
+    )
 
 
 if __name__ == "__main__":

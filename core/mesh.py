@@ -1,13 +1,14 @@
 """Roof surface mesh assembly from plane-envelope cells."""
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from math import floor
 from typing import Sequence
 
-from .geometry import GeometryInputError, PlaneZ, signed_area
+from .geometry import GeometryInputError, PlaneZ, _bbox_scale, signed_area
 from .planes import boundary_envelope_conflicts, build_boundary_planes
-from .envelope import lower_envelope_restricted_cells
+from .envelope import lower_envelope_cells, lower_envelope_restricted_cells
 
 Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
@@ -59,6 +60,114 @@ class _VertexRegistry:
         self.vertices.append(point)
         self.buckets.setdefault(key, []).append(index)
         return index
+
+
+def _split_face_edges_at_shared_vertices(
+    vertices: Sequence[Point3],
+    faces: Sequence[Face],
+    tolerance: float,
+    *,
+    minimum_edge_length: float | None = None,
+) -> list[Face]:
+    """Conform face boundaries by inserting shared vertices on long edges.
+
+    Clipped cells created from different triangulation/arrangement regions can
+    produce a T-junction: one face uses a long edge while its neighbour uses
+    two shorter edges meeting at a vertex. This pass inserts that existing
+    vertex into the long edge without moving geometry or changing the face
+    region, so edge-incidence validation sees matching topology.
+
+    The optional minimum_edge_length separates the edge degeneracy threshold
+    from the search tolerance for T-junctions. The default preserves the
+    historical behavior.
+    """
+    minimum_length = tolerance if minimum_edge_length is None else minimum_edge_length
+    if minimum_length <= 0.0:
+        raise ValueError("minimum_edge_length must be positive")
+    minimum_length_sq = minimum_length * minimum_length
+    tolerance_sq = tolerance * tolerance
+    output: list[Face] = []
+    axis_orders: list[list[int]] = []
+    axis_values: list[list[float]] = []
+    for axis in range(3):
+        order = sorted(
+            range(len(vertices)),
+            key=lambda vertex_id: (vertices[vertex_id][axis], vertex_id),
+        )
+        axis_orders.append(order)
+        axis_values.append([vertices[vertex_id][axis] for vertex_id in order])
+
+    for face in faces:
+        expanded: list[int] = []
+        for edge_index, start_id in enumerate(face):
+            end_id = face[(edge_index + 1) % len(face)]
+            start = vertices[start_id]
+            end = vertices[end_id]
+            direction = tuple(end[axis] - start[axis] for axis in range(3))
+            length_sq = sum(value * value for value in direction)
+            if length_sq <= minimum_length_sq:
+                raise GeometryInputError(
+                    "ZERO_LENGTH_FACE_EDGE",
+                    "После сборки фасет найдено ребро нулевой длины.",
+                )
+
+            points_on_edge: list[tuple[float, int]] = []
+            search_axis = min(range(3), key=lambda axis: abs(direction[axis]))
+            lower_value = min(start[search_axis], end[search_axis]) - tolerance
+            upper_value = max(start[search_axis], end[search_axis]) + tolerance
+            values = axis_values[search_axis]
+            order = axis_orders[search_axis]
+            candidate_start = bisect_left(values, lower_value)
+            candidate_end = bisect_right(values, upper_value)
+
+            for candidate_position in range(candidate_start, candidate_end):
+                candidate_id = order[candidate_position]
+                if candidate_id == start_id or candidate_id == end_id:
+                    continue
+                candidate = vertices[candidate_id]
+                if any(
+                    candidate[axis] < min(start[axis], end[axis]) - tolerance
+                    or candidate[axis] > max(start[axis], end[axis]) + tolerance
+                    for axis in range(3)
+                    if axis != search_axis
+                ):
+                    continue
+                relative = tuple(candidate[axis] - start[axis] for axis in range(3))
+                parameter = sum(
+                    relative[axis] * direction[axis] for axis in range(3)
+                ) / length_sq
+                endpoint_margin = tolerance / (length_sq ** 0.5)
+                if parameter <= endpoint_margin or parameter >= 1.0 - endpoint_margin:
+                    continue
+                projected = tuple(
+                    start[axis] + parameter * direction[axis] for axis in range(3)
+                )
+                distance_sq = sum(
+                    (candidate[axis] - projected[axis]) ** 2 for axis in range(3)
+                )
+                if distance_sq <= tolerance_sq:
+                    points_on_edge.append((parameter, candidate_id))
+
+            points_on_edge.sort(key=lambda item: (item[0], item[1]))
+            if not expanded:
+                expanded.append(start_id)
+            expanded.extend(candidate_id for _, candidate_id in points_on_edge)
+            if expanded[-1] != end_id:
+                expanded.append(end_id)
+
+        compact: list[int] = []
+        for vertex_id in expanded:
+            if not compact or compact[-1] != vertex_id:
+                compact.append(vertex_id)
+        if len(compact) > 1 and compact[0] == compact[-1]:
+            compact.pop()
+        if len(set(compact)) < 3:
+            raise GeometryInputError(
+                "DEGENERATE_CONFORMED_FACE",
+                "Разбиение T-junction создало вырожденную грань.",
+            )
+        output.append(tuple(compact))
+    return output
 
 
 def _mesh_edge_usage(faces: Sequence[Face]) -> dict[tuple[int, int], int]:
@@ -141,6 +250,157 @@ def validate_surface_boundary_edges(vertices: Sequence[Point3], faces: Sequence[
             )
     return open_edges
 
+def build_roof_surface_from_planes(
+    domain: Sequence[Point2],
+    planes: Sequence[PlaneZ],
+    *,
+    source_area_xy: float | None = None,
+    eps: float = 1e-9,
+    active_contour: Sequence[Point2] | None = None,
+) -> RoofSurface:
+    """Assemble a continuous lower envelope over an expanded build domain.
+
+    The optional active contour retains ownership of the original eave planes.
+    Exterior overhang cells inherit the active set from their nearest point on
+    that contour, so shifted reflex edges cannot undercut the source roof.
+    """
+    if len(planes) < 3:
+        raise GeometryInputError(
+            "PLANE_COUNT",
+            "Для расширенной поверхности нужны минимум три плоскости скатов.",
+        )
+    if len(domain) < 3 or len(planes) < 3:
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Для построения поверхности нужны минимум три вершины и три плоскости.",
+        )
+
+    domain_area = abs(signed_area(domain))
+    if domain_area <= eps:
+        raise GeometryInputError(
+            "DEGENERATE_DOMAIN",
+            "Расширенный контур имеет нулевую площадь.",
+        )
+    activation_area = (
+        float(source_area_xy)
+        if source_area_xy is not None
+        else domain_area
+    )
+
+    scale = max(
+        1.0,
+        _bbox_scale(domain),
+    )
+    weld_tolerance = max(1e-12, eps * scale * 100.0)
+    area_tolerance = eps * scale * scale
+
+    cells_by_slope = lower_envelope_restricted_cells(
+        domain, planes, eps, active_contour=active_contour
+    )
+    registry = _VertexRegistry(weld_tolerance)
+    faces: list[Face] = []
+    face_slope_indices: list[int] = []
+    face_keys: set[tuple[int, ...]] = set()
+
+    for slope_index, cells in enumerate(cells_by_slope):
+        plane = planes[slope_index]
+        for cell in cells:
+            if len(cell) < 3 or abs(signed_area(cell)) <= area_tolerance:
+                continue
+            face_indices = [
+                registry.add((x, y, plane.height(x, y)))
+                for x, y in cell
+            ]
+            compact: list[int] = []
+            for vertex_index in face_indices:
+                if not compact or compact[-1] != vertex_index:
+                    compact.append(vertex_index)
+            if len(compact) > 1 and compact[0] == compact[-1]:
+                compact.pop()
+            if len(set(compact)) < 3:
+                continue
+            if signed_area(cell) < 0.0:
+                compact.reverse()
+            key = tuple(sorted(compact))
+            if key in face_keys:
+                continue
+            face_keys.add(key)
+            faces.append(tuple(compact))
+            face_slope_indices.append(slope_index)
+
+    if not faces:
+        raise GeometryInputError(
+            "EMPTY_ROOF",
+            "Нижняя огибающая не создала ни одной области расширенной крыши.",
+        )
+
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 5.0
+    )
+
+    surface_area_xy = sum(
+        abs(signed_area([
+            (registry.vertices[index][0], registry.vertices[index][1])
+            for index in face
+        ]))
+        for face in faces
+    )
+    if abs(surface_area_xy - domain_area) > max(
+        area_tolerance * 100.0, domain_area * 1e-7
+    ):
+        raise GeometryInputError(
+            "DOMAIN_COVERAGE_MISMATCH",
+            f"Области расширенной крыши покрывают {surface_area_xy:.9g} "
+            f"из {domain_area:.9g} квадратных единиц внешнего контура.",
+        )
+
+    edge_usage = _mesh_edge_usage(faces)
+    non_manifold_edges = [
+        edge for edge, count in edge_usage.items() if count > 2
+    ]
+    if non_manifold_edges:
+        raise GeometryInputError(
+            "NON_MANIFOLD_SURFACE",
+            f"При сборке расширенной поверхности обнаружено рёбер с более чем "
+            f"двумя гранями: {len(non_manifold_edges)}.",
+        )
+
+    validate_surface_boundary_edges(
+        registry.vertices, faces, domain, weld_tolerance * 5.0
+    )
+
+    return RoofSurface(
+        vertices=tuple(registry.vertices),
+        faces=tuple(faces),
+        face_slope_indices=tuple(face_slope_indices),
+        planes=tuple(planes),
+        source_area_xy=activation_area,
+        surface_area_xy=surface_area_xy,
+        boundary_xy=tuple(domain),
+    )
+
+
+def _has_reflex_vertex(domain: Sequence[Point2], eps: float) -> bool:
+    """Return whether a simple XY contour contains a genuine reflex turn."""
+    area = signed_area(domain)
+    if abs(area) <= eps:
+        return False
+    winding = 1.0 if area > 0.0 else -1.0
+    scale = max(_bbox_scale(domain), 1.0)
+    turn_tolerance = eps * scale * scale
+    count = len(domain)
+    for index, current in enumerate(domain):
+        previous = domain[index - 1]
+        following = domain[(index + 1) % count]
+        turn = (
+            (current[0] - previous[0]) * (following[1] - current[1])
+            - (current[1] - previous[1]) * (following[0] - current[0])
+        )
+        if turn * winding < -turn_tolerance:
+            return True
+    return False
+
+
 def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float],
                        eps: float = 1e-9) -> RoofSurface:
     """Build an open planar upper surface from a closed 3D boundary loop.
@@ -150,10 +410,6 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     The source contour is never modified.
     """
     planes = build_boundary_planes(points, pitches_degrees, eps)
-    conflicts = boundary_envelope_conflicts(points, planes)
-    if conflicts:
-        raise GeometryInputError(conflicts[0].code, conflicts[0].message)
-
     domain = [(point[0], point[1]) for point in points]
     domain_area = abs(signed_area(domain))
     scale = max(
@@ -162,10 +418,39 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
         max(point[1] for point in points) - min(point[1] for point in points),
         max(point[2] for point in points) - min(point[2] for point in points),
     )
+
+    # Infinite inward half-planes are not valid influence regions for a
+    # concave contour. Their extensions cross the polygon interior and can
+    # switch candidate planes off along an internal line. For a mixed-height
+    # concave contour, use each authored edge's finite projection interval.
+    mixed_height_concave = (
+        _has_reflex_vertex(domain, eps)
+        and max(point[2] for point in points) - min(point[2] for point in points)
+        > eps * scale * 10.0
+    )
+    active_support = points if mixed_height_concave else None
+    active_support_xy = domain if mixed_height_concave else None
+
+    # A mixed-height concave contour is constructed by the independent exact
+    # spatial planar solver. It produces one source-plane face per eave edge
+    # and a small planar transition patch; no distance-field fallback is used.
+    if mixed_height_concave:
+        from .exact_spatial import build_exact_planar_ring_surface
+
+        return build_exact_planar_ring_surface(points, pitches_degrees, eps)
+
+    conflicts = boundary_envelope_conflicts(
+        points, planes, eps, active_contour=active_support
+    )
+    if conflicts:
+        raise GeometryInputError(conflicts[0].code, conflicts[0].message)
+
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = eps * scale * scale
 
-    cells_by_slope = lower_envelope_restricted_cells(domain, planes, eps)
+    cells_by_slope = lower_envelope_restricted_cells(
+        domain, planes, eps, active_contour=active_support_xy
+    )
     registry = _VertexRegistry(weld_tolerance)
     faces: list[Face] = []
     face_slope_indices: list[int] = []
@@ -200,6 +485,9 @@ def build_roof_surface(points: Sequence[Point3], pitches_degrees: Sequence[float
     if not faces:
         raise GeometryInputError("EMPTY_ROOF", "Нижняя огибающая не создала ни одной области крыши.")
 
+    faces = _split_face_edges_at_shared_vertices(
+        registry.vertices, faces, weld_tolerance * 5.0
+    )
     surface_area_xy = sum(
         abs(signed_area([(registry.vertices[i][0], registry.vertices[i][1]) for i in face]))
         for face in faces

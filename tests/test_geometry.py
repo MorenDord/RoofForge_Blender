@@ -12,14 +12,91 @@ from core.mesh import build_roof_surface
 from core.shell import build_roof_shell
 from core.validation import validate_closed_mesh
 from core.distance_field import build_distance_field_roof_surface
+from core.exact_spatial import build_exact_planar_ring_surface, validate_planar_face
 from core.wavefront import (
     EventBatch, EventKind, WavefrontEvent, WavefrontEventQueue, WavefrontLoop,
     advance_wavefront_state, apply_split_event, build_moving_lines,
     build_wavefront_roof_surface,
     collect_loop_events, create_wavefront_state, find_split_candidates,
-    run_weighted_wavefront,
+    run_weighted_wavefront, is_flat_eave_contour,
     simulate_convex_wavefront, _line_intersection, _resolve_edge_collapse_group,
 )
+
+
+def assert_exact_support_plane_partition(testcase, surface, max_faces=512):
+    testcase.assertEqual(surface.approximation_error, 0.0)
+    testcase.assertEqual(surface.refinement_depth, 0)
+    testcase.assertLessEqual(len(surface.faces), max_faces)
+    testcase.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+    testcase.assertTrue(surface.faces)
+    testcase.assertTrue(
+        all(-1 <= source < len(surface.planes) for source in surface.face_slope_indices),
+        "roof faces must be exact support planes or explicit planar transition faces",
+    )
+
+    edge_sources = {}
+    for face, source in zip(surface.faces, surface.face_slope_indices):
+        if source >= 0:
+            plane = surface.planes[source]
+            for vertex_index in face:
+                point = surface.vertices[vertex_index]
+                testcase.assertAlmostEqual(
+                    point[2], plane.height(point[0], point[1]), places=7
+                )
+        else:
+            validate_planar_face(surface.vertices, face)
+            testcase.assertEqual(
+                len(face), 3,
+                "transition regions must be represented by individually planar triangles",
+            )
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            edge_sources.setdefault(
+                (min(first, second), max(first, second)), []
+            ).append(source)
+
+    has_exact_seam = False
+    for edge, sources in edge_sources.items():
+        testcase.assertLessEqual(len(sources), 2)
+        if (
+            len(sources) == 2
+            and sources[0] >= 0
+            and sources[1] >= 0
+            and sources[0] != sources[1]
+        ):
+            has_exact_seam = True
+            for vertex_index in edge:
+                point = surface.vertices[vertex_index]
+                for source in sources:
+                    plane = surface.planes[source]
+                    testcase.assertAlmostEqual(
+                        point[2], plane.height(point[0], point[1]), places=7
+                    )
+    testcase.assertTrue(has_exact_seam, "roof should contain at least one exact plane-intersection seam")
+
+    directed_uses = {}
+    for face_index, face in enumerate(surface.faces):
+        source = surface.face_slope_indices[face_index]
+        for local_index, first in enumerate(face):
+            second = face[(local_index + 1) % len(face)]
+            key = (min(first, second), max(first, second))
+            directed_uses.setdefault(key, []).append(
+                (face_index, source, first, second)
+            )
+    for edge_key, uses in directed_uses.items():
+        testcase.assertLessEqual(
+            len(uses), 2,
+            f"top roof edge {edge_key} is used by {len(uses)} faces",
+        )
+        if len(uses) == 2:
+            first_use, second_use = uses
+            testcase.assertEqual(
+                (first_use[2], first_use[3]),
+                (second_use[3], second_use[2]),
+                "top surface edge winding is inconsistent: "
+                f"edge={edge_key}, uses={uses}, "
+                f"coords=({surface.vertices[edge_key[0]]}, {surface.vertices[edge_key[1]]})",
+            )
 
 
 class PolygonTests(unittest.TestCase):
@@ -140,6 +217,73 @@ class PolygonTests(unittest.TestCase):
                                          for i in face]) > 0.0
                             for face in surface.faces))
 
+    def test_mixed_height_concave_surface_uses_exact_planar_envelope(self):
+        points = [
+            (0.0, 0.0, 0.00),
+            (3.0, 0.0, 0.05),
+            (3.0, 1.0, 0.08),
+            (1.0, 1.0, 0.12),
+            (1.0, 3.0, 0.16),
+            (0.0, 3.0, 0.10),
+        ]
+        pitches = [40.0, 42.0, 38.0, 45.0, 41.0, 39.0]
+        surface = build_roof_surface(points, pitches)
+
+        assert_exact_support_plane_partition(self, surface)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=7,
+        )
+        self.assertEqual(
+            len({source for source in surface.face_slope_indices if source >= 0}),
+            len(points),
+            "every authored edge plane must own a non-zero exact roof region",
+        )
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+        direct = build_exact_planar_ring_surface(points, pitches)
+        self.assertEqual(direct.faces, surface.faces)
+        self.assertEqual(direct.face_slope_indices, surface.face_slope_indices)
+
+    def test_single_nonplanar_vertex_l_contour_uses_exact_spatial_events(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (3.0, 0.0, 0.0),
+            (3.0, 1.0, 0.05),
+            (1.0, 1.0, 0.0),
+            (1.0, 3.0, 0.0),
+            (0.0, 3.0, 0.0),
+        ]
+        pitches = [40.0] * len(points)
+        surface = build_roof_surface(points, pitches)
+        assert_exact_support_plane_partition(self, surface)
+        self.assertAlmostEqual(surface.surface_area_xy, 5.0, places=7)
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_single_nonplanar_vertex_u_contour_uses_exact_spatial_events(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (4.0, 0.0, 0.0),
+            (4.0, 4.0, 0.0),
+            (3.0, 4.0, 0.0),
+            (3.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (1.0, 4.0, 0.08),
+            (0.0, 4.0, 0.0),
+        ]
+        pitches = [40.0] * len(points)
+        surface = build_roof_surface(points, pitches)
+        assert_exact_support_plane_partition(self, surface)
+        self.assertAlmostEqual(surface.surface_area_xy, 10.0, places=7)
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
     def test_discontinuous_concave_surface_is_rejected(self):
         fixtures = [
             [(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 1.0, 0.0),
@@ -211,6 +355,42 @@ class PolygonTests(unittest.TestCase):
         vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
         diagnostics = validate_closed_mesh(vertices, [(0, 1, 2)])
         self.assertIn("BOUNDARY_EDGE", {item.code for item in diagnostics})
+
+    def test_closed_mesh_validator_uses_local_face_scale_for_area(self):
+        # A small but well-shaped base triangle remains numerically resolvable
+        # even though the complete closed tetrahedron spans a much larger range.
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (0.0004, 0.0, 0.0),
+            (0.0002, 0.0003464101615, 0.0),
+            (10.0, 10.0, 10.0),
+        ]
+        faces = [
+            (1, 2, 3),
+            (0, 3, 2),
+            (0, 1, 3),
+            (0, 2, 1),
+        ]
+        self.assertEqual(validate_closed_mesh(vertices, faces, eps=1e-9), [])
+
+    def test_closed_mesh_validator_rejects_sliver_below_coordinate_tolerance(self):
+        vertices = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.5, 1e-10, 0.0),
+            (10.0, 10.0, 10.0),
+        ]
+        faces = [
+            (1, 2, 3),
+            (0, 3, 2),
+            (0, 1, 3),
+            (0, 2, 1),
+        ]
+        codes = {
+            item.code
+            for item in validate_closed_mesh(vertices, faces, eps=1e-9)
+        }
+        self.assertIn("ZERO_AREA_FACE", codes)
 
     def test_closed_mesh_validator_detects_bow_tie_vertex(self):
         vertices = [
@@ -321,6 +501,22 @@ class PolygonTests(unittest.TestCase):
                   (4.0, 2.0, 0.5), (0.0, 2.0, 0.0)]
         with self.assertRaises(GeometryInputError) as ctx:
             build_moving_lines(points, [45.0] * 4)
+        self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
+
+    def test_flat_eave_detection_is_independent_of_absolute_z_offset(self):
+        flat = [
+            (0.0, 0.0, 1_000_000_000.0),
+            (4.0, 0.0, 1_000_000_000.0),
+            (4.0, 2.0, 1_000_000_000.0),
+            (0.0, 2.0, 1_000_000_000.0),
+        ]
+        stepped = list(flat)
+        stepped[1] = (stepped[1][0], stepped[1][1], 1_000_000_000.5)
+
+        self.assertTrue(is_flat_eave_contour(flat))
+        self.assertFalse(is_flat_eave_contour(stepped))
+        with self.assertRaises(GeometryInputError) as ctx:
+            build_moving_lines(stepped, [45.0] * 4)
         self.assertEqual(ctx.exception.code, "MIXED_EAVE_HEIGHTS_UNSUPPORTED")
 
     def test_wavefront_convex_simulation_rejects_reflex_contour(self):
@@ -918,21 +1114,227 @@ class PolygonTests(unittest.TestCase):
             shell = build_roof_shell(surface, 0.10)
             self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
-    def test_wavefront_rejects_sub_tolerance_split_collapse_sliver_in_shell(self):
+    def test_wavefront_resolves_symmetric_concave_point_terminations_through_64_edges(self):
+        # Alternating radii create a simple concave star-like contour whose
+        # weighted fronts all converge at the origin at one terminal height.
+        # The event batch contains endpoint hits and edge collapses together.
+        for count in (8, 16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    radius = 10.0 if index % 2 == 0 else 8.6
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                pitches = [35.0] * count
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertEqual(trace.terminal_kind, "POINT")
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_resolves_variable_pitch_concave_contours_through_64_edges(self):
+        # Asymmetric pitches break the single central-point event and force
+        # the solver to process local endpoint-hit/collapse batches.
+        for count in (8, 16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                pitches = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    radius = 10.0 if index % 2 == 0 else 8.6
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                    pitches.append(
+                        32.0 + 4.0 * math.sin(index * 1.371)
+                        + 2.5 * math.cos(index * 0.613)
+                    )
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                self.assertEqual(
+                    len(surface.face_slope_indices), len(surface.faces)
+                )
+
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_asymmetric_reflex_radial_contours_through_64_edges(self):
+        # Break the exact alternating-radius symmetry while retaining a
+        # simple star-shaped contour with many reflex vertices.
+        for count in (16, 32, 64):
+            with self.subTest(edge_count=count):
+                points = []
+                pitches = []
+                for index in range(count):
+                    angle = 2.0 * math.pi * index / count
+                    base_radius = 10.0 if index % 2 == 0 else 8.6
+                    radius = (
+                        base_radius
+                        + 0.23 * math.sin(index * 0.793)
+                        + 0.17 * math.cos(index * 1.317)
+                    )
+                    points.append((
+                        radius * math.cos(angle),
+                        radius * math.sin(angle),
+                        0.0,
+                    ))
+                    pitches.append(
+                        30.0 + 5.0 * math.sin(index * 1.173)
+                        + 2.0 * math.cos(index * 0.537)
+                    )
+
+                trace = run_weighted_wavefront(points, pitches)
+                self.assertTrue(trace.is_complete)
+                self.assertAlmostEqual(
+                    trace.projected_facet_area,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                surface = build_wavefront_roof_surface(points, pitches)
+                self.assertAlmostEqual(
+                    surface.surface_area_xy,
+                    abs(signed_area([(point[0], point[1]) for point in points])),
+                    places=5,
+                )
+                self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+                shell = build_roof_shell(surface, 0.10)
+                self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_64_edge_wavy_l_contour_with_variable_pitch(self):
+        outline = [
+            (0.0, 0.0), (10.0, 0.0), (10.0, 3.0),
+            (4.0, 3.0), (4.0, 10.0), (0.0, 10.0),
+        ]
+        subdivisions = (11, 11, 10, 11, 10, 11)
+        points = []
+        for edge_index, start in enumerate(outline):
+            end = outline[(edge_index + 1) % len(outline)]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            length = math.hypot(dx, dy)
+            left_normal = (-dy / length, dx / length)
+            for step in range(subdivisions[edge_index]):
+                t = step / subdivisions[edge_index]
+                bend = 0.015 * math.sin(math.pi * t)
+                points.append((
+                    start[0] + dx * t + left_normal[0] * bend,
+                    start[1] + dy * t + left_normal[1] * bend,
+                    0.0,
+                ))
+
+        self.assertEqual(len(points), 64)
+        pitches = [
+            30.0 + 5.0 * math.sin(index * 0.817)
+            + 2.0 * math.cos(index * 0.613)
+            for index in range(len(points))
+        ]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(
+            trace.projected_facet_area,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_handles_64_edge_wavy_u_contour_with_variable_pitch(self):
+        outline = [
+            (0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (3.0, 4.0),
+            (3.0, 1.0), (1.0, 1.0), (1.0, 4.0), (0.0, 4.0),
+        ]
+        points = []
+        for edge_index, start in enumerate(outline):
+            end = outline[(edge_index + 1) % len(outline)]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            length = math.hypot(dx, dy)
+            left_normal = (-dy / length, dx / length)
+            for step in range(8):
+                t = step / 8.0
+                bend = 0.008 * math.sin(math.pi * t)
+                points.append((
+                    start[0] + dx * t + left_normal[0] * bend,
+                    start[1] + dy * t + left_normal[1] * bend,
+                    0.0,
+                ))
+
+        self.assertEqual(len(points), 64)
+        pitches = [
+            31.0 + 4.5 * math.sin(index * 0.917)
+            + 2.5 * math.cos(index * 0.641)
+            for index in range(len(points))
+        ]
+        trace = run_weighted_wavefront(points, pitches)
+        self.assertTrue(trace.is_complete)
+        self.assertAlmostEqual(
+            trace.projected_facet_area,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        surface = build_wavefront_roof_surface(points, pitches)
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in points])),
+            places=5,
+        )
+        self.assertEqual(len(surface.face_slope_indices), len(surface.faces))
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
+    def test_wavefront_keeps_small_resolvable_split_collapse_sliver_in_shell(self):
         points = [
             (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 1.0, 0.0),
             (1.0, 1.0, 0.0), (1.0, 4.0, 0.0), (0.0, 4.0, 0.0),
         ]
-        # This perturbation leaves a valid but sub-tolerance terminal sliver.
-        # The upper surface must retain it, while the solid-shell validator
-        # must reject the resulting face rather than weakening its area gate.
+        # This produces a small but locally resolved terminal facet. Its area
+        # is small relative to the whole roof, not relative to its own edges.
         speeds = [0.8, 1.0, 1.2, 1.3002, 1.0, 0.7]
         pitches = [math.degrees(math.atan(1.0 / speed)) for speed in speeds]
         surface = build_wavefront_roof_surface(points, pitches)
         self.assertAlmostEqual(surface.surface_area_xy, 7.0, places=6)
-        with self.assertRaises(GeometryInputError) as ctx:
-            build_roof_shell(surface, 0.10)
-        self.assertEqual(ctx.exception.code, "ZERO_AREA_FACE")
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_wavefront_rejects_partial_overlap_as_complete_needle(self):
         points = [

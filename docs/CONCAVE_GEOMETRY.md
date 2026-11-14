@@ -98,7 +98,7 @@ Latest pure-Python CI: **61 tests passed on Python 3.11 and 3.13**: https://gith
 - Two asymmetric L cases now verify the distinct-time continuation after a compound event in both orders (right-side event first and bottom-side event first). The second event must be later than the queue batching tolerance and must reference the live child-loop generation and active edge instances. This is fixture-specific evidence, not a general proof for arbitrary event batches.
 - A geometrically nonzero but sub-tolerance sliver may fail the closed-shell face-area gate. The solver retains the source facet; the shell validator intentionally rejects such output. No validator tolerance has been relaxed.
 - Mixed-height eaves are not supported by this 2D wavefront formulation.
-- The code is not connected to the Blender generation operator and has not been runtime-tested inside Blender 5.0.
+- The weighted-wavefront path is connected to the Blender generation operator for flat-eave contours. Its supported event set is still deliberately bounded; unsupported event batches are rejected.
 
 ## 3. Experimental comparison path
 
@@ -142,3 +142,19 @@ For each fixture assert:
 ## 6. Exit condition
 
 Concave roof support is not complete until the weighted wavefront solver produces exact planar edge faces and passes every topology/geometry regression fixture above. The distance-field prototype alone does not satisfy this gate.
+
+
+## 2.6 Concave positive overhang ring (RoofForge 0.3.8)
+
+The concave positive-overhang path is connected to the Blender build pipeline for flat-eave contours whose weighted wavefront is accepted by the production alpha solver.
+
+1. Build the original open roof surface with the weighted wavefront. Do not replace it with the global infinite-plane envelope.
+2. Build the corner-converged outer offset. Each outer vertex is projected to the intersection of its two adjacent source-edge pitch planes.
+3. Prove the offset is a simple expanded ring that contains the source contour. Reject a self-intersection or an offset that closes a reflex notch.
+4. For every directed open edge of the source roof, identify its unique source contour edge. Interpolate the matching outer endpoints along that edge's offset segment and create a quad that replaces the original open edge.
+5. The four quad vertices lie on the corresponding source-edge pitch plane. Adjacent quads share their corner spokes; their outer edges make the new roof boundary.
+6. Validate exact ring-area coverage, no edge with more than two incident upper faces, complete expanded-boundary coverage, and then run the normal closed-shell manifold validator.
+
+This approach preserves the original support boundary and uses exact planar edge strips instead of asking remote infinite planes to compete across a concave domain.
+
+**Scope and limits:** positive overhang is tested for flat-eave L/U contours and selected weighted per-edge pitch profiles. It requires **Converge corners**. Mixed-height concave eaves, offsets that alter polygon topology, and unsupported weighted-wavefront event combinations remain rejected. Passing L/U fixtures do not prove support for every simple concave polygon.

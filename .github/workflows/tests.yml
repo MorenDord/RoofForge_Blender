@@ -2,7 +2,7 @@ name: RoofForge tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'feature/**']
     paths-ignore:
       - "docs/**"
       - "README.md"
@@ -28,11 +28,60 @@ jobs:
       - name: Run geometry tests
         run: python -m unittest discover -s tests -v
 
-  blender-5-smoke-package:
-    runs-on: ubuntu-latest
-    needs: pure-python-tests
+  native-platform-wheels:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: windows-x64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-26
+          - platform: macos-x64
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build platform-native stable-ABI wheel
+        working-directory: rust/roof_forge_native
+        shell: bash
+        run: |
+          python -m pip install "maturin>=1.9,<2.0"
+          if [ "${{ matrix.platform }}" = "linux-x64" ]; then
+            docker run --rm -v "$GITHUB_WORKSPACE:/io" -w /io/rust/roof_forge_native ghcr.io/pyo3/maturin:latest build --release --compatibility manylinux_2_28 --out /io/dist/wheels
+          else
+            python -m maturin build --release --out ../../dist/wheels
+          fi
+          ls -lh ../../dist/wheels/*.whl
+      - name: Upload native platform wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-native-wheel-${{ matrix.platform }}
+          path: dist/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 30
+
+  blender-5-smoke-package:
+    runs-on: ubuntu-latest
+    needs:
+      - pure-python-tests
+      - native-platform-wheels
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all native platform wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: roof-forge-native-wheel-*
+          path: ${{ runner.temp }}/roof-forge-native-wheels
+          merge-multiple: true
       - name: Install Blender runtime libraries
         run: |
           sudo apt-get update
@@ -45,17 +94,167 @@ jobs:
           tar -xf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/blender-5.0.1-linux-x64" >> "$GITHUB_PATH"
       - name: Run Blender background smoke tests
-        run: blender --background --factory-startup --python tests/blender_smoke.py
-      - name: Build clean Blender Extension ZIP
-        run: python3 tools/build_extension.py --output-dir dist
+        run: |
+          set -euo pipefail
+          blender --background --factory-startup --python tests/blender_smoke.py 2>&1 | tee "$RUNNER_TEMP/roof-smoke.log"
+          grep -q "ROOFFORGE_SMOKE_OK" "$RUNNER_TEMP/roof-smoke.log"
+          blender --background --factory-startup --python tests/blender_vector_preview_smoke.py 2>&1 | tee "$RUNNER_TEMP/vector-smoke.log"
+          grep -q "ROOFFORGE_VECTOR_PREVIEW_SMOKE_OK" "$RUNNER_TEMP/vector-smoke.log"
+      - name: Build Blender Extension ZIP with native Rust wheels
+        run: |
+          python3 tools/build_extension.py --native-wheels-dir "$RUNNER_TEMP/roof-forge-native-wheels" --require-native-wheels --output-dir dist
       - name: Validate Extension ZIP with Blender 5.0.1
-        run: blender --command extension validate dist/roof_forge-0.1.0.zip
+        run: blender --command extension validate dist/roof_forge-0.3.22.zip
+      - name: Install native extension into Blender
+        run: blender --command extension install-file --repo user_default --enable dist/roof_forge-0.3.22.zip
+      - name: Smoke-test the installed native extension inside Blender
+        run: |
+          set -euo pipefail
+          blender --background --python tests/blender_native_extension_smoke.py 2>&1 | tee "$RUNNER_TEMP/native-blender-smoke.log"
+          grep -q "ROOFFORGE_NATIVE_BLENDER_SMOKE_OK" "$RUNNER_TEMP/native-blender-smoke.log"
       - name: Upload installable test build
         uses: actions/upload-artifact@v4
         with:
-          name: roof_forge-0.1.0-blender-5.0.1
+          name: roof_forge-0.3.22-blender-5.0.1
           path: |
-            dist/roof_forge-0.1.0.zip
-            dist/roof_forge-0.1.0.zip.sha256
+            dist/roof_forge-0.3.22.zip
+            dist/roof_forge-0.3.22.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+  rust-native-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check Rust formatting
+        working-directory: rust/roof_forge_native
+        run: cargo fmt --all -- --check
+      - name: Run Rust unit tests
+        working-directory: rust/roof_forge_native
+        run: cargo test --all-targets
+      - name: Lint Rust core and Python binding
+        working-directory: rust/roof_forge_native
+        run: cargo clippy --all-targets --features python-extension -- -D warnings
+      - name: Build stable-ABI Python wheel
+        working-directory: rust/roof_forge_native
+        run: |
+          python -m pip install "maturin>=1.9,<2.0"
+          maturin build --release --out "$RUNNER_TEMP/roof-forge-native-wheels"
+      - name: Install native wheel
+        run: python -m pip install "$RUNNER_TEMP"/roof-forge-native-wheels/*.whl
+      - name: Run full Python suite with native dispatch enabled
+        run: python -m unittest discover -s tests -v
+      - name: Benchmark Python and Rust contour validation
+        run: python tests/benchmark_native_validation.py --json-output rust-native-validation.json
+      - name: Upload native validation benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-native-validation
+          path: rust-native-validation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Benchmark Python and Rust wavefront event collection
+        run: python tests/benchmark_native_events.py --json-output rust-native-events.json
+      - name: Upload native wavefront benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-native-events
+          path: rust-native-events.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Benchmark full Python and Rust roof generation
+        run: python tests/benchmark_native_wavefront.py --repeats 5 --json-output rust-native-wavefront.json
+      - name: Upload end-to-end native benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-native-wavefront
+          path: rust-native-wavefront.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Profile native wavefront event state machine
+        run: python tests/profile_native_state_machine.py --runs 5 --json-output native-state-machine-profile.json
+      - name: Upload native state machine profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-native-state-machine-profile
+          path: native-state-machine-profile.json
+          if-no-files-found: error
+          retention-days: 30
+
+  geometry-benchmarks:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run geometry scaling benchmarks
+        run: python tests/benchmark_geometry.py --repeats 3 --json-output benchmark-results.json
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-geometry-benchmarks
+          path: benchmark-results.json
+          if-no-files-found: error
+          retention-days: 30
+  rust-skeleton-candidate:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Benchmark weighted Rust skeleton candidate
+        run: |
+          set -o pipefail
+          cargo run --release --manifest-path tests/rust_skeleton_bench/Cargo.toml | tee rust-skeleton-bench.csv
+      - name: Upload Rust candidate benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-rust-skeleton-candidate
+          path: rust-skeleton-bench.csv
+          if-no-files-found: error
+          retention-days: 30
+  legacy-spatial-benchmarks:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Benchmark the historical spatial solver
+        run: python tests/legacy_spatial_solver_bench.py | tee legacy-spatial-bench.csv
+      - name: Upload legacy solver benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-legacy-spatial-bench
+          path: legacy-spatial-bench.csv
+          if-no-files-found: error
+          retention-days: 30
+
+  legacy-solver-profile:
+    runs-on: ubuntu-latest
+    needs: pure-python-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Profile 64-edge target solver cases
+        run: python tests/profile_legacy_solver.py | tee legacy-solver-profile.txt
+      - name: Upload solver profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: roof-forge-legacy-solver-profile
+          path: legacy-solver-profile.txt
           if-no-files-found: error
           retention-days: 30
