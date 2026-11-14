@@ -12,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 21)
+assert extension.bl_info["version"] == (0, 3, 22)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -51,8 +51,8 @@ assert "_build_debug_message" in module._draw_vector_preview.__code__.co_names
 assert "_draw_debug_overlay" in module._draw_vector_preview.__code__.co_names
 panel_module = importlib.import_module(f"{extension.__name__}.addon.ui.panel")
 assert "panel" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
-assert "template_icon" not in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
-assert "scale_y" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "template_icon" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
+assert "alignment" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "set_preview_slot_visible" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "preview_category_rail_width" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_names
 assert "roof_forge.pitch_intersection_step" in panel_module.ROOFFORGE_PT_panel.draw.__code__.co_consts
@@ -159,6 +159,21 @@ assert mapping["bottom_left_view"] == (0.0, 0.0)
 assert mapping["top_right_view"] == (49.5, 12.25)
 assert mapping["bottom_left_pixel"] == (0, 0)
 assert mapping["top_right_pixel"] == (99, 49)
+
+# The category gutter is horizontal. View2D may have different X/Y zoom.
+rail_region = SimpleNamespace(
+    width=100,
+    height=50,
+    view2d=fake_view2d,
+)
+assert abs(
+    module.preview_category_rail_width(20.0, region=rail_region) - 40.0
+) < 1.0e-7
+assert abs(
+    module.preview_category_rail_width(
+        20.0, region=rail_region, compact=True
+    ) - 56.0
+) < 1.0e-7
 
 message = module._build_debug_message(
     SimpleNamespace(scene=bpy.context.scene),

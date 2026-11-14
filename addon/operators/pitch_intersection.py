@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import bpy
 
-from ...core.geometry import PlaneZ, build_boundary_planes
-from ...core.mesh import build_roof_surface_from_planes
 from ...core.pitch_snap import find_adjacent_pitch_vertex_angle
 from ..adapters.mesh_io import read_object_boundary
 from ..roof_build import _build_roof_surface, pitch_values
@@ -19,44 +17,6 @@ def _build_surface_without_overhang(points, pitches):
         True,
     )
     return surface
-
-
-def _build_surface_without_slope(points, pitches, excluded_slope):
-    """Build the roof made by all slopes except the one being adjusted.
-
-    Keep one plane slot per source edge so every face retains its original
-    slope index. The selected plane is raised above the maximum of all other
-    planes over the contour domain, making it inactive without changing the
-    support-edge indexing used by the finite-segment envelope.
-    """
-    planes = build_boundary_planes(points, pitches)
-    if excluded_slope < 0 or excluded_slope >= len(planes):
-        raise IndexError("Индекс выбранного ската находится вне контура.")
-
-    xy_domain = [(float(point[0]), float(point[1])) for point in points]
-    other_heights = [
-        plane.height(point[0], point[1])
-        for index, plane in enumerate(planes)
-        if index != excluded_slope
-        for point in xy_domain
-    ]
-    coordinate_span = max(
-        1.0,
-        max(point[0] for point in xy_domain) - min(point[0] for point in xy_domain),
-        max(point[1] for point in xy_domain) - min(point[1] for point in xy_domain),
-        max(float(point[2]) for point in points) - min(float(point[2]) for point in points),
-    )
-    suppression_height = max(other_heights) + coordinate_span * 1000.0
-    planes[excluded_slope] = PlaneZ(0.0, 0.0, suppression_height)
-
-    # The original contour remains the finite support for each plane. This is
-    # important for concave footprints: an infinite extension of a remote edge
-    # must not manufacture a false neighbour vertex.
-    return build_roof_surface_from_planes(
-        xy_domain,
-        planes,
-        active_contour=points,
-    )
 
 
 class ROOFFORGE_OT_pitch_intersection_step(bpy.types.Operator):
@@ -123,7 +83,6 @@ class ROOFFORGE_OT_pitch_intersection_step(bpy.types.Operator):
                 self.edge_index,
                 direction,
                 _build_surface_without_overhang,
-                _build_surface_without_slope,
             )
             if candidate is None:
                 direction_label = "меньший" if direction < 0 else "больший"

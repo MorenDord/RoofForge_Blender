@@ -105,23 +105,26 @@ def preview_category_rail_width(widget_unit=20.0, *, region=None, compact=False)
     """Estimate Blender's category-tab gutter in region-local UI pixels.
 
     Blender uses one UI widget unit for normal sidebar tabs and 1.4 units for
-    compact tabs. The gutter is additionally scaled by the region's View2D
-    zoom; infer that factor through its public region_to_view mapping.
+    compact tabs. The gutter is horizontal, so its View2D zoom must be measured
+    along X. Using the region's vertical zoom shifts the preview whenever the
+    UI region is zoomed or scaled differently on the two axes.
     """
     tab_units = 1.4 if compact else _PANEL_CATEGORY_RAIL_UNITS
-    zoom = 1.0
+    zoom_x = 1.0
     if region is not None:
         try:
             view2d = region.view2d
+            width = max(1.0, float(region.width))
             height = max(1.0, float(region.height))
-            bottom_y = float(view2d.region_to_view(0.0, 0.0)[1])
-            top_y = float(view2d.region_to_view(0.0, height - 1.0)[1])
-            view_height = abs(top_y - bottom_y)
-            if view_height > 1.0e-9:
-                zoom = (height - 1.0) / view_height
+            sample_y = (height - 1.0) * 0.5
+            left_x = float(view2d.region_to_view(0.0, sample_y)[0])
+            right_x = float(view2d.region_to_view(width - 1.0, sample_y)[0])
+            view_width = abs(right_x - left_x)
+            if view_width > 1.0e-9:
+                zoom_x = (width - 1.0) / view_width
         except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
             pass
-    return max(0.0, float(widget_unit) * tab_units * zoom)
+    return max(0.0, float(widget_unit) * tab_units * zoom_x)
 
 
 def preview_icon_scale(region_width, *, widget_unit=20.0):
@@ -336,7 +339,7 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
         f"Region: {int(region.width)}x{int(region.height)} @ {region_x},{region_y}",
         f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
         f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
-        f"template_icon: scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
+        f"UI anchor: centered template_icon; scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
         (
             "RoofForge tab content bounds X: "
             f"{float(layout['panel_content_left']):.1f}..{float(layout['panel_content_right']):.1f}px"

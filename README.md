@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.21.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.3.22.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -61,6 +61,13 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave footprints are not supported and are rejected with a warning, regardless of overhang. Offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain rejected.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
+## RoofForge 0.3.22
+
+- Pitch snapping no longer builds a deliberately incomplete roof with one source slope suppressed. It solves triple intersections of the remaining finite support planes analytically, then checks the candidate by rebuilding the complete production roof.
+- Candidate vertices must lie inside the contour, be supported by their three finite source edges, and belong to the lower envelope of the other slopes. This avoids treating extensions of distant support planes as valid snap targets.
+- The preview placeholder is a real, center-aligned `template_icon` square. Blender's own UI layout centers that anchor in the active tab body; the GPU canvas uses the same center and slot size.
+- Category-tab width now uses the horizontal View2D zoom, not the vertical zoom. Blender smoke tests cover different horizontal and vertical scale factors and a real pitch-to-vertex snap.
+
 ## RoofForge 0.3.21
 
 - The left/right Pitch controls solve the exact angle at which the selected slope plane passes through a fixed vertex formed by the other roof slopes.
@@ -82,7 +89,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.21-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow, extract it once, then install the inner `roof_forge-0.3.21.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.3.22-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow on the feature branch, extract it once, then install the inner `roof_forge-0.3.22.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 

@@ -1,20 +1,23 @@
-"""Tests for geometric pitch snapping to neighbouring roof vertices."""
+"""Tests for analytic pitch snapping to neighbouring roof vertices."""
 from dataclasses import dataclass
 import math
-from types import SimpleNamespace
 import unittest
 
-from core.pitch_snap import find_adjacent_pitch_vertex_angle
+from core.geometry import build_boundary_planes
+from core.pitch_snap import (
+    _neighbour_vertex_targets,
+    find_adjacent_pitch_vertex_angle,
+)
 
 
 POINTS = (
     (0.0, 0.0, 0.0),
-    (10.0, 0.0, 0.0),
-    (10.0, 10.0, 0.0),
-    (0.0, 10.0, 0.0),
+    (4.0, 0.0, 0.0),
+    (4.0, 3.0, 0.0),
+    (0.0, 3.0, 0.0),
 )
-TARGET = (5.0, 8.0, 4.0)
-TARGET_ANGLE = math.degrees(math.atan(0.5))
+TARGET = (2.0, 1.0, 2.0 * math.tan(math.radians(30.0)))
+TARGET_ANGLE = math.degrees(math.atan(2.0 * math.tan(math.radians(30.0))))
 
 
 @dataclass(frozen=True)
@@ -22,17 +25,6 @@ class Surface:
     vertices: tuple
     faces: tuple
     face_slope_indices: tuple
-
-
-def neighbour_surface(target=TARGET):
-    return Surface(
-        vertices=POINTS + (target,),
-        faces=(
-            (1, 2, 4),
-            (2, 3, 4),
-        ),
-        face_slope_indices=(1, 2),
-    )
 
 
 def snapped_surface(target=TARGET):
@@ -47,86 +39,103 @@ def snapped_surface(target=TARGET):
     )
 
 
+def neighbour_only_surface(target=TARGET):
+    return Surface(
+        vertices=POINTS + (target,),
+        faces=(
+            (1, 2, 4),
+            (2, 3, 4),
+        ),
+        face_slope_indices=(1, 2),
+    )
+
+
 class PitchSnapTests(unittest.TestCase):
-    def run_snap(self, current_angle, direction, *, final_surface=None):
-        target_surface = neighbour_surface()
+    def test_three_other_slopes_define_the_expected_internal_vertex(self):
+        planes = build_boundary_planes(POINTS, (20.0, 30.0, 30.0, 30.0))
+        targets = _neighbour_vertex_targets(POINTS, planes, 0)
+        self.assertEqual(len(targets), 1)
+        for actual, expected in zip(targets[0], TARGET):
+            self.assertAlmostEqual(actual, expected, places=7)
 
-        def build_neighbours(_points, _pitches, excluded):
-            self.assertEqual(excluded, 0)
-            return target_surface
-
-        def build_full(_points, pitches):
-            if final_surface is not None:
-                return final_surface
+    def test_next_snaps_to_nearest_higher_neighbour_vertex(self):
+        def build_surface(_points, pitches):
             self.assertAlmostEqual(pitches[0], TARGET_ANGLE, places=7)
             return snapped_surface()
-
-        return find_adjacent_pitch_vertex_angle(
-            POINTS,
-            (current_angle, 30.0, 30.0, 30.0),
-            0,
-            direction,
-            build_full,
-            build_neighbours,
-        )
-
-    def test_previous_snaps_to_the_nearest_lower_pitch_vertex(self):
-        result = self.run_snap(30.0, -1)
-        self.assertIsNotNone(result)
-        self.assertAlmostEqual(result.angle_degrees, TARGET_ANGLE, places=7)
-        self.assertEqual(result.target_vertex, TARGET)
-
-    def test_next_snaps_to_the_nearest_higher_pitch_vertex(self):
-        result = self.run_snap(20.0, 1)
-        self.assertIsNotNone(result)
-        self.assertAlmostEqual(result.angle_degrees, TARGET_ANGLE, places=7)
-        self.assertEqual(result.target_vertex, TARGET)
-
-    def test_candidate_must_be_shared_in_the_final_roof(self):
-        result = self.run_snap(
-            20.0,
-            1,
-            final_surface=neighbour_surface(),
-        )
-        self.assertIsNone(result)
-
-    def test_candidate_on_the_eave_is_not_a_roof_vertex_target(self):
-        eave_target = POINTS[0]
-        reference = Surface(
-            vertices=POINTS,
-            faces=((0, 1, 2), (0, 2, 3)),
-            face_slope_indices=(1, 2),
-        )
 
         result = find_adjacent_pitch_vertex_angle(
             POINTS,
             (20.0, 30.0, 30.0, 30.0),
             0,
             1,
-            lambda _points, _pitches: snapped_surface(eave_target),
-            lambda _points, _pitches, _excluded: reference,
+            build_surface,
+        )
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result.angle_degrees, TARGET_ANGLE, places=7)
+        self.assertEqual(result.target_vertex, TARGET)
+
+    def test_previous_snaps_to_nearest_lower_neighbour_vertex(self):
+        def build_surface(_points, pitches):
+            self.assertAlmostEqual(pitches[0], TARGET_ANGLE, places=7)
+            return snapped_surface()
+
+        result = find_adjacent_pitch_vertex_angle(
+            POINTS,
+            (55.0, 30.0, 30.0, 30.0),
+            0,
+            -1,
+            build_surface,
+        )
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result.angle_degrees, TARGET_ANGLE, places=7)
+
+    def test_candidate_requires_shared_vertex_in_final_production_build(self):
+        result = find_adjacent_pitch_vertex_angle(
+            POINTS,
+            (20.0, 30.0, 30.0, 30.0),
+            0,
+            1,
+            lambda _points, _pitches: neighbour_only_surface(),
         )
         self.assertIsNone(result)
 
     def test_no_vertex_in_requested_direction_is_a_noop(self):
-        result = self.run_snap(20.0, -1)
-        self.assertIsNone(result)
-
-    def test_invalid_surface_metadata_has_no_candidate(self):
-        malformed = SimpleNamespace(
-            vertices=POINTS + (TARGET,),
-            faces=((1, 2, 4), (2, 3, 4)),
-            face_slope_indices=(1,),
-        )
         result = find_adjacent_pitch_vertex_angle(
             POINTS,
-            (20.0, 30.0, 30.0, 30.0),
+            (60.0, 30.0, 30.0, 30.0),
             0,
             1,
             lambda _points, _pitches: snapped_surface(),
-            lambda _points, _pitches, _excluded: malformed,
         )
         self.assertIsNone(result)
+
+    def test_contour_with_only_two_other_slopes_has_no_interior_triple_vertex(self):
+        triangle = (
+            (0.0, 0.0, 0.0),
+            (4.0, 0.0, 0.0),
+            (2.0, 3.0, 0.0),
+        )
+        result = find_adjacent_pitch_vertex_angle(
+            triangle,
+            (20.0, 30.0, 30.0),
+            0,
+            1,
+            lambda _points, _pitches: snapped_surface(),
+        )
+        self.assertIsNone(result)
+
+    def test_failed_final_build_reports_the_real_build_error(self):
+        def fail_build(_points, _pitches):
+            raise ValueError("test roof build failure")
+
+        with self.assertRaisesRegex(RuntimeError, "test roof build failure"):
+            find_adjacent_pitch_vertex_angle(
+                POINTS,
+                (20.0, 30.0, 30.0, 30.0),
+                0,
+                1,
+                fail_build,
+            )
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
 """Geometric pitch snapping to vertices formed by neighbouring roof slopes.
 
-The reference roof is built with the selected source plane suppressed. Its
-multi-slope vertices are therefore fixed targets. For each target, solve the
-selected edge pitch analytically, then ask the production roof builder to
-confirm that the selected slope really shares that vertex.
+Candidate vertices are computed directly from the analytic support planes.
+This avoids trying to validate a deliberately incomplete "roof without one
+slope", which is not a closed surface and can legitimately contain open edges.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 import math
 from typing import Callable, Sequence
+
+from .geometry import PlaneZ, build_boundary_planes
 
 
 Point3 = tuple[float, float, float]
@@ -34,78 +36,219 @@ def _coordinate_span(points: Sequence[Sequence[float]]) -> float:
     )
 
 
-def _point_lies_on_segment_3d(
+def _edge_projection(
+    point: Sequence[float],
+    start: Sequence[float],
+    end: Sequence[float],
+) -> float | None:
+    dx = float(end[0]) - float(start[0])
+    dy = float(end[1]) - float(start[1])
+    length_sq = dx * dx + dy * dy
+    if length_sq <= 1.0e-20:
+        return None
+    return (
+        (float(point[0]) - float(start[0])) * dx
+        + (float(point[1]) - float(start[1])) * dy
+    ) / length_sq
+
+
+def _point_on_segment_xy(
     point: Sequence[float],
     start: Sequence[float],
     end: Sequence[float],
     tolerance: float,
 ) -> bool:
-    direction = tuple(float(end[i]) - float(start[i]) for i in range(3))
-    relative = tuple(float(point[i]) - float(start[i]) for i in range(3))
-    length_sq = sum(value * value for value in direction)
+    dx = float(end[0]) - float(start[0])
+    dy = float(end[1]) - float(start[1])
+    length_sq = dx * dx + dy * dy
     if length_sq <= tolerance * tolerance:
-        return math.dist(point, start) <= tolerance
-
-    parameter = sum(relative[i] * direction[i] for i in range(3)) / length_sq
-    parameter_tolerance = tolerance / math.sqrt(length_sq)
-    if parameter < -parameter_tolerance or parameter > 1.0 + parameter_tolerance:
+        return math.hypot(
+            float(point[0]) - float(start[0]),
+            float(point[1]) - float(start[1]),
+        ) <= tolerance
+    parameter = (
+        (float(point[0]) - float(start[0])) * dx
+        + (float(point[1]) - float(start[1])) * dy
+    ) / length_sq
+    if parameter < 0.0 or parameter > 1.0:
         return False
-
-    parameter = max(0.0, min(1.0, parameter))
-    closest = tuple(
-        float(start[i]) + parameter * direction[i] for i in range(3)
-    )
-    return math.dist(point, closest) <= tolerance
-
-
-def _surface_vertex_owners(surface) -> dict[int, set[int]]:
-    """Return the distinct source slopes whose faces use each mesh vertex."""
-    faces = getattr(surface, "faces", ())
-    face_sources = getattr(surface, "face_slope_indices", ())
-    if len(faces) != len(face_sources):
-        return {}
-
-    owners: dict[int, set[int]] = {}
-    for face, source_index in zip(faces, face_sources):
-        source_index = int(source_index)
-        if source_index < 0:
-            continue
-        for vertex_index in face:
-            owners.setdefault(int(vertex_index), set()).add(source_index)
-    return owners
+    closest_x = float(start[0]) + parameter * dx
+    closest_y = float(start[1]) + parameter * dy
+    return math.hypot(
+        float(point[0]) - closest_x,
+        float(point[1]) - closest_y,
+    ) <= tolerance
 
 
-def _reference_vertices(
-    surface,
-    points: Sequence[Sequence[float]],
-    selected_slope: int,
+def _strictly_inside_polygon(
+    point: Sequence[float],
+    polygon: Sequence[Sequence[float]],
     tolerance: float,
+) -> bool:
+    """Return True only for a point strictly inside the authored XY contour."""
+    inside = False
+    x, y = float(point[0]), float(point[1])
+    for index, start in enumerate(polygon):
+        end = polygon[(index + 1) % len(polygon)]
+        if _point_on_segment_xy((x, y), start, end, tolerance):
+            return False
+        x0, y0 = float(start[0]), float(start[1])
+        x1, y1 = float(end[0]), float(end[1])
+        if (y0 > y) != (y1 > y):
+            crossing_x = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
+            if x < crossing_x:
+                inside = not inside
+    return inside
+
+
+def _intersect_three_planes(
+    first: PlaneZ,
+    second: PlaneZ,
+    third: PlaneZ,
+) -> Point3 | None:
+    """Intersect three z=ax+by+c planes, rejecting parallel/ill-conditioned sets."""
+    a11 = first.a - second.a
+    a12 = first.b - second.b
+    rhs1 = second.c - first.c
+    a21 = first.a - third.a
+    a22 = first.b - third.b
+    rhs2 = third.c - first.c
+    determinant = a11 * a22 - a12 * a21
+    determinant_scale = max(
+        1.0,
+        abs(a11 * a22),
+        abs(a12 * a21),
+    )
+    if abs(determinant) <= 1.0e-12 * determinant_scale:
+        return None
+
+    x = (rhs1 * a22 - a12 * rhs2) / determinant
+    y = (a11 * rhs2 - rhs1 * a21) / determinant
+    heights = (
+        first.height(x, y),
+        second.height(x, y),
+        third.height(x, y),
+    )
+    z = sum(heights) / 3.0
+    if not all(math.isfinite(value) for value in (x, y, z)):
+        return None
+    if max(heights) - min(heights) > 1.0e-7 * max(1.0, abs(z)):
+        return None
+    return (x, y, z)
+
+
+def _neighbour_vertex_targets(
+    points: Sequence[Sequence[float]],
+    planes: Sequence[PlaneZ],
+    excluded_slope: int,
 ) -> list[Point3]:
-    """Collect internal vertices shared by at least two non-selected slopes."""
-    vertices = getattr(surface, "vertices", ())
-    owners = _surface_vertex_owners(surface)
-    if not owners or not vertices:
+    """Find internal lower-envelope vertices made by three other finite slopes.
+
+    Each participating plane must be active over its own finite source edge.
+    A candidate is discarded when another eligible non-excluded plane lies
+    below it. The selected slope is intentionally omitted from this test:
+    its current pitch must not hide the vertex to which it is supposed to snap.
+    """
+    count = len(points)
+    if count < 4 or len(planes) != count:
         return []
 
-    eave_segments = [
-        (points[index], points[(index + 1) % len(points)])
-        for index in range(len(points))
+    scale = _coordinate_span(points)
+    position_tolerance = max(1.0e-8, scale * 1.0e-8)
+    projection_margin = max(1.0e-9, scale * 2.0e-8)
+    height_tolerance = max(1.0e-8, scale * 1.0e-7)
+    eligible_indices = [
+        index for index in range(count) if index != excluded_slope
     ]
-    result: list[Point3] = []
-    for vertex_index, slope_owners in owners.items():
-        if selected_slope in slope_owners or len(slope_owners) < 2:
+    targets: list[Point3] = []
+    min_x = min(float(point[0]) for point in points)
+    max_x = max(float(point[0]) for point in points)
+    min_y = min(float(point[1]) for point in points)
+    max_y = max(float(point[1]) for point in points)
+
+    for triple in combinations(eligible_indices, 3):
+        first, second, third = triple
+        target = _intersect_three_planes(
+            planes[first], planes[second], planes[third]
+        )
+        if target is None:
             continue
-        if vertex_index < 0 or vertex_index >= len(vertices):
+        # Cheap finite-edge and bounding-box filters run before the
+        # contour point-in-polygon test. This keeps large (up to 256-edge)
+        # contours responsive while preserving the exact active-edge rules.
+        triple_is_active = True
+        for slope_index in triple:
+            projection = _edge_projection(
+                target,
+                points[slope_index],
+                points[(slope_index + 1) % count],
+            )
+            if (
+                projection is None
+                or projection <= projection_margin
+                or projection >= 1.0 - projection_margin
+            ):
+                triple_is_active = False
+                break
+        if not triple_is_active:
             continue
-        point = tuple(float(value) for value in vertices[vertex_index])
-        if any(
-            _point_lies_on_segment_3d(point, start, end, tolerance)
-            for start, end in eave_segments
+
+        # The selected slope must also reach this point over its own finite
+        # edge. Its height is deliberately not compared here.
+        selected_projection = _edge_projection(
+            target,
+            points[excluded_slope],
+            points[(excluded_slope + 1) % count],
+        )
+        if (
+            selected_projection is None
+            or selected_projection <= projection_margin
+            or selected_projection >= 1.0 - projection_margin
         ):
             continue
-        if not any(math.dist(point, existing) <= tolerance for existing in result):
-            result.append(point)
-    return result
+
+        if (
+            target[0] < min_x - position_tolerance
+            or target[0] > max_x + position_tolerance
+            or target[1] < min_y - position_tolerance
+            or target[1] > max_y + position_tolerance
+            or not _strictly_inside_polygon(target, points, position_tolerance)
+        ):
+            continue
+
+        # Keep only vertices of the lower envelope of the remaining slopes.
+        # Ineligible finite edges do not compete at this point.
+        hidden_by_neighbour = False
+        for slope_index in eligible_indices:
+            if slope_index in triple:
+                continue
+            projection = _edge_projection(
+                target,
+                points[slope_index],
+                points[(slope_index + 1) % count],
+            )
+            if (
+                projection is None
+                or projection <= projection_margin
+                or projection >= 1.0 - projection_margin
+            ):
+                continue
+            if planes[slope_index].height(target[0], target[1]) < (
+                target[2] - height_tolerance
+            ):
+                hidden_by_neighbour = True
+                break
+        if hidden_by_neighbour:
+            continue
+
+        if not any(
+            math.dist(target, existing) <= position_tolerance
+            for existing in targets
+        ):
+            targets.append(target)
+
+    targets.sort(key=lambda point: (point[0], point[1], point[2]))
+    return targets
 
 
 def _pitch_for_plane_through_vertex(
@@ -155,6 +298,23 @@ def _pitch_for_plane_through_vertex(
     return math.degrees(math.atan(total_gradient))
 
 
+def _surface_vertex_owners(surface) -> dict[int, set[int]]:
+    """Return the distinct source slopes whose faces use each mesh vertex."""
+    faces = getattr(surface, "faces", ())
+    face_sources = getattr(surface, "face_slope_indices", ())
+    if len(faces) != len(face_sources):
+        return {}
+
+    owners: dict[int, set[int]] = {}
+    for face, source_index in zip(faces, face_sources):
+        source_index = int(source_index)
+        if source_index < 0:
+            continue
+        for vertex_index in face:
+            owners.setdefault(int(vertex_index), set()).add(source_index)
+    return owners
+
+
 def _surface_shares_target_vertex(
     surface,
     selected_slope: int,
@@ -181,9 +341,6 @@ def find_adjacent_pitch_vertex_angle(
     build_surface: Callable[
         [Sequence[Sequence[float]], Sequence[float]], object
     ],
-    build_neighbour_surface: Callable[
-        [Sequence[Sequence[float]], Sequence[float], int], object
-    ],
     *,
     min_pitch: float = 1.0,
     max_pitch: float = 85.0,
@@ -192,15 +349,14 @@ def find_adjacent_pitch_vertex_angle(
 ) -> PitchSnapCandidate | None:
     """Find the nearest real neighbouring vertex in the requested angle direction.
 
-    The neighbour-surface builder must retain the original source slope indices
-    but replace the selected source plane with an inactive/high plane. This
-    gives fixed intersection vertices formed exclusively by the other slopes.
-    Candidate angles are solved from the plane equation, not sampled. A final
-    production build verifies that the selected and neighbouring slopes
-    actually share the target coordinate before the angle is returned.
+    Neighbour vertices are solved analytically from the other finite support
+    planes. No incomplete roof mesh is assembled or boundary-validated.
+    Candidate angles are solved from the selected plane equation. A final
+    production build verifies that selected and neighbouring slopes share the
+    same 3D vertex before the value is accepted.
     """
     count = len(points)
-    if count < 3 or len(pitches_degrees) != count:
+    if count < 4 or len(pitches_degrees) != count:
         return None
     if slope_index < 0 or slope_index >= count:
         return None
@@ -215,14 +371,8 @@ def find_adjacent_pitch_vertex_angle(
     direction = 1 if direction >= 0 else -1
     scale = _coordinate_span(points)
     position_tolerance = max(1.0e-7, scale * 1.0e-6)
-    eave_tolerance = max(1.0e-8, scale * 1.0e-8)
-
-    reference_surface = build_neighbour_surface(
-        points, pitches_degrees, slope_index
-    )
-    targets = _reference_vertices(
-        reference_surface, points, slope_index, eave_tolerance
-    )
+    planes = build_boundary_planes(points, pitches_degrees)
+    targets = _neighbour_vertex_targets(points, planes, slope_index)
     if not targets:
         return None
 
@@ -241,6 +391,7 @@ def find_adjacent_pitch_vertex_angle(
 
     candidates.sort(key=lambda item: abs(item[0] - current_angle))
     tested_angles: dict[float, object | None] = {}
+    last_build_error: Exception | None = None
     trial_count = 0
     for angle, target in candidates:
         angle_key = round(angle, 10)
@@ -251,8 +402,9 @@ def find_adjacent_pitch_vertex_angle(
             trial_pitches[slope_index] = angle
             try:
                 tested_angles[angle_key] = build_surface(points, trial_pitches)
-            except Exception:
+            except Exception as exc:
                 tested_angles[angle_key] = None
+                last_build_error = exc
             trial_count += 1
 
         trial_surface = tested_angles[angle_key]
@@ -266,10 +418,16 @@ def find_adjacent_pitch_vertex_angle(
                 target_vertex=tuple(float(value) for value in target),
             )
 
+    if last_build_error is not None:
+        message = str(getattr(last_build_error, "message", last_build_error))
+        raise RuntimeError(
+            "Не удалось проверить ближайшую вершину на полной крыше: " + message
+        ) from last_build_error
     return None
 
 
 __all__ = [
     "PitchSnapCandidate",
     "find_adjacent_pitch_vertex_angle",
+    "_neighbour_vertex_targets",
 ]

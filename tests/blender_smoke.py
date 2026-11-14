@@ -539,6 +539,71 @@ def main() -> None:
     )
 
 
+    # A pitch arrow must solve a real neighbouring-plane vertex. The
+    # reference point is computed without assembling an invalid roof with one
+    # source plane removed, then confirmed in the final production surface.
+    clear_scene()
+    snap_source = create_square_object("RoofForge_Smoke_Pitch_Vertex_Snap")
+    snap_settings = bpy.context.scene.roof_forge
+    snap_settings.initial_pitch = 20.0
+    snap_settings.eave_overhang_cm = 0.0
+    snap_settings.live_update = False
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "could not create the pitch-snap source roof",
+    )
+    for slope_index, item in enumerate(snap_settings.slope_settings):
+        item.pitch = 20.0 if slope_index == 0 else 30.0
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "could not create the asymmetric reference roof for pitch snapping",
+    )
+    expected_snap_angle = math.degrees(
+        math.atan(2.0 * math.tan(math.radians(30.0)))
+    )
+    ensure(
+        bpy.ops.roof_forge.pitch_intersection_step(
+            edge_index=0,
+            direction="NEXT",
+        ) == {"FINISHED"},
+        "pitch vertex-snap operator did not complete",
+    )
+    actual_snap_angle = float(snap_settings.slope_settings[0].pitch)
+    ensure(
+        abs(actual_snap_angle - expected_snap_angle) < 1.0e-3,
+        f"pitch snap found {actual_snap_angle:.6f}°, expected {expected_snap_angle:.6f}°",
+    )
+    ensure(
+        "общая вершина" in snap_settings.pitch_snap_status.lower(),
+        f"pitch snap did not report a verified shared vertex: {snap_settings.pitch_snap_status}",
+    )
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "roof did not rebuild after pitch vertex snapping",
+    )
+    snap_plan_data = json.loads(snap_settings.roof_plan_json)
+    snap_vertices, snap_faces, snap_slopes, _snap_planes = plan_core.normalise_roof_plan(
+        snap_plan_data
+    )
+    expected_vertex = (2.0, 1.0, 2.0 * math.tan(math.radians(30.0)))
+    target_vertex_index = min(
+        range(len(snap_vertices)),
+        key=lambda index: math.dist(snap_vertices[index], expected_vertex),
+    )
+    ensure(
+        math.dist(snap_vertices[target_vertex_index], expected_vertex) < 1.0e-4,
+        "rebuilt roof is missing the analytically targeted neighbouring vertex",
+    )
+    target_owners = {
+        int(slope_index)
+        for face, slope_index in zip(snap_faces, snap_slopes)
+        if target_vertex_index in face and int(slope_index) >= 0
+    }
+    ensure(
+        0 in target_owners and len(target_owners) >= 2,
+        f"target point is not shared by the selected and neighbouring slopes: {target_owners}",
+    )
+
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
     # Complex flat convex contours may use up to 256 boundary edges. The

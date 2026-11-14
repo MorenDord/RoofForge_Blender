@@ -101,12 +101,13 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
                     if icon_scale is None:
                         body.label(text="Widen the N-panel to view the plan", icon="INFO")
                     else:
-                        # Reserve vertical space only. GPU drawing is centered
-                        # against the active tab's content rectangle, excluding
-                        # Blender's category-tab rail at the left of the UI region.
+                        # Use a real square UI item as the GPU anchor. Blender's
+                        # own layout engine centers this item in the active tab
+                        # body; the draw handler uses the matching View2D-based
+                        # content center and slot size.
                         preview_row = body.row()
-                        preview_row.scale_y = icon_scale
-                        preview_row.label(text=" ")
+                        preview_row.alignment = "CENTER"
+                        preview_row.template_icon(icon_value=0, scale=icon_scale)
 
                     debug_row = body.row()
                     debug_row.enabled = icon_scale is not None
