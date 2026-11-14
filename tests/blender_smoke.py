@@ -604,6 +604,9 @@ def main() -> None:
         f"target point is not shared by the selected and neighbouring slopes: {target_owners}",
     )
 
+    # Restore shared scene defaults so later smoke fixtures remain isolated.
+    snap_settings.initial_pitch = 30.0
+
     # 64 is the enforced alpha limit, not merely a benchmark target.
     clear_scene()
     # Complex flat convex contours may use up to 256 boundary edges. The
