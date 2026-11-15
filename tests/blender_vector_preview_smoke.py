@@ -197,6 +197,7 @@ message = module._build_debug_message(
 )
 assert "ROOFFORGE PREVIEW DEBUG" in message
 assert "Region: 100x50 @ 1729,29" in message
+assert "Region alignment: RIGHT" in message
 assert "View2D error:" not in message
 assert "RoofForge tab content bounds X: 0.0..300.0px" in message
 assert "RoofForge category-tab rail edge: RIGHT" in message
