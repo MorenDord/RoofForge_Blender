@@ -361,6 +361,7 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
         "ROOFFORGE PREVIEW DEBUG",
         f"Blender: {blender_version}",
         f"Region: {int(region.width)}x{int(region.height)} @ {region_x},{region_y}",
+        f"Region alignment: {getattr(region, 'alignment', 'unavailable')}",
         f"GPU viewport local: {viewport_x},{viewport_y} {viewport_width}x{viewport_height}",
         f"UI scale: {float(ui_scale):.3f}; widget unit estimate: {float(layout['widget_unit']):.1f}",
         f"UI anchor: centered template_icon; scale={float(layout['icon_scale']):.3f}; estimated slot={slot_side:.1f}px",
