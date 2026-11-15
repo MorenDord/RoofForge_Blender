@@ -35,6 +35,9 @@ _WIDGET_UNIT_BASE = 20.0
 # Blender reserves a vertical category-tab rail on the left of the UI region.
 # Preview placement and sizing use the remaining active-tab content rectangle.
 _PANEL_CATEGORY_RAIL_UNITS = 1.0
+# In a VIEW_3D sidebar the category-tab rail is on the outer edge of the UI region.
+# RIGHT-aligned N-panels have tabs on the right; LEFT-aligned panels have tabs on the left.
+_PANEL_CATEGORY_RAIL_SIDE = "RIGHT"
 
 
 def _prepare_geometry(plan_data):
@@ -127,6 +130,14 @@ def preview_category_rail_width(widget_unit=20.0, *, region=None, compact=False)
     return max(0.0, float(widget_unit) * tab_units * zoom_x)
 
 
+def preview_category_rail_side(region=None):
+    """Return the edge occupied by category tabs for this sidebar region."""
+    alignment = str(getattr(region, "alignment", "") or "").upper()
+    if alignment in {"LEFT", "RIGHT"}:
+        return alignment
+    return _PANEL_CATEGORY_RAIL_SIDE
+
+
 def preview_icon_scale(region_width, *, widget_unit=20.0):
     """Return the historical template_icon scale, not its pixel dimension.
 
@@ -152,13 +163,15 @@ def _compute_canvas_layout(
     ui_scale=1.0,
     widget_unit=None,
     category_rail_width=None,
+    category_rail_side=None,
 ):
     """Fit the roof inside the active sidebar tab's content rectangle.
 
-    The UI region also contains Blender's vertical category-tab rail. The
-    drawable tab body begins to its right, so centering on region.width / 2
-    incorrectly shifts the plan toward the tabs. The blank UI row remains only
-    a vertical spacer; GPU coordinates are anchored to the active tab body.
+    The UI region also contains Blender's vertical category-tab rail. Its side
+    follows Region.alignment: on the outer edge of a right- or left-aligned
+    sidebar. Centering uses only the remaining active-tab content rectangle.
+    The blank UI row remains a vertical spacer; GPU coordinates match its UI
+    anchor within that same rectangle.
     """
     ui_scale = max(0.5, float(ui_scale))
     width = max(0.0, float(region_width))
@@ -169,7 +182,18 @@ def _compute_canvas_layout(
     if category_rail_width is None:
         category_rail_width = preview_category_rail_width(widget_unit)
     category_rail_width = min(max(0.0, float(category_rail_width)), width * 0.4)
-    panel_content_width = max(0.0, width - category_rail_width)
+    category_rail_side = str(
+        category_rail_side or _PANEL_CATEGORY_RAIL_SIDE
+    ).upper()
+    if category_rail_side not in {"LEFT", "RIGHT"}:
+        category_rail_side = _PANEL_CATEGORY_RAIL_SIDE
+    if category_rail_side == "RIGHT":
+        panel_content_left = 0.0
+        panel_content_right = width - category_rail_width
+    else:
+        panel_content_left = category_rail_width
+        panel_content_right = width
+    panel_content_width = max(0.0, panel_content_right - panel_content_left)
     icon_scale = preview_icon_scale(
         panel_content_width,
         widget_unit=widget_unit,
@@ -195,16 +219,15 @@ def _compute_canvas_layout(
     if scale <= 0.0:
         return None
 
-    # Exclude Blender's left category-tab rail. The right boundary is the
-    # active UI region edge; the left boundary is where this tab's contents start.
-    region_center_x = category_rail_width + panel_content_width * 0.5
+    # Exclude the category-tab rail on the actual outer edge of this sidebar.
+    region_center_x = panel_content_left + panel_content_width * 0.5
     slot_left = region_center_x - slot_side * 0.5
     slot_top = height - _PREVIEW_SLOT_TOP_UNITS * widget_unit
     slot_bottom = slot_top - slot_side
     if (
         slot_bottom < 8.0 * ui_scale
-        or slot_left < category_rail_width
-        or slot_left + slot_side > width
+        or slot_left < panel_content_left
+        or slot_left + slot_side > panel_content_right
     ):
         return None
 
@@ -238,10 +261,11 @@ def _compute_canvas_layout(
         "canvas_top": draw_bottom + draw_side,
         "target_center": target_center,
         "region_center_x": region_center_x,
-        "panel_content_left": category_rail_width,
-        "panel_content_right": width,
+        "panel_content_left": panel_content_left,
+        "panel_content_right": panel_content_right,
         "panel_content_width": panel_content_width,
         "category_rail_width": category_rail_width,
+        "category_rail_side": category_rail_side,
         "bbox_center": bbox_center,
         "margin": margin,
         "icon_scale": icon_scale,
@@ -344,6 +368,7 @@ def _build_debug_message(context, region, layout, viewport, ui_scale):
             "RoofForge tab content bounds X: "
             f"{float(layout['panel_content_left']):.1f}..{float(layout['panel_content_right']):.1f}px"
         ),
+        f"RoofForge category-tab rail edge: {layout['category_rail_side']}",
         f"RoofForge tab content midpoint X: {float(layout['region_center_x']):.1f}px",
         f"GPU canvas midpoint X: {slot_left + slot_side * 0.5:.1f}px",
         (
@@ -536,6 +561,7 @@ def _draw_vector_preview():
             region=region,
             compact=compact_tabs,
         )
+        category_rail_side = preview_category_rail_side(region)
         layout = _compute_canvas_layout(
             region.width,
             region.height,
@@ -543,6 +569,7 @@ def _draw_vector_preview():
             ui_scale=ui_scale,
             widget_unit=widget_unit,
             category_rail_width=category_rail_width,
+            category_rail_side=category_rail_side,
         )
         if layout is None:
             return
@@ -710,4 +737,5 @@ __all__ = [
     "estimate_widget_unit",
     "preview_icon_scale",
     "preview_category_rail_width",
+    "preview_category_rail_side",
 ]
