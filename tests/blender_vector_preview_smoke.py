@@ -12,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 22)
+assert extension.bl_info["version"] == (0, 3, 23)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -98,8 +98,11 @@ assert abs(center_a[0] - 5.0) < 1.0e-7
 assert abs(center_b[0] - 5.0) < 1.0e-7
 assert abs(center_a[1] - center_b[1]) < 1.0e-7
 
-# The UI row is only a vertical spacer. GPU coordinates are anchored to the
-# active tab content, excluding Blender's category gutter on the left.
+# The category-tab rail sits on the outer edge indicated by Region.alignment.
+# The common right-aligned N-panel therefore uses [0, width - rail] as content.
+assert module.preview_category_rail_side(SimpleNamespace(alignment="RIGHT")) == "RIGHT"
+assert module.preview_category_rail_side(SimpleNamespace(alignment="LEFT")) == "LEFT"
+assert module.preview_category_rail_side(SimpleNamespace(alignment="NONE")) == "RIGHT"
 assert module.estimate_widget_unit(1.333) == 27
 assert module.preview_icon_scale(72, widget_unit=20.0) is None
 layout = module._compute_canvas_layout(
@@ -112,12 +115,21 @@ assert layout is not None and wider_layout is not None
 assert abs(module.preview_category_rail_width(20.0) - 20.0) < 1.0e-7
 assert abs(module.preview_category_rail_width(20.0, compact=True) - 28.0) < 1.0e-7
 assert abs(layout["category_rail_width"] - 20.0) < 1.0e-7
-assert abs(layout["panel_content_left"] - 20.0) < 1.0e-7
-assert abs(layout["panel_content_right"] - 320.0) < 1.0e-7
+assert abs(layout["panel_content_left"] - 0.0) < 1.0e-7
+assert abs(layout["panel_content_right"] - 300.0) < 1.0e-7
 assert abs(layout["panel_content_width"] - 300.0) < 1.0e-7
+assert layout["category_rail_side"] == "RIGHT"
+left_layout = module._compute_canvas_layout(
+    320, 900, (-2.0, 1.0, 8.0, 6.0), ui_scale=1.0, widget_unit=20.0,
+    category_rail_side="LEFT",
+)
+assert left_layout is not None
+assert abs(left_layout["panel_content_left"] - 20.0) < 1.0e-7
+assert abs(left_layout["panel_content_right"] - 320.0) < 1.0e-7
+assert abs(left_layout["region_center_x"] - 170.0) < 1.0e-7
 assert abs(layout["slot_side"] - 172.5) < 1.0e-7
 assert abs(layout["icon_scale"] - (276.0 / 32.0)) < 1.0e-7
-assert abs(layout["slot_left"] - 83.75) < 1.0e-7
+assert abs(layout["slot_left"] - 63.75) < 1.0e-7
 assert abs(layout["slot_top"] - 820.0) < 1.0e-7
 assert abs(layout["slot_bottom"] - 647.5) < 1.0e-7
 assert abs(layout["margin"] - layout["draw_side"] * 0.075) < 1.0e-7
@@ -125,19 +137,19 @@ center_x = layout["origin_x"] + (3.0 - (-2.0)) * layout["scale"]
 center_y = layout["origin_y"] + (3.5 - 1.0) * layout["scale"]
 assert abs(center_x - layout["target_center"][0]) < 1.0e-7
 assert abs(center_y - layout["target_center"][1]) < 1.0e-7
-assert abs(layout["target_center"][0] - 170.0) < 1.0e-7
-assert abs(layout["region_center_x"] - 170.0) < 1.0e-7
+assert abs(layout["target_center"][0] - 150.0) < 1.0e-7
+assert abs(layout["region_center_x"] - 150.0) < 1.0e-7
 assert abs(layout["slot_left"] + layout["slot_side"] * 0.5 - layout["region_center_x"]) < 1.0e-7
 assert abs(layout["target_center"][1] - 733.75) < 1.0e-7
-assert layout["scissor"] == (84, 648, 172, 172)
+assert layout["scissor"] == (64, 648, 172, 172)
 assert module._translate_scissor(
     layout["scissor"], (100, 200, 320, 900)
 ) == (184, 848, 172, 172)
 assert abs(layout["draw_side"] - 156.5) < 1.0e-7
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]
-assert abs(wider_layout["target_center"][0] - 220.0) < 1.0e-7
-assert abs(wider_layout["region_center_x"] - 220.0) < 1.0e-7
+assert abs(wider_layout["target_center"][0] - 200.0) < 1.0e-7
+assert abs(wider_layout["region_center_x"] - 200.0) < 1.0e-7
 assert abs(wider_layout["slot_left"] + wider_layout["slot_side"] * 0.5 - wider_layout["region_center_x"]) < 1.0e-7
 assert abs(wider_layout["target_center"][1] - 702.5) < 1.0e-7
 
@@ -148,6 +160,7 @@ fake_view2d = type("View2D", (), {
 fake_region = type("Region", (), {
     "width": 100,
     "height": 50,
+    "alignment": "RIGHT",
     "x": 1729,
     "y": 29,
     "view2d": fake_view2d,
@@ -185,9 +198,10 @@ message = module._build_debug_message(
 assert "ROOFFORGE PREVIEW DEBUG" in message
 assert "Region: 100x50 @ 1729,29" in message
 assert "View2D error:" not in message
-assert "RoofForge tab content bounds X: 20.0..320.0px" in message
-assert "RoofForge tab content midpoint X: 170.0px" in message
-assert "GPU canvas midpoint X: 170.0px" in message
+assert "RoofForge tab content bounds X: 0.0..300.0px" in message
+assert "RoofForge category-tab rail edge: RIGHT" in message
+assert "RoofForge tab content midpoint X: 150.0px" in message
+assert "GPU canvas midpoint X: 150.0px" in message
 assert "View2D roundtrip pixels TR: 99.000,49.000" in message
 module._PREVIEW_DEBUG_MESSAGES[4242] = message
 assert module.get_preview_debug_message(fake_region) == message
