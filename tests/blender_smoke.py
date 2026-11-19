@@ -18,6 +18,10 @@ import bmesh
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
+geometry_module = importlib.import_module(f"{extension.__name__}.core.geometry")
+validation_module = importlib.import_module(f"{extension.__name__}.core.validation")
+signed_area = geometry_module.signed_area
+validate_closed_mesh = validation_module.validate_closed_mesh
 
 
 def ensure(condition: bool, message: str) -> None:
