@@ -12,7 +12,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
 extension = importlib.import_module(ROOT.name)
-assert extension.bl_info["version"] == (0, 3, 23)
+assert extension.bl_info["version"] == (0, 4, 0)
 extension.register()
 
 settings = bpy.context.scene.roof_forge
@@ -144,7 +144,7 @@ assert abs(layout["target_center"][1] - 733.75) < 1.0e-7
 assert layout["scissor"] == (64, 648, 172, 172)
 assert module._translate_scissor(
     layout["scissor"], (100, 200, 320, 900)
-) == (184, 848, 172, 172)
+) == (164, 848, 172, 172)
 assert abs(layout["draw_side"] - 156.5) < 1.0e-7
 assert wider_layout["slot_side"] > layout["slot_side"]
 assert wider_layout["scale"] > layout["scale"]

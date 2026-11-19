@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.3.23.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.4.0.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -128,3 +128,11 @@ The 0.3.10 exact-coplanar pass could leave narrow seams when independently solve
 ### Mixed-height concave contours (0.3.12)
 
 The 3D support-plane arrangement is still attempted first. If the exact planar arrangement fails its internal-edge / perimeter continuity check, RoofForge retries the mixed-height concave contour with the continuous finite-segment field already used as a geometry prototype. Each source edge uses its authored plane while the perpendicular foot lies on that finite edge; near endpoints, a radial transition function makes the field continuous. Those transition zones are adaptively triangulated to a height error of 0.1% of the mesh span (maximum depth 4), while edge-interior patches remain exact planar facets. The shell and boundary validators still run on the fallback result. This trades exact planar facets near reflex vertices for a valid continuous surface; it does not enable positive overhang on mixed-height concave contours.
+
+
+## Roof details in 0.4.0
+
+- **Ridges and valleys:** the add-on analyses actual shared edges of the generated roof top surface. Coplanar continuations are ignored; convex and concave dihedral breaks are classified separately. Each enabled type is built as its own roof-following profile mesh with independent width, rise and signed end offset.
+- **Standing seams:** optional folded ribs are generated on each roof facet. Panel spacing is measured on the sloped surface, ridge-facing ends tuck under ridge covers, fold height is limited by the ridge rise, and the two fold shoulders are marked as Blender mesh seams.
+- All details are derived from the existing roof mesh and do not modify the roof shell or rerun the roof solver. Detail settings participate in Live Update; **Rebuild roof details** also works when Live Update is disabled.
+- Ridge, valley and standing-seam meshes are separate helper objects linked to the roof transform.

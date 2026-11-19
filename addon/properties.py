@@ -131,3 +131,58 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         default="",
         options={"HIDDEN"},
     )
+
+    # Optional roof details, configured in scene units and converted through scale_length.
+    show_ridges: bpy.props.BoolProperty(
+        name="Create ridge profiles", description="Build separate raised profile meshes along convex roof joints",
+        default=True, update=_settings_changed,
+    )
+    ridge_width_cm: bpy.props.FloatProperty(
+        name="Ridge width (cm)", default=24.0, min=0.1, max=500.0,
+        precision=2, update=_settings_changed,
+    )
+    ridge_extrusion_cm: bpy.props.FloatProperty(
+        name="Ridge rise (cm)", default=2.0, min=0.01, max=100.0,
+        precision=2, update=_settings_changed,
+    )
+    ridge_end_offset_cm: bpy.props.FloatProperty(
+        name="Ridge end offset (cm)", description="Positive extends beyond the roof boundary; negative retracts inward",
+        default=0.0, min=-500.0, max=500.0, precision=2, update=_settings_changed,
+    )
+    show_valleys: bpy.props.BoolProperty(
+        name="Create valley profiles", description="Build separate raised profile meshes along concave roof joints",
+        default=True, update=_settings_changed,
+    )
+    valley_width_cm: bpy.props.FloatProperty(
+        name="Valley width (cm)", default=24.0, min=0.1, max=500.0,
+        precision=2, update=_settings_changed,
+    )
+    valley_extrusion_cm: bpy.props.FloatProperty(
+        name="Valley rise (cm)", default=1.0, min=0.01, max=100.0,
+        precision=2, update=_settings_changed,
+    )
+    valley_end_offset_cm: bpy.props.FloatProperty(
+        name="Valley end offset (cm)", description="Positive extends beyond the roof boundary; negative retracts inward",
+        default=0.0, min=-500.0, max=500.0, precision=2, update=_settings_changed,
+    )
+    show_standing_seams: bpy.props.BoolProperty(
+        name="Create standing seams", description="Generate light folded seam ribs across each roof facet",
+        default=False, update=_settings_changed,
+    )
+    standing_panel_width_cm: bpy.props.FloatProperty(
+        name="Panel width (cm)", default=60.0, min=20.0, max=500.0,
+        precision=1, update=_settings_changed,
+    )
+    standing_seam_height_cm: bpy.props.FloatProperty(
+        name="Fold height (cm)", default=3.0, min=0.1, max=50.0,
+        precision=2, update=_settings_changed,
+    )
+    standing_seam_width_cm: bpy.props.FloatProperty(
+        name="Fold base width (cm)", default=1.4, min=0.1, max=10.0,
+        precision=2, update=_settings_changed,
+    )
+    standing_end_offset_cm: bpy.props.FloatProperty(
+        name="Seam end offset (cm)", description="Positive extends beyond the roof boundary; negative retracts inward",
+        default=0.0, min=-500.0, max=500.0, precision=2, update=_settings_changed,
+    )
+

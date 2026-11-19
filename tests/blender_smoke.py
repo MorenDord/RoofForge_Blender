@@ -1090,6 +1090,82 @@ def main() -> None:
         "over-wide concave offset did not preserve its diagnostic in panel status",
     )
 
+    # Verify 0.4.0 roof details on both convex and concave shared joints.
+    from RoofForge_Blender.addon.roof_details import rebuild_roof_details
+
+    detail_settings = bpy.context.scene.roof_forge
+    detail_settings.live_update = False
+    detail_settings.show_ridges = True
+    detail_settings.show_valleys = True
+    detail_settings.show_standing_seams = True
+    detail_settings.ridge_width_cm = 12.0
+    detail_settings.ridge_extrusion_cm = 2.0
+    detail_settings.valley_width_cm = 12.0
+    detail_settings.valley_extrusion_cm = 2.0
+    detail_settings.standing_panel_width_cm = 60.0
+    detail_settings.standing_seam_height_cm = 3.0
+    detail_settings.standing_seam_width_cm = 1.4
+
+    def make_two_facet_roof(name, centre_z):
+        points = [
+            (0.0, 0.0, 0.0), (2.0, 0.0, centre_z), (4.0, 0.0, 0.0),
+            (0.0, 4.0, 0.0), (2.0, 4.0, centre_z), (4.0, 4.0, 0.0),
+        ]
+        mesh = bpy.data.meshes.new(name + "_Mesh")
+        mesh.from_pydata(points, [], [(0, 1, 4, 3), (1, 2, 5, 4)])
+        mesh.update()
+        component = mesh.attributes.new(
+            name="roof_forge_component", type="INT", domain="FACE"
+        )
+        component.data.foreach_set("value", [0, 0])
+        slope = mesh.attributes.new(
+            name="roof_forge_slope_index", type="INT", domain="FACE"
+        )
+        slope.data.foreach_set("value", [0, 1])
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.collection.objects.link(obj)
+        obj["roof_forge_generated"] = True
+        return obj
+
+    ridge_test_roof = make_two_facet_roof("RoofForge_Detail_Ridge_Test", 1.0)
+    ridge_result = rebuild_roof_details(
+        ridge_test_roof, detail_settings, bpy.context.scene
+    )
+    ensure(ridge_result["ridge_edges"] == 1, "convex joint was not classified as a ridge")
+    ensure(ridge_result["valley_edges"] == 0, "ridge fixture was incorrectly classified as a valley")
+    ridge_helper_name = ridge_test_roof.get("roof_forge_ridges_object", "")
+    ridge_helper = bpy.data.objects.get(ridge_helper_name) if ridge_helper_name else None
+    ensure(ridge_helper is not None and len(ridge_helper.data.polygons) > 0,
+           "ridge profile helper mesh was not created")
+    standing_helper_name = ridge_test_roof.get("roof_forge_standing_seams_object", "")
+    standing_helper = bpy.data.objects.get(standing_helper_name) if standing_helper_name else None
+    ensure(standing_helper is not None and int(ridge_test_roof.get("roof_forge_standing_segment_count", 0)) > 0,
+           "standing-seam ribs were not generated")
+    ensure(any(
+        constraint.type == "COPY_TRANSFORMS"
+        and constraint.name == "RoofForge Follow Roof"
+        for constraint in ridge_helper.constraints
+    ), "ridge helper is not linked to the roof transform")
+
+    valley_test_roof = make_two_facet_roof("RoofForge_Detail_Valley_Test", -1.0)
+    valley_result = rebuild_roof_details(
+        valley_test_roof, detail_settings, bpy.context.scene
+    )
+    ensure(valley_result["valley_edges"] == 1, "concave joint was not classified as a valley")
+    ensure(valley_result["ridge_edges"] == 0, "valley fixture was incorrectly classified as a ridge")
+    valley_helper_name = valley_test_roof.get("roof_forge_valleys_object", "")
+    valley_helper = bpy.data.objects.get(valley_helper_name) if valley_helper_name else None
+    ensure(valley_helper is not None and len(valley_helper.data.polygons) > 0,
+           "valley profile helper mesh was not created")
+
+    detail_settings.show_standing_seams = False
+    rebuild_roof_details(ridge_test_roof, detail_settings, bpy.context.scene)
+    ensure(
+        not ridge_test_roof.get("roof_forge_standing_seams_object", ""),
+        "disabling standing seams did not remove the helper object",
+    )
+    clear_scene()
+
     extension.unregister()
     extension.unregister()  # Unregistration must be safe to call twice.
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")

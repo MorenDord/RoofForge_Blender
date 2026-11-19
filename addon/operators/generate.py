@@ -7,6 +7,7 @@ import json
 from ..adapters.mesh_io import read_object_boundary
 from ...core.geometry import GeometryInputError
 from ...core.roof_plan import surface_plan_data
+from ..roof_details import rebuild_roof_details
 from ..roof_build import (
     apply_shell_metadata,
     build_roof_payload,
@@ -198,8 +199,21 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
             settings.roof_plan_json = json.dumps(
                 surface_plan_data(surface), separators=(",", ":")
             )
-            settings.last_status = "RoofForge roof created/updated"
             new_mesh = None
+            try:
+                detail_result = rebuild_roof_details(roof_object, settings, context.scene)
+                if detail_result["errors"]:
+                    settings.last_status = (
+                        "RoofForge roof created/updated; details need attention: "
+                        + "; ".join(detail_result["errors"])
+                    )
+                else:
+                    settings.last_status = "RoofForge roof created/updated"
+            except Exception as detail_exc:
+                settings.last_status = (
+                    "RoofForge roof created/updated; detail generation failed: "
+                    + str(detail_exc)
+                )
 
         except Exception as exc:
             if created_object and roof_object is not None:

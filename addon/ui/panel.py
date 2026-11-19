@@ -167,6 +167,53 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         layout.separator(factor=0.5)
         _draw_common_settings(layout, settings)
 
+        details_header, details_body = layout.panel(
+            "roof_forge_details",
+            default_closed=True,
+        )
+        details_header.label(text="Ridges, valleys & standing seams")
+        if details_body is not None:
+            ridge_box = details_body.box()
+            ridge_box.prop(settings, "show_ridges", text="Create ridges")
+            if settings.show_ridges:
+                ridge_box.prop(settings, "ridge_width_cm")
+                ridge_box.prop(settings, "ridge_extrusion_cm")
+                ridge_box.prop(settings, "ridge_end_offset_cm")
+            valley_box = details_body.box()
+            valley_box.prop(settings, "show_valleys", text="Create valleys")
+            if settings.show_valleys:
+                valley_box.prop(settings, "valley_width_cm")
+                valley_box.prop(settings, "valley_extrusion_cm")
+                valley_box.prop(settings, "valley_end_offset_cm")
+            seams_box = details_body.box()
+            seams_box.prop(settings, "show_standing_seams", text="Create standing seams")
+            if settings.show_standing_seams:
+                seams_box.prop(settings, "standing_panel_width_cm")
+                seams_box.prop(settings, "standing_seam_height_cm")
+                seams_box.prop(settings, "standing_seam_width_cm")
+                seams_box.prop(settings, "standing_end_offset_cm")
+                seams_box.label(text="Seam height is limited by the ridge rise.", icon="INFO")
+            update_row = details_body.row()
+            update_row.enabled = settings.generated_object is not None
+            update_row.operator(
+                "roof_forge.rebuild_details", text="Rebuild roof details", icon="FILE_REFRESH"
+            )
+            if settings.generated_object is not None:
+                detail_obj = settings.generated_object
+                details_body.label(
+                    text=f"Ridge joints: {int(detail_obj.get('roof_forge_ridge_edge_count', 0))} | Valley joints: {int(detail_obj.get('roof_forge_valley_edge_count', 0))}",
+                    icon="INFO",
+                )
+                details_body.label(
+                    text=f"Standing-seam segments: {int(detail_obj.get('roof_forge_standing_segment_count', 0))}",
+                    icon="INFO",
+                )
+                detail_error = str(detail_obj.get("roof_forge_details_error", ""))
+                if detail_error:
+                    details_body.alert = True
+                    details_body.label(text=detail_error[:140], icon="ERROR")
+
+
         native_kernel_count = sum((
             native_bridge.NATIVE_BACKEND_AVAILABLE,
             native_bridge.NATIVE_WAVEFRONT_EVENTS_AVAILABLE,

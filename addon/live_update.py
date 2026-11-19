@@ -6,6 +6,7 @@ import json
 
 from ..core.roof_plan import surface_plan_data
 from .adapters.mesh_io import read_object_boundary
+from .roof_details import rebuild_roof_details
 from .roof_build import (
     apply_shell_metadata,
     create_roof_mesh_data,
@@ -143,7 +144,20 @@ def _run_pending_update():
         settings.roof_plan_json = json.dumps(
             surface_plan_data(surface), separators=(",", ":")
         )
-        settings.last_status = "RoofForge live update completed"
+        try:
+            detail_result = rebuild_roof_details(roof, settings, scene)
+            if detail_result["errors"]:
+                settings.last_status = (
+                    "RoofForge live update completed; details need attention: "
+                    + "; ".join(detail_result["errors"])
+                )
+            else:
+                settings.last_status = "RoofForge live update completed"
+        except Exception as detail_exc:
+            settings.last_status = (
+                "RoofForge live update completed; detail generation failed: "
+                + str(detail_exc)
+            )
     except Exception as exc:
         if new_mesh is not None and new_mesh.users == 0:
             bpy.data.meshes.remove(new_mesh)
