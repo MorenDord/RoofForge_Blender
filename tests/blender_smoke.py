@@ -1199,6 +1199,10 @@ def main() -> None:
         tuple(float(c) for c in vertex.co) for vertex in edit_roof.data.vertices
     )
     bpy.ops.object.mode_set(mode="EDIT")
+    ensure(
+        edit_source.mode == "EDIT",
+        f"Edit-Mode smoke source did not enter Edit Mode (mode={edit_source.mode})",
+    )
     edit_bm = bmesh.from_edit_mesh(edit_source.data)
     moved_vertex = min(
         edit_bm.verts,
@@ -1206,14 +1210,26 @@ def main() -> None:
     )
     moved_vertex.co.x += 0.25
     bmesh.update_edit_mesh(edit_source.data, loop_triangles=False, destructive=True)
+    from RoofForge_Blender.addon.adapters.mesh_io import read_object_boundary
+    moved_contour = read_object_boundary(edit_source)
+    ensure(
+        live_update._contour_signature(moved_contour)
+        != live_update._EDIT_MODE_WATCH_STATES[bpy.context.scene.name]["signature"],
+        "Edit-Mode BMesh change was not visible to read_object_boundary",
+    )
     live_update._edit_mode_monitor(now=edit_time + 1.0)
+    pending_state = live_update._EDIT_MODE_WATCH_STATES[bpy.context.scene.name]
+    ensure(
+        pending_state["pending_since"] is not None,
+        f"Edit-Mode watcher did not queue the changed contour (mode={edit_source.mode})",
+    )
     live_update._edit_mode_monitor(now=edit_time + 1.3)
     edit_roof_after_move = tuple(
         tuple(float(c) for c in vertex.co) for vertex in edit_roof.data.vertices
     )
     ensure(
         edit_roof_after_move != edit_roof_before,
-        "Edit-Mode vertex movement did not rebuild the roof",
+        f"Edit-Mode vertex movement did not rebuild the roof: {edit_settings.last_status}",
     )
     ensure(
         edit_roof.get("roof_forge_source_edge_count") == 4,
