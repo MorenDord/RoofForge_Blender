@@ -40,12 +40,18 @@ class ROOFFORGE_PT_panel(bpy.types.Panel):
         )
 
         status = str(settings.last_status or "")
-        if status and (
-            "не выполнен" in status.lower()
-            or "ошиб" in status.lower()
-            or "не поддерживается" in status.lower()
-        ):
-            layout.label(text=status, icon="ERROR")
+        normal_status = (
+            status in {
+                "RoofForge roof created/updated",
+                "RoofForge live update completed",
+            }
+            or status.startswith("Загружено скатов:")
+            or status.startswith("Контур изменён:")
+        )
+        if status and not normal_status:
+            status_row = layout.row()
+            status_row.alert = True
+            status_row.label(text=status[:180], icon="ERROR")
 
         # The plan is always shown when a roof exists. There is no Show Preview
         # switch and no collapsible child panel that can accidentally hide it.
