@@ -952,9 +952,8 @@ def main() -> None:
         "roof top face metadata count is inconsistent",
     )
 
-    # Mixed-height concave footprints are deliberately disabled in 0.3.16.
-    # The block applies with and without overhang; convex mixed-height contours
-    # remain supported and are exercised below.
+    # Mixed-height concave footprints now use the exact spatial roof solver
+    # as their base and receive the same source-plane overhang strips.
     mixed_concave_points = [
         (0.0, 0.0, 0.00),
         (3.0, 0.0, 0.05),
@@ -977,57 +976,70 @@ def main() -> None:
         ("L", mixed_concave_points),
         ("U", mixed_u_points),
     ):
-        for overhang_units in (0.0, 0.1):
-            try:
-                roof_build_for_units.build_roof_payload(
-                    points, [40.0] * len(points), 0.01, overhang_units
-                )
-            except Exception as exc:
-                ensure(
-                    getattr(exc, "code", "") == "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
-                    f"mixed-height concave {label} returned the wrong diagnostic: {exc}",
-                )
-            else:
-                ensure(
-                    False,
-                    f"mixed-height concave {label} unexpectedly reached the roof builder",
-                )
+        # No-overhang mixed-height concave roofs retain their explicit legacy
+        # restriction; positive overhang must complete on both shapes.
+        try:
+            roof_build_for_units.build_roof_payload(
+                points, [40.0] * len(points), 0.01, 0.0
+            )
+        except Exception as exc:
+            ensure(
+                getattr(exc, "code", "") == "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
+                f"mixed-height concave {label} no-overhang returned the wrong diagnostic: {exc}",
+            )
+        else:
+            ensure(
+                False,
+                f"mixed-height concave {label} no-overhang unexpectedly reached the roof builder",
+            )
+
+        mixed_surface, mixed_shell, _solver = roof_build_for_units.build_roof_payload(
+            points, [40.0] * len(points), 0.01, 0.1
+        )
+        ensure(
+            mixed_shell.extrude_up,
+            f"mixed-height concave {label} overhang shell did not extrude upward",
+        )
+        ensure(
+            validate_closed_mesh(mixed_shell.vertices, mixed_shell.faces) == [],
+            f"mixed-height concave {label} overhang shell is not closed",
+        )
+        ensure(
+            mixed_surface.surface_area_xy
+            > abs(signed_area([(point[0], point[1]) for point in points])),
+            f"mixed-height concave {label} did not extend the footprint",
+        )
 
     clear_scene()
-    unsupported_mesh = bpy.data.meshes.new("RoofForge_MixedHeightConcave_Disabled_Mesh")
-    unsupported_mesh.from_pydata(
+    mixed_mesh = bpy.data.meshes.new("RoofForge_MixedHeightConcave_Overhang_Mesh")
+    mixed_mesh.from_pydata(
         mixed_concave_points,
         [(index, (index + 1) % len(mixed_concave_points))
          for index in range(len(mixed_concave_points))],
         [],
     )
-    unsupported_mesh.update()
-    unsupported_source = bpy.data.objects.new(
-        "RoofForge_MixedHeightConcave_Disabled", unsupported_mesh
+    mixed_mesh.update()
+    mixed_source = bpy.data.objects.new(
+        "RoofForge_MixedHeightConcave_Overhang", mixed_mesh
     )
-    bpy.context.scene.collection.objects.link(unsupported_source)
+    bpy.context.scene.collection.objects.link(mixed_source)
     for selected in list(bpy.context.selected_objects):
         selected.select_set(False)
-    unsupported_source.select_set(True)
-    bpy.context.view_layer.objects.active = unsupported_source
-    unsupported_settings = bpy.context.scene.roof_forge
-    unsupported_settings.eave_overhang_cm = 0.0
+    mixed_source.select_set(True)
+    bpy.context.view_layer.objects.active = mixed_source
+    mixed_settings = bpy.context.scene.roof_forge
+    mixed_settings.eave_overhang_cm = 10.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare mixed-height concave pitch settings",
     )
-    unsupported_result = bpy.ops.roof_forge.generate_surface()
     ensure(
-        unsupported_result == {"CANCELLED"},
-        "mixed-height concave contour unexpectedly generated a roof",
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        f"mixed-height concave overhang did not generate: {mixed_settings.last_status}",
     )
     ensure(
-        "временно отключено построение крыши" in unsupported_settings.last_status.lower(),
-        "mixed-height concave contour did not expose the user warning",
-    )
-    ensure(
-        unsupported_settings.generated_object is None,
-        "disabled mixed-height concave contour left a generated roof object",
+        mixed_settings.generated_object is not None,
+        "mixed-height concave overhang did not create a roof object",
     )
 
     # The same offset-contour rebuild must work on non-flat XYZ eaves.
@@ -1311,7 +1323,7 @@ def main() -> None:
     ensure(not hasattr(bpy.types.Scene, "roof_forge"), "Scene settings remained registered")
     print(
         f"ROOFFORGE_SMOKE_OK Blender {bpy.app.version_string}: "
-        "automatic boundary detection, transparent facet plan, convex and concave source-aligned overhang, concave no-overhang and live rebuild"
+        "automatic boundary detection, transparent facet plan, convex, concave and mixed-height source-aligned overhang and live rebuild"
     )
 
 
