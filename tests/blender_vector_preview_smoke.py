@@ -52,7 +52,7 @@ draw_code = panel_module.ROOFFORGE_PT_panel.draw.__code__
 assert "box" in draw_code.co_names
 assert "template_icon" in draw_code.co_names
 assert "set_preview_slot_visible" in draw_code.co_names
-assert "layout.panel" not in draw_code.co_names
+assert "panel" not in draw_code.co_names
 assert "plan_show_vector" not in draw_code.co_consts
 assert "plan_debug_bounds" not in draw_code.co_consts
 assert "roof_forge.copy_preview_debug" not in draw_code.co_consts
