@@ -316,6 +316,17 @@ class RoofOverhangTests(unittest.TestCase):
             abs(signed_area([(p[0], p[1]) for p in clockwise])),
         )
 
+        surface = build_source_anchored_overhang_surface(
+            clockwise, [35.0] * len(clockwise), 0.2
+        )
+        shell = build_roof_shell(surface, 0.01, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+        self.assertAlmostEqual(
+            surface.surface_area_xy,
+            abs(signed_area(surface.boundary_xy)),
+            delta=1.0e-7,
+        )
+
     def test_zero_distance_returns_same_contour(self):
         self.assertEqual(offset_contour_outward(MIXED_Z_RECTANGLE, 0.0), tuple(MIXED_Z_RECTANGLE))
 
