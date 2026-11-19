@@ -11,6 +11,11 @@ def _pitch_changed(self, context):
     settings = getattr(scene, "roof_forge", None)
     if settings is not None:
         settings.pitch_snap_status = ""
+        try:
+            if scene.get("_roofforge_syncing_slopes", False):
+                return
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
     from .live_update import schedule_live_update
     schedule_live_update(scene)
 

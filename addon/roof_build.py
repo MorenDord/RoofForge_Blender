@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import json
 from math import cos, isfinite, radians
 
 import bpy
@@ -15,6 +16,7 @@ from ..core.overhang import (
 )
 from ..core.shell import build_roof_shell
 from ..core.wavefront import build_wavefront_roof_surface, is_flat_eave_contour
+from ..core.contour_mapping import remap_contour_edge_values
 
 
 def pitch_values(settings, edge_count: int) -> list[float]:
@@ -324,37 +326,99 @@ def create_roof_mesh_data(name: str, surface, shell):
         raise
 
 
-def sync_slope_settings(settings, source, edge_count: int) -> bool:
-    """Initialize per-edge pitches when the source object / contour changes.
+def sync_slope_settings(settings, source, edge_count: int, points=None) -> bool:
+    """Keep one pitch per live contour edge, remapping values after topology edits.
 
-    Existing values are preserved while the source object and edge count stay
-    unchanged. Topology edits that change the number of edges require an
-    explicit refresh, preventing accidental remapping of authored pitches.
+    Split edges inherit their previous edge pitch. Removing a contour vertex
+    combines the pitches from the shorter old contour path using edge lengths.
+    Existing generated-roof links are retained when the same source is edited.
     """
+    source_changed = settings.source_object != source
+    old_items = tuple(settings.slope_settings)
+    old_pitches = [float(item.pitch) for item in old_items]
+    new_points = (
+        tuple(tuple(float(value) for value in point) for point in points)
+        if points is not None else None
+    )
+    previous_points = ()
+    try:
+        if settings.outline_preview_json:
+            previous_points = tuple(
+                tuple(float(value) for value in point)
+                for point in json.loads(settings.outline_preview_json)
+            )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        previous_points = ()
+
+    if not source_changed and new_points is None and len(old_items) == edge_count:
+        return False
     if (
-        settings.source_object == source
-        and len(settings.slope_settings) == edge_count
+        not source_changed
+        and new_points is not None
+        and len(old_items) == edge_count
+        and len(previous_points) == edge_count
+        and previous_points == new_points
     ):
         return False
 
-    settings.slope_settings.clear()
-    if hasattr(settings, "pitch_snap_status"):
-        settings.pitch_snap_status = ""
-    for edge_index in range(edge_count):
-        item = settings.slope_settings.add()
-        item.edge_index = edge_index
-        item.start_vertex_index = edge_index
-        item.end_vertex_index = (edge_index + 1) % edge_count
-        item.pitch = float(settings.initial_pitch)
+    if (
+        not source_changed
+        and new_points is not None
+        and len(previous_points) == len(old_pitches)
+        and len(previous_points) >= 3
+    ):
+        mapped_pitches = remap_contour_edge_values(
+            previous_points, old_pitches, new_points, float(settings.initial_pitch)
+        )
+    elif (
+        not source_changed
+        and new_points is None
+        and len(old_items) == edge_count
+    ):
+        return False
+    else:
+        mapped_pitches = [float(settings.initial_pitch)] * edge_count
+
+    scene = getattr(settings, "id_data", None)
+    if scene is not None:
+        scene["_roofforge_syncing_slopes"] = True
+    try:
+        settings.slope_settings.clear()
+        for edge_index, pitch in enumerate(mapped_pitches):
+            item = settings.slope_settings.add()
+            item.edge_index = edge_index
+            item.start_vertex_index = edge_index
+            item.end_vertex_index = (edge_index + 1) % edge_count
+            item.pitch = float(pitch)
+    finally:
+        if scene is not None:
+            try:
+                del scene["_roofforge_syncing_slopes"]
+            except KeyError:
+                pass
+
+    if source_changed:
+        settings.generated_object = None
+        settings.generated_name_snapshot = ""
+        if hasattr(settings, "roof_plan_json"):
+            settings.roof_plan_json = ""
     settings.source_object = source
     settings.source_name_snapshot = source.name
-    settings.generated_object = None
-    settings.generated_name_snapshot = ""
-    if hasattr(settings, "roof_plan_json"):
-        settings.roof_plan_json = ""
-    settings.last_status = (
-        f"Загружено скатов: {edge_count}. Углы можно задавать отдельно."
-    )
+    if new_points is not None:
+        settings.outline_preview_json = json.dumps(
+            new_points, separators=(",", ":")
+        )
+    if hasattr(settings, "pitch_snap_status"):
+        settings.pitch_snap_status = ""
+    if source_changed:
+        settings.last_status = (
+            f"Загружено скатов: {edge_count}. Углы можно задавать отдельно."
+        )
+    elif len(old_items) != edge_count:
+        settings.last_status = (
+            f"Контур изменён: настроено {edge_count} скатов; "
+            "углы существующих рёбер перенесены на новый контур."
+        )
     return True
 
 

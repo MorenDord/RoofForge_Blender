@@ -9,7 +9,7 @@ from .operators import (
     ROOFFORGE_OT_pitch_intersection_step,
 )
 from .ui.panel import ROOFFORGE_PT_panel
-from .live_update import cancel_pending_live_update
+from .live_update import cancel_pending_live_update, start_edit_mode_monitoring
 from .roof_build import clear_surface_cache
 from .roof_details import ROOFFORGE_OT_rebuild_details
 from .ui.vector_plan_preview import register_vector_preview, unregister_vector_preview
@@ -35,6 +35,7 @@ def register():
     if not hasattr(bpy.types.Scene, "roof_forge"):
         bpy.types.Scene.roof_forge = bpy.props.PointerProperty(type=RoofForgeSettings)
     register_vector_preview()
+    start_edit_mode_monitoring()
 
 
 def unregister():

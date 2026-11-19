@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.4.0.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.4.1.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
 
 ## Project documents
 
@@ -18,7 +18,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Automatically read one closed outer boundary from a wire contour or the boundary of a surface mesh.
 - Show a top-view numbered roof-facet plan generated from actual roof geometry. Each number maps directly to the corresponding per-edge Pitch field. The GPU preview uses antialiased polylines, contrast-aware line/text colours and area-weighted label anchors; coplanar seams are omitted.
 - Generate and update a separate closed roof shell.
-- Debounced Live Update for per-edge pitch, thickness and overhang changes. The vector plan geometry is cached from the latest successful roof build and redrawn directly by Blender's GPU handler.
+- Debounced Live Update for per-edge pitch, thickness and overhang changes, plus automatic Edit-Mode boundary polling for moved/added/removed contour vertices. The vector plan geometry is cached from the latest successful roof build and redrawn directly by Blender's GPU handler.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
 - **Source-anchored eaves:** convex contours continue to use the original 3D support-plane envelope. Concave flat-eave L/U contours now use the weighted wavefront roof plus one exact coplanar overhang strip per source edge. With **Converge corners** enabled (required for concave contours), adjacent strips meet at one shared outer corner while each strip remains on its source slope plane. The source eave line remains fixed.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
@@ -26,7 +26,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Per-slope Pitch arrows find vertices formed by the other roof planes, solve the exact target angle, then verify a shared vertex in the rebuilt roof before changing the field.
 - Length controls are displayed in centimeters; default shell thickness is 1 cm. Before the first roof build, **Initial Pitch** sets the value copied to every contour edge (default 30°); individual Pitch values can then be edited independently.
 - The first **Create / Update Roof** click reads the active contour and automatically creates the Pitch fields. No separate Load / Refresh Slope Angles action is required.
-- If the generated roof is deleted, Create / Update can recreate it from the stored source. Edit the source contour in Edit Mode, return to Object Mode and press Create / Update to rebuild from the edited boundary.
+- If the generated roof is deleted, Create / Update can recreate it from the stored source. With Live Update enabled, moving, splitting or dissolving boundary vertices in Edit Mode automatically rebuilds the roof, plan and enabled roof details after a short pause.
 - No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
 - Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
 - Keep the last valid roof mesh if a requested live rebuild fails.
@@ -94,7 +94,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 
 ## Installation and test build
 
-Download the **outer** `roof_forge-0.3.23-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow on the feature branch, extract it once, then install the inner `roof_forge-0.3.23.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
+Download the **outer** `roof_forge-0.4.1-blender-5.0.1.zip` artifact from the latest successful **RoofForge tests** workflow on the feature branch, extract it once, then install the inner `roof_forge-0.4.1.zip` using Preferences → Get Extensions → Install from Disk. Do not extract the inner extension ZIP.
 
 Russian installation and QA steps are included in `INSTALL_TEST_RU.md` inside the extension package. Remove the previous RoofForge alpha before installing this one so that Blender does not load two versions.
 
@@ -130,7 +130,14 @@ The 0.3.10 exact-coplanar pass could leave narrow seams when independently solve
 The 3D support-plane arrangement is still attempted first. If the exact planar arrangement fails its internal-edge / perimeter continuity check, RoofForge retries the mixed-height concave contour with the continuous finite-segment field already used as a geometry prototype. Each source edge uses its authored plane while the perpendicular foot lies on that finite edge; near endpoints, a radial transition function makes the field continuous. Those transition zones are adaptively triangulated to a height error of 0.1% of the mesh span (maximum depth 4), while edge-interior patches remain exact planar facets. The shell and boundary validators still run on the fallback result. This trades exact planar facets near reflex vertices for a valid continuous surface; it does not enable positive overhang on mixed-height concave contours.
 
 
-## Roof details in 0.4.0
+## Live Update in Edit Mode (0.4.1)
+
+- The source contour is watched directly from Blender's live Edit-Mode BMesh. Moving boundary vertices updates the generated roof after a short debounce without leaving Edit Mode.
+- Adding a boundary vertex splits the associated pitch value onto the new child edges. Dissolving/removing a contour vertex merges the old values using edge-length weighting. Moving or reordering vertices remaps values by geometric correspondence.
+- The same roof mesh, roof plan and enabled ridge/valley/standing-seam detail objects rebuild together. Invalid or temporarily open contours are ignored while editing; the last valid generated roof is kept until a valid closed contour is available.
+- The watcher continues to detect edits after switching back into Edit Mode. Disable **Live Update** to stop automatic rebuilds; **Create / Update Roof** remains available as a manual rebuild.
+
+## Roof details in 0.4.1
 
 - **Ridges and valleys:** the add-on analyses actual shared edges of the generated roof top surface. Coplanar continuations are ignored; convex and concave dihedral breaks are classified separately. Each enabled type is built as its own roof-following profile mesh with independent width, rise and signed end offset.
 - **Standing seams:** optional folded ribs are generated on each roof facet. Panel spacing is measured on the sloped surface, ridge-facing ends tuck under ridge covers, fold height is limited by the ridge rise, and the two fold shoulders are marked as Blender mesh seams.

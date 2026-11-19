@@ -20,8 +20,9 @@ class ROOFFORGE_OT_prepare_slopes(bpy.types.Operator):
         settings = context.scene.roof_forge
         try:
             points = read_object_boundary(context.object)
-            changed = sync_slope_settings(settings, context.object, len(points))
-            settings.outline_preview_json = json.dumps(points, separators=(",", ":"))
+            changed = sync_slope_settings(
+                settings, context.object, len(points), points=points
+            )
         except Exception as exc:
             self.report({"ERROR"}, str(getattr(exc, "message", exc)))
             return {"CANCELLED"}

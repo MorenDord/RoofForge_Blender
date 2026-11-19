@@ -9,6 +9,7 @@ import importlib
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 import bpy
@@ -1164,6 +1165,120 @@ def main() -> None:
         not ridge_test_roof.get("roof_forge_standing_seams_object", ""),
         "disabling standing seams did not remove the helper object",
     )
+    clear_scene()
+
+    # Edit-Mode Live Update: moving a contour vertex rebuilds the roof without
+    # leaving Edit Mode; splitting and dissolving an edge updates the pitch list.
+    edit_source = create_square_object("RoofForge_Smoke_Edit_Mode_Live", with_face=False)
+    edit_settings = bpy.context.scene.roof_forge
+    edit_settings.live_update = True
+    edit_settings.thickness_cm = 1.0
+    ensure(
+        bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
+        "could not prepare Edit-Mode live contour pitches",
+    )
+    edit_pitches = (24.0, 32.0, 40.0, 48.0)
+    for item, pitch in zip(edit_settings.slope_settings, edit_pitches):
+        item.pitch = pitch
+    ensure(
+        bpy.ops.roof_forge.generate_surface() == {"FINISHED"},
+        "initial Edit-Mode live test roof did not generate",
+    )
+    edit_roof = edit_settings.generated_object
+    ensure(edit_roof is not None, "Edit-Mode live test roof pointer is missing")
+    live_update = importlib.import_module(
+        f"{extension.__name__}.addon.live_update"
+    )
+    live_update.cancel_pending_live_update()
+    live_update._EDIT_MODE_WATCH_STATES.clear()
+    live_update.start_edit_mode_monitoring(bpy.context.scene)
+    edit_time = time.monotonic()
+    live_update._edit_mode_monitor(now=edit_time)
+
+    edit_roof_before = tuple(
+        tuple(float(c) for c in vertex.co) for vertex in edit_roof.data.vertices
+    )
+    bpy.ops.object.mode_set(mode="EDIT")
+    edit_bm = bmesh.from_edit_mesh(edit_source.data)
+    moved_vertex = min(
+        edit_bm.verts,
+        key=lambda vertex: (vertex.co.x - 4.0) ** 2 + (vertex.co.y - 3.0) ** 2,
+    )
+    moved_vertex.co.x += 0.25
+    bmesh.update_edit_mesh(edit_source.data, loop_triangles=False, destructive=True)
+    live_update._edit_mode_monitor(now=edit_time + 1.0)
+    live_update._edit_mode_monitor(now=edit_time + 1.3)
+    edit_roof_after_move = tuple(
+        tuple(float(c) for c in vertex.co) for vertex in edit_roof.data.vertices
+    )
+    ensure(
+        edit_roof_after_move != edit_roof_before,
+        "Edit-Mode vertex movement did not rebuild the roof",
+    )
+    ensure(
+        edit_roof.get("roof_forge_source_edge_count") == 4,
+        "moving a contour vertex unexpectedly changed the boundary edge count",
+    )
+
+    edit_bm = bmesh.from_edit_mesh(edit_source.data)
+    target_edge = min(
+        edit_bm.edges,
+        key=lambda edge: (
+            min(
+                (edge.verts[0].co.x - 0.0) ** 2 + (edge.verts[0].co.y - 0.0) ** 2,
+                (edge.verts[1].co.x - 0.0) ** 2 + (edge.verts[1].co.y - 0.0) ** 2,
+            )
+            + min(
+                (edge.verts[0].co.x - 4.0) ** 2 + (edge.verts[0].co.y - 0.0) ** 2,
+                (edge.verts[1].co.x - 4.0) ** 2 + (edge.verts[1].co.y - 0.0) ** 2,
+            )
+        ),
+    )
+    split_result = bmesh.ops.subdivide_edges(
+        edit_bm, edges=[target_edge], cuts=1, use_grid_fill=False
+    )
+    split_vertices = [
+        element for element in split_result.get("geom_inner", ())
+        if isinstance(element, bmesh.types.BMVert)
+    ]
+    ensure(split_vertices, "BMesh did not return the inserted contour vertex")
+    split_vertex = split_vertices[0]
+    bmesh.update_edit_mesh(edit_source.data, loop_triangles=False, destructive=True)
+    live_update._edit_mode_monitor(now=edit_time + 2.0)
+    live_update._edit_mode_monitor(now=edit_time + 2.3)
+    ensure(
+        len(edit_settings.slope_settings) == 5,
+        "adding a contour vertex did not add a matching pitch setting",
+    )
+    ensure(
+        edit_roof.get("roof_forge_source_edge_count") == 5,
+        "adding a contour vertex did not rebuild the five-edge roof",
+    )
+
+    edit_bm = bmesh.from_edit_mesh(edit_source.data)
+    split_vertex = min(
+        edit_bm.verts,
+        key=lambda vertex: (vertex.co - split_vertex.co).length,
+    )
+    bmesh.ops.dissolve_verts(
+        edit_bm,
+        verts=[split_vertex],
+        use_face_split=False,
+        use_boundary_tear=False,
+    )
+    bmesh.update_edit_mesh(edit_source.data, loop_triangles=False, destructive=True)
+    live_update._edit_mode_monitor(now=edit_time + 3.0)
+    live_update._edit_mode_monitor(now=edit_time + 3.3)
+    ensure(
+        len(edit_settings.slope_settings) == 4,
+        "removing a contour vertex did not remove its pitch setting",
+    )
+    ensure(
+        edit_roof.get("roof_forge_source_edge_count") == 4,
+        "removing a contour vertex did not rebuild the four-edge roof",
+    )
+    bpy.ops.object.mode_set(mode="OBJECT")
+    live_update.cancel_pending_live_update()
     clear_scene()
 
     extension.unregister()

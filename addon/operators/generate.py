@@ -8,6 +8,7 @@ from ..adapters.mesh_io import read_object_boundary
 from ...core.geometry import GeometryInputError
 from ...core.roof_plan import surface_plan_data
 from ..roof_details import rebuild_roof_details
+from ..live_update import start_edit_mode_monitoring
 from ..roof_build import (
     apply_shell_metadata,
     build_roof_payload,
@@ -214,6 +215,7 @@ class ROOFFORGE_OT_generate_surface(bpy.types.Operator):
                     "RoofForge roof created/updated; detail generation failed: "
                     + str(detail_exc)
                 )
+            start_edit_mode_monitoring(context.scene)
 
         except Exception as exc:
             if created_object and roof_object is not None:
