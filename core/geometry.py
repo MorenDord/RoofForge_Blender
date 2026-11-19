@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from math import atan, degrees, hypot, isfinite, radians, sqrt, tan
 from typing import Sequence
 
+from .native_bridge import validate_simple_polygon_native
+
 Point2 = tuple[float, float]
 Point3 = tuple[float, float, float]
 
@@ -92,7 +94,7 @@ def _segments_intersect(a: Point2, b: Point2, c: Point2, d: Point2,
     )
 
 
-def validate_simple_polygon(poly: Sequence[Point2], eps: float = 1e-9) -> list[Diagnostic]:
+def _validate_simple_polygon_python(poly: Sequence[Point2], eps: float = 1e-9) -> list[Diagnostic]:
     """Validate a simple, non-degenerate XY polygon.
 
     'eps' is a relative tolerance scaled by the polygon bounding-box size.
@@ -124,6 +126,21 @@ def validate_simple_polygon(poly: Sequence[Point2], eps: float = 1e-9) -> list[D
             if _segments_intersect(a, b, c, d, area_eps, linear_eps):
                 issues.append(Diagnostic("SELF_INTERSECTION", f"Рёбра {i} и {j} пересекаются."))
     return issues
+
+
+_NATIVE_VALIDATION_MIN_VERTICES = 32
+
+
+def validate_simple_polygon(poly: Sequence[Point2], eps: float = 1e-9) -> list[Diagnostic]:
+    """Validate a contour, preferring the compatible Rust core for dense loops."""
+    if len(poly) >= _NATIVE_VALIDATION_MIN_VERTICES:
+        native_issues = validate_simple_polygon_native(poly, eps)
+        if native_issues is not None:
+            return [
+                Diagnostic(code, message, severity)
+                for code, message, severity in native_issues
+            ]
+    return _validate_simple_polygon_python(poly, eps)
 
 
 def clip_half_plane(poly: Sequence[Point2], a: float, b: float, c: float,

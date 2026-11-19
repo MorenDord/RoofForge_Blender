@@ -50,6 +50,7 @@ All stored dimensions use Blender scene units. UI labels must display the active
 - Produce deterministic vertex/face output and weld numerically coincident 3D vertices using scale-aware tolerance.
 - Verify XY coverage against the source polygon area.
 - Verify that all internal surface edges are shared; single-use edges must lie on the source perimeter and fully cover each perimeter segment.
+- Validate the final closed shell for geometric intersections between non-adjacent face triangles using a spatial broad phase and coplanar/non-coplanar narrow-phase tests; reject detected intersections before committing a new Blender mesh.
 - Reject unsupported or ambiguous cases instead of silently generating corrupt geometry. The current supporting-line arrangement and finite-segment distance field are experimental only; neither qualifies as the production concave solver. Concave + mixed-height eaves must be rejected until a separate generalized formulation is validated.
 
 ### FR-03 — Per-slope pitch UI

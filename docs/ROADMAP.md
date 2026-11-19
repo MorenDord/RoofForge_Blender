@@ -1,7 +1,7 @@
 # RoofForge 1.0 — Development Roadmap
 
 ## Current implementation state
-The Blender 0.1.0 alpha now ships a testable UI for one selected closed XY boundary loop, a single global pitch value, validation and creation of a separate closed shell. Blender 5.0.1 background smoke checks pass in Edit Mode and Object Mode, including idempotent registration/unregistration, source preservation and face attributes. The extension ZIP passes Blender's official package validator. GUI installation/visual QA by the user remains open. Separately, the experimental pure-Python weighted wavefront covers bounded rectangle, V-notch, L/U and constrained split/collapse fixtures; it is not connected to the Blender operator. Pure-Python CI passes 61 tests on Python 3.11 and 3.13.
+RoofForge 0.3.9 is the current test build for Blender 5.0+. The add-on generates a closed roof shell from one ordered boundary loop, supports per-edge pitch and live rebuild, and uses the weighted wavefront for tested flat-eave concave fixtures. Positive concave overhang is available on supported L/U contours through planar edge strips; mixed-height concave eaves and unsupported weighted event batches are rejected. Version 0.3.9 adds a geometric intersection check between non-adjacent face triangles. Blender 5.0.1 background smoke, pure-Python CI, package validation and the extension ZIP are the release gates; interactive GUI visual QA remains a user-side check.
 
 ## Milestone 0 — Repository and engineering foundation
 - [x] Modular Blender extension package and manifest
@@ -49,11 +49,11 @@ The Blender 0.1.0 alpha now ships a testable UI for one selected closed XY bound
 - [ ] General L/U support for arbitrary per-edge pitch assignments and degenerate event ordering
 - [ ] Generalized concave solver for mixed-height eaves
 - [x] Closed-mesh edge/vertex-link validator (boundary edges, edge incidence, winding, connected components, bow-tie vertices)
-- [ ] Geometric self-intersection detection and zero-area diagnostics integrated into the Blender UI
+- [x] Geometric self-intersection detection between non-adjacent face triangles and zero-area diagnostics propagated through the Blender generation operator
 - [ ] Robust handling of collinear and near-degenerate contour vertices
 - [ ] Multi-plane node solver and adversarial precision suite
 - [ ] Eaves overhang, fascia and soffit
-**Exit:** verified rectangle, V-notch, equal-pitch L/U alpha fixtures pass pure-Python area, boundary and edge/vertex manifold checks. Arbitrary concave event coverage, self-intersection checks and Blender integration tests remain open.
+**Exit:** verified rectangle, V-notch and supported L/U fixtures pass pure-Python area, boundary, edge/vertex manifold and non-adjacent triangle-intersection checks. Arbitrary concave event coverage and mixed-height concave roofs remain open.
 
 ## Milestone 2 — Artist workflow (Critical)
 - [ ] Numbered top-view pitch map
@@ -95,4 +95,4 @@ The Blender 0.1.0 alpha now ships a testable UI for one selected closed XY bound
 **Exit:** all acceptance criteria in SPECIFICATION.md met or explicitly deferred with documented limitation.
 
 ## Next implementation task
-Collect manual feedback on the 0.1.0 alpha in Blender 5.0+: install the extension from disk, test a rectangle in Edit Mode and Object Mode, then a convex trapezoid/pentagon. Resolve any install, panel, selection, transform or mesh-output issues reported by the user. Keep concave L/U marked unsupported in the UI while wavefront remains disconnected. After user QA, return to generic partial-overlap needle handling and multiple split events. Keep all exact plane, area, boundary-chain, T-junction, face-area and manifold checks unchanged.
+Next critical geometry tasks: general partial-overlap opposing-front resolution and multiple independent split events on one loop. Keep unsupported weighted-wavefront event batches explicit and preserve every current exact plane, projected-area, boundary-chain, T-junction, face-area, manifold and self-intersection guard. After that, improve collinear/near-degenerate contour handling and extend Blender diagnostics where possible.

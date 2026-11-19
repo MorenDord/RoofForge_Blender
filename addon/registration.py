@@ -1,14 +1,29 @@
 """Registration entry point."""
 import bpy
 
-from .properties import RoofForgeSettings
-from .operators import ROOFFORGE_OT_generate_surface, ROOFFORGE_OT_validate_input
+from .properties import RoofForgeSettings, RoofForgeSlopeSettings
+from .operators import (
+    ROOFFORGE_OT_generate_surface,
+    ROOFFORGE_OT_prepare_slopes,
+    ROOFFORGE_OT_pitch_intersection_step,
+)
 from .ui.panel import ROOFFORGE_PT_panel
+from .live_update import (
+    cancel_pending_live_update,
+    register_live_update_handlers,
+    unregister_live_update_handlers,
+)
+from .roof_build import clear_surface_cache
+from .roof_details import ROOFFORGE_OT_rebuild_details
+from .ui.vector_plan_preview import register_vector_preview, unregister_vector_preview
 
 _CLASSES = (
+    RoofForgeSlopeSettings,
     RoofForgeSettings,
-    ROOFFORGE_OT_validate_input,
+    ROOFFORGE_OT_prepare_slopes,
     ROOFFORGE_OT_generate_surface,
+    ROOFFORGE_OT_pitch_intersection_step,
+    ROOFFORGE_OT_rebuild_details,
     ROOFFORGE_PT_panel,
 )
 
@@ -21,9 +36,15 @@ def register():
             pass
     if not hasattr(bpy.types.Scene, "roof_forge"):
         bpy.types.Scene.roof_forge = bpy.props.PointerProperty(type=RoofForgeSettings)
+    register_vector_preview()
+    register_live_update_handlers()
 
 
 def unregister():
+    unregister_live_update_handlers()
+    cancel_pending_live_update()
+    unregister_vector_preview()
+    clear_surface_cache()
     if hasattr(bpy.types.Scene, "roof_forge"):
         del bpy.types.Scene.roof_forge
     for cls in reversed(_CLASSES):
