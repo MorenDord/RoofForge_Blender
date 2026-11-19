@@ -57,6 +57,46 @@ def _schedule_edit_mode_monitor() -> None:
         pass
 
 
+def _start_edit_mode_monitoring_after_load():
+    """Defer scene access until Blender has left the restricted register context."""
+    start_edit_mode_monitoring()
+    return None
+
+
+def schedule_edit_mode_monitoring_startup() -> None:
+    """Schedule startup monitoring after extension registration or file load."""
+    if _timer_is_registered(_start_edit_mode_monitoring_after_load):
+        return
+    try:
+        bpy.app.timers.register(
+            _start_edit_mode_monitoring_after_load,
+            first_interval=0.5,
+        )
+    except (AttributeError, RuntimeError, ValueError):
+        pass
+
+
+@bpy.app.handlers.persistent
+def _roof_forge_file_loaded(_dummy):
+    schedule_edit_mode_monitoring_startup()
+
+
+def register_live_update_handlers() -> None:
+    """Install a safe deferred startup and file-load hook."""
+    handlers = bpy.app.handlers.load_post
+    if _roof_forge_file_loaded not in handlers:
+        handlers.append(_roof_forge_file_loaded)
+    schedule_edit_mode_monitoring_startup()
+
+
+def unregister_live_update_handlers() -> None:
+    """Remove startup hooks and their deferred callback."""
+    _cancel_timer(_start_edit_mode_monitoring_after_load)
+    handlers = bpy.app.handlers.load_post
+    if _roof_forge_file_loaded in handlers:
+        handlers.remove(_roof_forge_file_loaded)
+
+
 def start_edit_mode_monitoring(scene=None) -> None:
     """Watch saved RoofForge source contours for geometry edits in Edit Mode."""
     scenes = (scene,) if scene is not None else tuple(bpy.data.scenes)
@@ -104,6 +144,7 @@ def cancel_pending_live_update() -> None:
     global _PENDING_SCENE_NAME
     _cancel_timer(_run_pending_update)
     _cancel_timer(_edit_mode_monitor)
+    _cancel_timer(_start_edit_mode_monitoring_after_load)
     _PENDING_SCENE_NAME = None
     _EDIT_MODE_WATCH_STATES.clear()
 
