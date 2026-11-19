@@ -72,43 +72,36 @@ def _cache_owner_id(owner) -> int | None:
         return id(owner)
 
 
-def _validate_supported_contour(points) -> None:
-    """Reject mixed-height concave footprints until their 3D solver is reliable."""
+def _validate_supported_contour(points, *, allow_mixed_height_concave: bool = False) -> None:
+    """Guard the legacy non-overhang path; overhang uses the exact 3D solver."""
     authored_points = tuple(tuple(float(value) for value in point) for point in points)
     if (
-        not is_flat_eave_contour(authored_points)
+        not allow_mixed_height_concave
+        and not is_flat_eave_contour(authored_points)
         and not is_convex_contour_xy(authored_points)
     ):
         raise GeometryInputError(
             "NONPLANAR_CONCAVE_CONTOUR_UNSUPPORTED",
-            "В RoofForge 0.3.16 временно отключено построение крыши "
-            "по вогнутому контуру с разной высотой вершин: результат "
-            "пока недостаточно надёжен. Используй вогнутый контур "
-            "с одинаковой высотой карниза или выпуклый контур.",
+            "Построение крыши по вогнутому контуру с разной высотой вершин "
+            "не поддерживается в обычном режиме без свеса. Для такого "
+            "контура задай положительный свес.",
         )
 
 
 def _build_roof_surface(points, pitches, overhang, corner_convergence):
     authored_points = tuple(tuple(float(value) for value in point) for point in points)
-    _validate_supported_contour(authored_points)
+    _validate_supported_contour(
+        authored_points, allow_mixed_height_concave=overhang > 0.0
+    )
     if overhang > 0.0:
         surface = build_source_anchored_overhang_surface(
             authored_points, pitches, overhang,
             corner_convergence=corner_convergence,
         )
-        if not is_convex_contour_xy(authored_points):
-            solver = "WEIGHTED_WAVEFRONT_CONCAVE_OVERHANG_RING"
-        elif (
-            len(authored_points) > 64
-            and is_flat_eave_contour(authored_points)
-            and (
-                corner_convergence
-                or max(pitches) - min(pitches) <= 1.0e-7
-            )
-        ):
-            solver = "WEIGHTED_WAVEFRONT_CONVEX_OVERHANG_RING"
+        if is_flat_eave_contour(authored_points):
+            solver = "WEIGHTED_WAVEFRONT_OVERHANG_STRIPS"
         else:
-            solver = "SOURCE_ANCHORED_PLANE_ENVELOPE_OFFSET_CONTOUR"
+            solver = "SOURCE_PLANE_OVERHANG_STRIPS"
         return surface, solver
     if is_flat_eave_contour(authored_points):
         return build_wavefront_roof_surface(authored_points, pitches), "WEIGHTED_WAVEFRONT_FLAT_EAVE"
