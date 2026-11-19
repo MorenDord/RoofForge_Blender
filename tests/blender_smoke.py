@@ -1270,7 +1270,14 @@ def main() -> None:
     )
     ensure(
         edit_roof.get("roof_forge_source_edge_count") == 5,
-        "adding a contour vertex did not rebuild the five-edge roof",
+        (
+            "adding a contour vertex did not rebuild the five-edge roof: "
+            f"{edit_settings.last_status}; "
+            f"pitch_count={len(edit_settings.slope_settings)}; "
+            f"pitches={[round(float(item.pitch), 3) for item in edit_settings.slope_settings]}; "
+            f"source_edge_count={edit_roof.get('roof_forge_source_edge_count')}; "
+            f"contour={read_object_boundary(edit_source)}"
+        ),
     )
 
     edit_bm = bmesh.from_edit_mesh(edit_source.data)
