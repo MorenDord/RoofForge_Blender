@@ -382,7 +382,7 @@ def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float
 
     # Reuse the exact 3D plane builder for compatibility validation and pitch
     # semantics. With flat eaves, its edge gradient is purely inward.
-    planes = build_boundary_planes(authored_points, authored_pitches, eps)
+    planes = build_boundary_planes(points, pitches_degrees, eps)
     result = []
     for index, start in enumerate(points):
         end = points[(index + 1) % len(points)]
@@ -2170,7 +2170,7 @@ def build_wavefront_roof_surface(
     # discarding a face. Real event ordering can create very small but valid
     # sliver facets; dropping them opens an otherwise conforming surface.
     min_fragment_area = max(1e-24, weld_tolerance * weld_tolerance * 10.0)
-    planes = build_boundary_planes(points, pitches_degrees, eps)
+    planes = build_boundary_planes(authored_points, authored_pitches, eps)
 
     registry = _VertexRegistry(weld_tolerance)
     faces: list[tuple[int, ...]] = []
