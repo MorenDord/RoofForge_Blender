@@ -65,17 +65,28 @@ class ConcaveOverhangTests(unittest.TestCase):
             build_source_anchored_overhang_surface(U_POINTS, U_PITCHES, 1.5)
         self.assertEqual(context.exception.code, "OVERHANG_OFFSET_INVALID")
 
-    def test_concave_overhang_requires_corner_convergence(self):
-        with self.assertRaises(GeometryInputError) as context:
-            build_source_anchored_overhang_surface(L_POINTS, L_PITCHES, 0.15, corner_convergence=False)
-        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_NEEDS_CORNER_CONVERGENCE")
+    def test_legacy_corner_switch_is_ignored_for_concave_contours(self):
+        surface = build_source_anchored_overhang_surface(
+            L_POINTS, L_PITCHES, 0.15, corner_convergence=False
+        )
+        self.assertGreater(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in L_POINTS])),
+        )
+        self.assert_surface_is_planar_and_closed(surface)
 
-    def test_concave_overhang_rejects_mixed_height_eaves(self):
+    def test_concave_mixed_height_eaves_support_overhang(self):
         mixed = list(L_POINTS)
         mixed[1] = (mixed[1][0], mixed[1][1], 0.2)
-        with self.assertRaises(GeometryInputError) as context:
-            build_source_anchored_overhang_surface(mixed, L_PITCHES, 0.15)
-        self.assertEqual(context.exception.code, "OVERHANG_CONCAVE_NON_FLAT_EAVES")
+        surface = build_source_anchored_overhang_surface(
+            mixed, (40.0,) * len(mixed), 0.15
+        )
+        self.assertGreater(
+            surface.surface_area_xy,
+            abs(signed_area([(point[0], point[1]) for point in mixed])),
+        )
+        shell = build_roof_shell(surface, 0.1, extrude_up=True)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
 
     def test_corner_converged_contour_preserves_source_vertex_count(self):
         expanded = corner_converged_overhang_contour(L_POINTS, L_PITCHES, 0.15)
