@@ -1173,6 +1173,8 @@ def main() -> None:
     edit_settings = bpy.context.scene.roof_forge
     edit_settings.live_update = True
     edit_settings.thickness_cm = 1.0
+    # This Edit-Mode test isolates contour monitoring from overhang solver limits.
+    edit_settings.eave_overhang_cm = 0.0
     ensure(
         bpy.ops.roof_forge.prepare_slopes() == {"FINISHED"},
         "could not prepare Edit-Mode live contour pitches",
