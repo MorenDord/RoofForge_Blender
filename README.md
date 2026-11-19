@@ -2,7 +2,7 @@
 
 Procedural roof generation for Blender 5.0+, aimed at environment artists and game-ready asset workflows.
 
-> **Current test build: 0.4.1.** This is an early user-test build, not a finished 1.0 release. With an overhang, the original contour remains the underside/support line while the same edge planes continue beyond it. Per-slope Pitch arrows snap a slope to an exact shared vertex formed by neighbouring roof planes. The roof plan is now vector-only and redraws directly in the N-panel.
+> **Current test build: 0.4.2.** This is an early user-test build, not a finished 1.0 release. Overhangs are built as support-plane strips around the normal roof surface for convex, concave and mixed-height contours. The Edit Mode watcher is debounced to avoid rebuilding continuously during a drag. The vector roof plan is always shown when a roof exists; debug and preview visibility switches have been removed.
 
 ## Project documents
 
@@ -20,7 +20,7 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - Generate and update a separate closed roof shell.
 - Debounced Live Update for per-edge pitch, thickness and overhang changes, plus automatic Edit-Mode boundary polling for moved/added/removed contour vertices. The vector plan geometry is cached from the latest successful roof build and redrawn directly by Blender's GPU handler.
 - Cache validated roof surfaces so thickness-only edits skip the wavefront / plane-envelope rebuild.
-- **Source-anchored eaves:** convex contours continue to use the original 3D support-plane envelope. Concave flat-eave L/U contours now use the weighted wavefront roof plus one exact coplanar overhang strip per source edge. With **Converge corners** enabled (required for concave contours), adjacent strips meet at one shared outer corner while each strip remains on its source slope plane. The source eave line remains fixed.
+- **Source-plane overhangs:** RoofForge first builds the roof on the authored contour using its normal solver, then adds one exact strip per source edge. Adjacent strips meet on the intersection of their original support planes. The same construction is used for convex, concave, clockwise and mixed-height XYZ contours; it does not rebuild the full plane envelope across the enlarged footprint.
 - The shell thickness is added upward from the support surface when overhang is enabled. The lower/underside surface therefore remains on the original contour while the roof extends outward beyond it.
 - Coplanar and practically coplanar internal edges are dissolved from the generated Blender mesh (up to 0.05° and 10 ppm of mesh span), including degree-two vertices and loose points left by loop-cut partitions. The pass repeats until no new planar neighbours remain. Planar patches collapse to clean N-gons; straight shell walls become larger quads/N-gons. Clear ridges, valleys, silhouette corners and the outer boundary remain.
 - Per-slope Pitch arrows find vertices formed by the other roof planes, solve the exact target angle, then verify a shared vertex in the rebuilt roof before changing the field.
@@ -28,14 +28,14 @@ Procedural roof generation for Blender 5.0+, aimed at environment artists and ga
 - The first **Create / Update Roof** click reads the active contour and automatically creates the Pitch fields. No separate Load / Refresh Slope Angles action is required.
 - If the generated roof is deleted, Create / Update can recreate it from the stored source. With Live Update enabled, moving, splitting or dissolving boundary vertices in Edit Mode automatically rebuilds the roof, plan and enabled roof details after a short pause.
 - No separate Validate Roof or Default Pitch field; invalid geometry is diagnosed during Create / Update.
-- Configurable Live Update debounce from 0 to 1000 ms, default 0 ms (geometry still executes on Blender's main thread).
+- Live Update coalesces rapid property changes and waits at least 250 ms after the last edit before starting a geometry rebuild (geometry still executes on Blender's main thread). The debounce value is internal rather than another panel control.
 - Keep the last valid roof mesh if a requested live rebuild fails.
 - Stop automatic updating if the source object or generated roof object is renamed.
 - Preserve source mesh coordinates and the source object's world transform.
 - Store face attributes for roof component and source slope index.
 - Validate the closed shell for geometric self-intersections between non-adjacent face triangles, in addition to edge/vertex manifold topology. Intersecting results are rejected before Blender mesh creation.
 
-The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is vector-only: the PNG renderer, raster toggle, preview-icon cache and refresh timer are removed. Blender's `POLYLINE_UNIFORM_COLOR` shader draws antialiased edges in a collapsible **Roof Plan** section nested inside the main **RoofForge** N-panel panel. Its transparent `template_icon` slot reserves a square in Blender's normal UI flow, pushing the subsequent Pitch and settings controls down. The GPU output is clipped to that slot with a scissor rectangle, so it cannot paint over Pitch fields or the neighbouring editor. The slot dimensions now follow Blender's actual `UI_UNIT_X/Y * icon_scale` rule (estimated from the exposed UI scale), and its position follows the exact midpoint of a CENTER-aligned UI row, shared by the placeholder and GPU overlay. The bounding box is fitted with a 7.5% margin. The draw-handler is active only while the nested section is expanded and visible. Facet numbers use an area-weighted centroid across all faces belonging to a slope, with a pole-of-inaccessibility fallback for strongly concave regions. Number size and line thickness remain adjustable.
+The top-view plan is created from the saved generated roof faces and source-slope metadata. RoofForge is vector-only: the PNG renderer and raster toggle are removed. Blender's `POLYLINE_UNIFORM_COLOR` shader draws antialiased edges directly in the RoofForge N-panel. The preview is always enabled when a roof exists; it is not hidden behind a Show Preview checkbox or a collapsible child section. The GPU output is clipped to its reserved slot and cannot paint over Pitch fields or the neighbouring editor. Facet numbers use an area-weighted centroid across all faces belonging to a slope, with a pole-of-inaccessibility fallback for strongly concave regions. Number size and line thickness remain adjustable. Debug bounds and copy-debug controls have been removed from the user panel.
 
 ## Geometry paths and limitations
 
@@ -50,7 +50,7 @@ This is a tested family of cases, not a proof for every possible simple polygon.
 
 ### Mixed-height 3D eaves
 
-If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver for convex footprints. Mixed-height concave footprints are disabled in 0.3.16: the generator stops before surface construction and shows a warning. Flat-height concave L/U footprints remain supported through the weighted-wavefront path.
+If boundary vertices have different Z heights, RoofForge keeps the original XYZ eave coordinates and uses the 3D support-plane envelope solver for convex footprints. Mixed-height concave footprints remain disabled in the ordinary no-overhang path, but a positive overhang uses the exact 3D support-plane base solver and the same strip construction as other contours.
 
 ### Other current limits
 
@@ -58,7 +58,7 @@ If boundary vertices have different Z heights, RoofForge keeps the original XYZ 
 - Self-intersecting, degenerate or unsupported contours are rejected rather than silently repaired.
 - 64 edges is the enforced maximum for this alpha; larger boundaries are rejected with an actionable diagnostic.
 - Length inputs are centimeters and convert through the scene's `scale_length`. Apply object scale for physically consistent centimeter distances and thickness in world space.
-- Nonzero overhang is supported for convex contours, including mixed-height XYZ fixtures. Positive overhang is also supported on the tested flat-eave concave L/U wavefront cases when **Converge corners** is enabled. Mixed-height concave footprints are not supported and are rejected with a warning, regardless of overhang. Offsets that close a notch or self-intersect, and unsupported weighted-wavefront event combinations remain rejected.
+- Nonzero overhang is supported on convex and concave contours, including mixed-height concave XYZ fixtures, when the expanded footprint remains a simple polygon containing the source. Offsets that close a notch, self-intersect or collapse are rejected with a geometry diagnostic rather than entering the roof solver. The source-plane strips preserve the original pitch per edge.
 - Ridge/valley/hip profiles, standing seams, UVs, LOD and export automation are not included.
 
 ## RoofForge 0.3.23
