@@ -3,7 +3,6 @@ import bpy
 
 from .properties import RoofForgeSettings, RoofForgeSlopeSettings
 from .operators import (
-    ROOFFORGE_OT_copy_preview_debug,
     ROOFFORGE_OT_generate_surface,
     ROOFFORGE_OT_prepare_slopes,
     ROOFFORGE_OT_pitch_intersection_step,
@@ -23,7 +22,6 @@ _CLASSES = (
     RoofForgeSettings,
     ROOFFORGE_OT_prepare_slopes,
     ROOFFORGE_OT_generate_surface,
-    ROOFFORGE_OT_copy_preview_debug,
     ROOFFORGE_OT_pitch_intersection_step,
     ROOFFORGE_OT_rebuild_details,
     ROOFFORGE_PT_panel,
