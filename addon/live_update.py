@@ -132,7 +132,13 @@ def schedule_live_update(scene=None) -> None:
     try:
         bpy.app.timers.register(
             _run_pending_update,
-            first_interval=live_update_delay_seconds(settings),
+            # Property callbacks can fire continuously while a slider is
+            # dragged. Coalesce them so expensive geometry only runs after
+            # the user pauses, even when an older file stores a zero delay.
+            first_interval=max(
+                _EDIT_MODE_MIN_DEBOUNCE,
+                live_update_delay_seconds(settings),
+            ),
         )
     except (RuntimeError, ValueError):
         settings.last_status = "Не удалось запланировать Live Update."
