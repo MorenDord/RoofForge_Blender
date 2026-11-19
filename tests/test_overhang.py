@@ -108,13 +108,19 @@ class RoofOverhangTests(unittest.TestCase):
         offset, surface, shell = self._build_offset_roof(
             FLAT_RECTANGLE, [35.0] * 4, 0.25
         )
-        expected = (
-            (-0.25, -0.25, 0.0), (4.25, -0.25, 0.0),
-            (4.25, 3.25, 0.0), (-0.25, 3.25, 0.0),
+        expected_xy = (
+            (-0.25, -0.25), (4.25, -0.25),
+            (4.25, 3.25), (-0.25, 3.25),
         )
-        for actual, wanted in zip(offset, expected):
-            for a, b in zip(actual, wanted):
-                self.assertAlmostEqual(a, b, places=7)
+        for actual, wanted in zip(offset, expected_xy):
+            self.assertAlmostEqual(actual[0], wanted[0], places=7)
+            self.assertAlmostEqual(actual[1], wanted[1], places=7)
+        for index, point in enumerate(offset):
+            for plane_index in ((index - 1) % 4, index):
+                plane = surface.planes[plane_index]
+                self.assertAlmostEqual(
+                    point[2], plane.height(point[0], point[1]), places=7
+                )
         self.assertEqual(len(surface.boundary_xy), 4)
         self.assertEqual(shell.vertices[len(surface.vertices):], surface.vertices)
 
