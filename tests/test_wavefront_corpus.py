@@ -13,6 +13,35 @@ from core.wavefront import (
 
 
 class WeightedWavefrontCorpusTests(unittest.TestCase):
+    def test_collinear_subdivide_segment_keeps_authored_boundary_and_pitch_ids(self):
+        points = [
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (4.0, 0.0, 0.0),
+            (4.0, 3.0, 0.0),
+            (0.0, 3.0, 0.0),
+        ]
+        pitches = [24.0, 24.0, 32.0, 40.0, 48.0]
+
+        surface = build_wavefront_roof_surface(points, pitches)
+
+        self.assertEqual(len(surface.planes), len(points))
+        self.assertIn(0, surface.face_slope_indices)
+        self.assertNotIn(1, surface.face_slope_indices)
+        midpoint_indices = [
+            index for index, vertex in enumerate(surface.vertices)
+            if abs(vertex[0] - 2.0) <= 1.0e-8
+            and abs(vertex[1]) <= 1.0e-8
+            and abs(vertex[2]) <= 1.0e-8
+        ]
+        self.assertEqual(len(midpoint_indices), 1)
+        midpoint_index = midpoint_indices[0]
+        self.assertTrue(any(midpoint_index in face for face in surface.faces))
+        self.assertAlmostEqual(surface.surface_area_xy, surface.source_area_xy, places=6)
+
+        shell = build_roof_shell(surface, 0.10)
+        self.assertEqual(validate_closed_mesh(shell.vertices, shell.faces), [])
+
     @unittest.skip(
         "Known alpha limitation: some same-loop split/collapse batches are not yet "
         "resolved consistently for this multi-notch contour."

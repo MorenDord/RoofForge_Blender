@@ -382,7 +382,7 @@ def build_moving_lines(points: Sequence[Point3], pitches_degrees: Sequence[float
 
     # Reuse the exact 3D plane builder for compatibility validation and pitch
     # semantics. With flat eaves, its edge gradient is purely inward.
-    planes = build_boundary_planes(points, pitches_degrees, eps)
+    planes = build_boundary_planes(authored_points, authored_pitches, eps)
     result = []
     for index, start in enumerate(points):
         end = points[(index + 1) % len(points)]
@@ -2050,6 +2050,85 @@ def _split_face_edges_at_shared_vertices(
     return output
 
 
+def _coalesce_collinear_equal_pitch_edges(
+    points: Sequence[Point3],
+    pitches_degrees: Sequence[float],
+    eps: float,
+) -> tuple[tuple[Point3, ...], tuple[float, ...], tuple[int, ...], tuple[Point3, ...]]:
+    """Collapse straight, same-pitch subdivisions for wavefront kinematics.
+
+    Edit-Mode Subdivide inserts a point on an existing contour edge. If both
+    child edges retain the parent pitch, their moving lines are identical and
+    adjacent-line intersection is undefined. Merge those segments for the event
+    simulation only, while keeping the authored boundary split in the final
+    mesh. The source ID maps each reduced solver edge to an original contour
+    edge so UI pitch indices and roof-plane metadata remain stable.
+    """
+    reduced_points = [tuple(float(value) for value in point) for point in points]
+    reduced_pitches = [float(value) for value in pitches_degrees]
+    source_edge_ids = list(range(len(reduced_points)))
+    removed_boundary_points: list[Point3] = []
+
+    if len(reduced_points) != len(reduced_pitches):
+        raise GeometryInputError(
+            "INPUT_COUNT",
+            "Количество углов не соответствует числу граничных рёбер.",
+        )
+    if len(reduced_points) < 3:
+        return (
+            tuple(reduced_points),
+            tuple(reduced_pitches),
+            tuple(source_edge_ids),
+            tuple(removed_boundary_points),
+        )
+
+    xs = [point[0] for point in reduced_points]
+    ys = [point[1] for point in reduced_points]
+    scale = max(1.0, max(xs) - min(xs), max(ys) - min(ys))
+    cross_tolerance = max(1.0e-12, float(eps) * scale * scale * 10.0)
+    length_tolerance = max(1.0e-12, float(eps) * scale)
+    pitch_tolerance = max(1.0e-8, float(eps) * 10.0)
+
+    changed = True
+    while changed and len(reduced_points) > 3:
+        changed = False
+        count = len(reduced_points)
+        for index in range(count):
+            previous = (index - 1) % count
+            following = (index + 1) % count
+            a = reduced_points[previous]
+            b = reduced_points[index]
+            c = reduced_points[following]
+            first = (b[0] - a[0], b[1] - a[1])
+            second = (c[0] - b[0], c[1] - b[1])
+            first_length = hypot(*first)
+            second_length = hypot(*second)
+            if first_length <= length_tolerance or second_length <= length_tolerance:
+                continue
+            cross = first[0] * second[1] - first[1] * second[0]
+            dot = first[0] * second[0] + first[1] * second[1]
+            if (
+                abs(cross) > cross_tolerance
+                or dot <= 0.0
+                or abs(reduced_pitches[previous] - reduced_pitches[index]) > pitch_tolerance
+            ):
+                continue
+
+            removed_boundary_points.append(b)
+            del reduced_points[index]
+            del reduced_pitches[index]
+            del source_edge_ids[index]
+            changed = True
+            break
+
+    return (
+        tuple(reduced_points),
+        tuple(reduced_pitches),
+        tuple(source_edge_ids),
+        tuple(removed_boundary_points),
+    )
+
+
 def build_wavefront_roof_surface(
     points: Sequence[Point3],
     pitches_degrees: Sequence[float],
@@ -2065,18 +2144,25 @@ def build_wavefront_roof_surface(
     from .mesh import RoofSurface, _VertexRegistry, validate_surface_boundary_edges
     from .planes import build_boundary_planes
 
+    authored_points = tuple(tuple(float(value) for value in point) for point in points)
+    authored_pitches = tuple(float(value) for value in pitches_degrees)
+    solver_points, solver_pitches, source_edge_ids, removed_boundary_points = (
+        _coalesce_collinear_equal_pitch_edges(
+            authored_points, authored_pitches, eps
+        )
+    )
     trace = run_weighted_wavefront(
-        points, pitches_degrees, eps=eps,
+        solver_points, solver_pitches, eps=eps,
         max_event_batches=max_event_batches,
         require_area_coverage=True,
     )
-    boundary_xy = tuple((point[0], point[1]) for point in points)
+    boundary_xy = tuple((point[0], point[1]) for point in authored_points)
     source_area = abs(signed_area(boundary_xy))
     scale = max(
         1.0,
-        max(point[0] for point in points) - min(point[0] for point in points),
-        max(point[1] for point in points) - min(point[1] for point in points),
-        max(point[2] for point in points) - min(point[2] for point in points),
+        max(point[0] for point in authored_points) - min(point[0] for point in authored_points),
+        max(point[1] for point in authored_points) - min(point[1] for point in authored_points),
+        max(point[2] for point in authored_points) - min(point[2] for point in authored_points),
     )
     weld_tolerance = max(1e-12, eps * scale * 100.0)
     area_tolerance = max(eps * scale * scale * 100.0, source_area * 1e-7)
@@ -2095,7 +2181,7 @@ def build_wavefront_roof_surface(
     fragment_ranges: list[tuple[int, int]] = []
     flattened_points: list[Point3] = []
     for fragment in fragments:
-        if not (0 <= fragment.source_edge_id < len(planes)):
+        if not (0 <= fragment.source_edge_id < len(source_edge_ids)):
             raise GeometryInputError(
                 "INVALID_SOURCE_SLOPE_ID",
                 f"Фрагмент ссылается на неизвестный исходный скат {fragment.source_edge_id}."
@@ -2144,14 +2230,15 @@ def build_wavefront_roof_surface(
             compact.reverse()
             projected.reverse()
 
-        plane = planes[fragment.source_edge_id]
+        source_slope_id = source_edge_ids[fragment.source_edge_id]
+        plane = planes[source_slope_id]
         for vertex_index in compact:
             x, y, z = registry.vertices[vertex_index]
             expected_z = plane.height(x, y)
             if abs(expected_z - z) > max(weld_tolerance * 20.0, eps * scale * 1000.0):
                 raise GeometryInputError(
                     "FACET_PLANE_MISMATCH",
-                    f"Фрагмент ската {fragment.source_edge_id + 1} отклоняется от плоскости на "
+                    f"Фрагмент ската {source_slope_id + 1} отклоняется от плоскости на "
                     f"{abs(expected_z - z):.9g}."
                 )
 
@@ -2163,10 +2250,16 @@ def build_wavefront_roof_surface(
             )
         face_keys.add(key)
         faces.append(tuple(compact))
-        slope_ids.append(fragment.source_edge_id)
+        slope_ids.append(source_slope_id)
 
     if not faces:
         raise GeometryInputError("EMPTY_WAVEFRONT_SURFACE", "После объединения фасет не осталось граней.")
+
+    # Reinsert authored eave points removed only for wavefront simulation.
+    # The conforming pass below then splits long boundary edges back into the
+    # segments users see in Edit Mode and in the per-edge pitch list.
+    for boundary_point in removed_boundary_points:
+        registry.add(boundary_point)
 
     # A split can introduce a vertex in the interior of an earlier facet edge.
     # Make every incident face use the same edge segmentation before manifold
