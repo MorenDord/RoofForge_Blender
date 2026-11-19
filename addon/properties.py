@@ -76,37 +76,27 @@ class RoofForgeSettings(bpy.types.PropertyGroup):
         precision=2,
         update=_settings_changed,
     )
+    # Retained as a hidden compatibility field for older .blend files.
+    # The overhang solver now always converges adjacent support planes.
     overhang_corner_convergence: bpy.props.BoolProperty(
         name="Converge Corners",
-        description="Make neighbouring roof slopes meet at one point on each eave corner",
         default=True,
-        update=_settings_changed,
+        options={"HIDDEN"},
     )
     live_update_delay_ms: bpy.props.IntProperty(
         name="Update Delay",
         description="Debounce before a live rebuild; 0 runs on the next Blender timer tick",
-        default=0,
+        default=250,
         min=0,
         max=1000,
         step=10,
+        options={"HIDDEN"},
     )
     live_update: bpy.props.BoolProperty(name="Live Update", default=True)
     slope_settings: bpy.props.CollectionProperty(type=RoofForgeSlopeSettings)
     outline_preview_json: bpy.props.StringProperty(default="", options={"HIDDEN"})
     roof_plan_json: bpy.props.StringProperty(
         name="Roof Plan Data", default="", options={"HIDDEN"}
-    )
-    plan_show_vector: bpy.props.BoolProperty(
-        name="Show Roof Plan",
-        description="Show the direct GPU roof-plan preview in the RoofForge sidebar",
-        default=True,
-        update=_preview_changed,
-    )
-    plan_debug_bounds: bpy.props.BoolProperty(
-        name="Debug UI Bounds",
-        description="Overlay Region, View2D, estimated preview-slot and GPU viewport bounds",
-        default=False,
-        update=_preview_changed,
     )
     plan_label_scale: bpy.props.FloatProperty(
         name="Plan Label Size",
